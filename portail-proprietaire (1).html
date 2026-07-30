@@ -169,7 +169,7 @@
 const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
 
-let supabase = null;
+let supabaseClient = null;
 let ownerRecord = null;
 
 function configIsSet(){
@@ -181,22 +181,22 @@ async function init(){
     document.getElementById('config-warning').style.display = 'block';
     return;
   }
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  const { data: { session } } = await supabase.auth.getSession();
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const { data: { session } } = await supabaseClient.auth.getSession();
   if(session) await loadOwnerDashboard(session.user.id);
 }
 
 async function handleLogin(){
-  if(!supabase){ showLoginError('Configuration Supabase manquante.'); return; }
+  if(!supabaseClient){ showLoginError('Configuration Supabase manquante.'); return; }
   const email = document.getElementById('login-email').value;
   const password = document.getElementById('login-password').value;
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
   if(error){ showLoginError(error.message); return; }
   await loadOwnerDashboard(data.user.id);
 }
 
 async function handleSignOut(){
-  if(supabase) await supabase.auth.signOut();
+  if(supabaseClient) await supabaseClient.auth.signOut();
   document.getElementById('app-shell').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
 }
@@ -210,7 +210,7 @@ function showLoginError(msg){
 /* ---- Charge le tableau de bord d'UN SEUL propriétaire (RLS
    garantit qu'il ne peut recevoir que ses propres données) ---- */
 async function loadOwnerDashboard(userId){
-  const { data: owner, error } = await supabase
+  const { data: owner, error } = await supabaseClient
     .from('owners').select('*').eq('user_id', userId).single();
 
   if(error || !owner){
@@ -227,7 +227,7 @@ async function loadOwnerDashboard(userId){
 }
 
 async function loadBuildings(){
-  const { data: buildings } = await supabase
+  const { data: buildings } = await supabaseClient
     .from('buildings')
     .select('*, units(*, leases(*, tenants(*), payments(*)))')
     .eq('owner_id', ownerRecord.id);
@@ -292,8 +292,8 @@ function renderPaymentsTab(buildings){
 }
 
 async function loadExpenses(){
-  const buildingIds = (await supabase.from('buildings').select('id').eq('owner_id', ownerRecord.id)).data?.map(b=>b.id) || [];
-  const { data } = await supabase.from('expenses').select('*').in('building_id', buildingIds);
+  const buildingIds = (await supabaseClient.from('buildings').select('id').eq('owner_id', ownerRecord.id)).data?.map(b=>b.id) || [];
+  const { data } = await supabaseClient.from('expenses').select('*').in('building_id', buildingIds);
   const body = document.getElementById('expenses-body');
   body.innerHTML = (data && data.length)
     ? data.map(e => `<tr><td>${e.description}</td><td>${Number(e.amount).toLocaleString('fr-CA')} $</td><td>${e.expense_date}</td></tr>`).join('')
@@ -301,7 +301,7 @@ async function loadExpenses(){
 }
 
 async function loadApprovals(){
-  const { data } = await supabase
+  const { data } = await supabaseClient
     .from('approvals')
     .select('*, work_orders(description, unit_id, units(unit_number))')
     .eq('owner_id', ownerRecord.id)
@@ -328,7 +328,7 @@ async function loadApprovals(){
 }
 
 async function decideApproval(id, decision){
-  await supabase.from('approvals').update({ status: decision, decided_at: new Date().toISOString() }).eq('id', id);
+  await supabaseClient.from('approvals').update({ status: decision, decided_at: new Date().toISOString() }).eq('id', id);
   await loadApprovals();
 }
 
