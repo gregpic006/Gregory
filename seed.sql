@@ -14,7 +14,7 @@
 insert into owners (id, user_id, full_name, phone, spending_cap, management_rate)
 values (
   '11111111-1111-1111-1111-111111111111',
-  'REMPLACER_PAR_UUID_AUTH',
+  '1439cad7-b319-4686-85a4-ad14a5b8352e',
   'Denis Marceau',
   '514-555-0100',
   300,
