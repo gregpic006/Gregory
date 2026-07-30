@@ -14,7 +14,7 @@
 insert into owners (id, user_id, full_name, phone, spending_cap, management_rate)
 values (
   '11111111-1111-1111-1111-111111111111',
-  '1439cad7-b319-4686-85a4-ad14a5b8352e',
+  '7e6c26dd-d2ff-47f3-aa1d-3cb5035936f7',
   'Denis Marceau',
   '514-555-0100',
   300,
