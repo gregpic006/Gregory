@@ -214,6 +214,13 @@ returns uuid language sql stable as $$
   select id from owners where user_id = auth.uid()
 $$;
 
+-- Fonction utilitaire : retourne le tenant_id du locataire
+-- actuellement connecté (ou NULL si aucun).
+create or replace function auth_tenant_id()
+returns uuid language sql stable as $$
+  select id from tenants where user_id = auth.uid()
+$$;
+
 alter table users enable row level security;
 alter table owners enable row level security;
 alter table buildings enable row level security;
@@ -303,6 +310,24 @@ create policy "authenticated read inquiries" on inquiries for select
   using (auth.role() = 'authenticated');
 create policy "authenticated update inquiries" on inquiries for update
   using (auth.role() = 'authenticated');
+
+-- Accès en libre-service pour un locataire connecté à son propre
+-- bail, unité, immeuble, paiements et demandes de service.
+create policy "own tenant profile" on tenants for select
+  using (user_id = auth.uid());
+create policy "own leases as tenant" on leases for select
+  using (tenant_id = auth_tenant_id());
+create policy "own payments as tenant" on payments for select
+  using (lease_id in (select id from leases where tenant_id = auth_tenant_id()));
+create policy "own unit as tenant" on units for select
+  using (id in (select unit_id from leases where tenant_id = auth_tenant_id()));
+create policy "own building as tenant" on buildings for select
+  using (id in (select building_id from units where id in (
+    select unit_id from leases where tenant_id = auth_tenant_id())));
+create policy "own service_requests as tenant select" on service_requests for select
+  using (tenant_id = auth_tenant_id());
+create policy "own service_requests as tenant insert" on service_requests for insert
+  with check (tenant_id = auth_tenant_id());
 
 -- ============================================================
 -- AUTOMATISATION IA — traitement des demandes du formulaire
