@@ -108,6 +108,7 @@
       <button class="tab-btn" data-tab="payments" onclick="showTab('payments')">Loyers et paiements</button>
       <button class="tab-btn" data-tab="expenses" onclick="showTab('expenses')">Dépenses</button>
       <button class="tab-btn" data-tab="approvals" onclick="showTab('approvals')">Travaux à approuver</button>
+      <button class="tab-btn" data-tab="inquiries" onclick="showTab('inquiries')">Demandes</button>
       <div class="signout">
         <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
       </div>
@@ -156,6 +157,13 @@
       <section id="approvals" class="section">
         <div class="toolbar"><h2>Travaux à approuver</h2></div>
         <div id="approvals-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+      </section>
+
+      <section id="inquiries" class="section">
+        <div class="toolbar"><h2>Demandes</h2></div>
+        <table><thead><tr><th>Type</th><th>Catégorie IA</th><th>Contact</th><th>Résumé</th><th>Statut</th></tr></thead>
+          <tbody id="inquiries-body"><tr class="empty-row"><td colspan="5">Chargement...</td></tr></tbody>
+        </table>
       </section>
     </main>
   </div>
@@ -238,6 +246,7 @@ async function loadBuildings(){
   renderPaymentsTab(buildings || []);
   await loadExpenses();
   await loadApprovals();
+  await loadInquiries();
 }
 
 function renderOverview(buildings){
@@ -330,6 +339,44 @@ async function loadApprovals(){
 async function decideApproval(id, decision){
   await supabaseClient.from('approvals').update({ status: decision, decided_at: new Date().toISOString() }).eq('id', id);
   await loadApprovals();
+}
+
+async function loadInquiries(){
+  const { data } = await supabaseClient
+    .from('inquiries')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  const body = document.getElementById('inquiries-body');
+  if(!data || !data.length){
+    body.innerHTML = '<tr class="empty-row"><td colspan="5">Aucune demande.</td></tr>';
+    return;
+  }
+
+  const statusLabel = { new: 'Nouvelle', contacted: 'Contacté', closed: 'Fermée' };
+  const statusTag = { new: 'warn', contacted: 'neutral', closed: 'ok' };
+  const nextStatus = { new: 'contacted', contacted: 'closed', closed: null };
+  const nextLabel = { new: 'Marquer contacté', contacted: 'Marquer fermée' };
+
+  body.innerHTML = data.map(i => {
+    const typeLabel = i.type === 'visite' ? 'Visite' : 'Mandat';
+    const next = nextStatus[i.status];
+    const actionBtn = next
+      ? `<button onclick="markInquiryStatus('${i.id}','${next}')" style="border:1px solid var(--ink);background:none;padding:5px 10px;font-size:11.5px;cursor:pointer;font-family:'Inter',sans-serif;">${nextLabel[i.status]}</button>`
+      : '';
+    return `<tr>
+      <td>${typeLabel}</td>
+      <td>${i.ai_category || (i.ai_summary ? '' : 'En traitement…')}</td>
+      <td>${i.full_name}<br><span style="color:var(--muted);font-size:12px;">${i.email}${i.phone ? ' · ' + i.phone : ''}</span></td>
+      <td>${i.ai_summary || i.message || '—'}</td>
+      <td><span class="tag ${statusTag[i.status]}">${statusLabel[i.status]}</span><br>${actionBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function markInquiryStatus(id, status){
+  await supabaseClient.from('inquiries').update({ status }).eq('id', id);
+  await loadInquiries();
 }
 
 function showTab(id){

@@ -277,7 +277,7 @@
       <h2>Vous possédez un immeuble ?</h2>
       <p>Confiez-nous la gestion complète — locataires, loyers, travaux et suivis — avec le même souci du détail que si c'était notre propre immeuble.</p>
     </div>
-    <a href="formulaires-gestion-immobiliere.html" class="btn">Confier mon immeuble</a>
+    <a href="formulaires-gestion-immobiliere.html?type=mandat" class="btn">Confier mon immeuble</a>
   </div>
 </div>
 
@@ -341,7 +341,7 @@ async function loadLogements(){
           <span class="price">${Number(u.rent).toLocaleString('fr-CA')} $/mois</span>
           <span>Dispo: ${dispo}</span>
         </div>
-        <a class="apply" href="formulaires-gestion-immobiliere.html">Demander une visite</a>
+        <a class="apply" href="formulaires-gestion-immobiliere.html?type=visite&unit=${u.id}">Demander une visite</a>
       </div>`;
     list.appendChild(card);
   });

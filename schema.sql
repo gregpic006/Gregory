@@ -186,6 +186,24 @@ create table messages (
   created_at timestamptz default now()
 );
 
+-- ============ INQUIRIES (formulaires publics) ============
+-- 'visite' = demande de visite pour un logement (unit_id renseigné)
+-- 'mandat' = propriétaire prospect voulant confier son immeuble
+create table inquiries (
+  id uuid primary key default gen_random_uuid(),
+  type text not null check (type in ('visite', 'mandat')),
+  unit_id uuid references units(id),
+  full_name text not null,
+  email text not null,
+  phone text,
+  message text,
+  ai_category text,
+  ai_summary text,
+  ai_reply_sent boolean default false,
+  status text default 'new' check (status in ('new', 'contacted', 'closed')),
+  created_at timestamptz default now()
+);
+
 -- ============================================================
 -- SÉCURITÉ — isolation stricte par propriétaire (RLS)
 -- ============================================================
@@ -210,6 +228,7 @@ alter table approvals enable row level security;
 alter table documents enable row level security;
 alter table messages enable row level security;
 alter table workers enable row level security;
+alter table inquiries enable row level security;
 
 create policy "self" on users for select using (id = auth.uid());
 
@@ -274,6 +293,43 @@ create policy "public read buildings with available units" on buildings for sele
 -- (répertoire interne, accès géré via la clé service_role côté admin)
 create policy "authenticated read workers" on workers for select
   using (auth.role() = 'authenticated');
+
+-- inquiries : n'importe qui peut soumettre une demande via le
+-- formulaire public ; seul un compte connecté (le gestionnaire)
+-- peut les consulter et les mettre à jour.
+create policy "public insert inquiries" on inquiries for insert
+  with check (true);
+create policy "authenticated read inquiries" on inquiries for select
+  using (auth.role() = 'authenticated');
+create policy "authenticated update inquiries" on inquiries for update
+  using (auth.role() = 'authenticated');
+
+-- ============================================================
+-- AUTOMATISATION IA — traitement des demandes du formulaire
+-- ============================================================
+-- Déclenche la fonction Edge "handle-inquiry" à chaque nouvelle
+-- demande : elle catégorise/résume via l'IA, répond au visiteur
+-- par courriel (Resend), et met à jour ai_category/ai_summary.
+-- Nécessite les secrets ANTHROPIC_API_KEY et RESEND_API_KEY
+-- configurés dans Project Settings > Edge Functions > Secrets,
+-- et la vérification JWT désactivée sur cette fonction.
+create extension if not exists pg_net with schema extensions;
+
+create or replace function notify_new_inquiry()
+returns trigger language plpgsql as $$
+begin
+  perform net.http_post(
+    url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-inquiry',
+    body := jsonb_build_object('type', 'INSERT', 'table', 'inquiries', 'record', to_jsonb(NEW)),
+    headers := jsonb_build_object('Content-Type', 'application/json')
+  );
+  return NEW;
+end;
+$$;
+
+create trigger on_inquiry_insert
+  after insert on inquiries
+  for each row execute function notify_new_inquiry();
 
 -- ============================================================
 -- NOTE IMPORTANTE
