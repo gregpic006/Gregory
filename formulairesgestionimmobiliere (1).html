@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portail — Formulaires</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
+    --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;line-height:1.55;}
+  a{color:inherit;}
+  .wrap{max-width:640px;margin:0 auto;padding:48px 28px;}
+  .brand{font-family:'Fraunces',serif;font-weight:600;font-size:20px;margin-bottom:32px;}
+  .brand a{text-decoration:none;}
+
+  .tabs{display:flex;border-bottom:1px solid var(--ink);margin-bottom:28px;}
+  .tab-btn{background:none;border:none;padding:12px 20px;font-size:14px;font-family:'Inter',sans-serif;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;}
+  .tab-btn.active{color:var(--ink);font-weight:500;border-bottom-color:var(--brass);}
+
+  h1{font-family:'Fraunces',serif;font-weight:600;font-size:26px;margin-bottom:8px;}
+  .subtitle{color:var(--muted);font-size:14px;margin-bottom:28px;}
+
+  .form-panel{display:none;}
+  .form-panel.active{display:block;}
+  .f{margin-bottom:16px;}
+  label{display:block;font-size:12.5px;font-weight:500;margin-bottom:6px;}
+  input, textarea{width:100%;padding:11px 12px;border:1px solid var(--line);background:var(--paper-2);font-size:13.5px;font-family:'Inter',sans-serif;}
+  input:focus, textarea:focus{outline:none;border-color:var(--brass);}
+  textarea{resize:vertical;min-height:100px;}
+  button.submit{background:var(--ink);color:var(--paper);border:none;padding:13px 26px;font-size:14px;font-weight:500;cursor:pointer;margin-top:6px;}
+  button.submit:hover{background:var(--brass-dark);}
+  button.submit:disabled{opacity:0.6;cursor:default;}
+
+  .confirm{display:none;background:var(--paper-2);border-left:2px solid var(--sage);padding:20px;font-size:14px;}
+  .confirm.active{display:block;}
+  .error{color:var(--rust);font-size:12.5px;margin-top:10px;display:none;}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="brand"><a href="site-client.html">Portail</a></div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="visite" onclick="showFormTab('visite')">Demander une visite</button>
+    <button class="tab-btn" data-tab="mandat" onclick="showFormTab('mandat')">Confier mon immeuble</button>
+  </div>
+
+  <div id="form-visite" class="form-panel active">
+    <h1>Demander une visite</h1>
+    <p class="subtitle">Remplis ce formulaire et notre équipe te contactera pour proposer des créneaux de visite.</p>
+    <form onsubmit="submitInquiry(event, 'visite')">
+      <div class="f"><label>Nom complet</label><input type="text" name="full_name" required></div>
+      <div class="f"><label>Courriel</label><input type="email" name="email" required></div>
+      <div class="f"><label>Téléphone</label><input type="tel" name="phone"></div>
+      <div class="f"><label>Message (optionnel)</label><textarea name="message" placeholder="Dates préférées, questions sur le logement, etc."></textarea></div>
+      <button class="submit" type="submit">Envoyer la demande</button>
+      <p class="error" id="error-visite"></p>
+    </form>
+    <div class="confirm" id="confirm-visite">
+      <b>Demande envoyée !</b><br>Tu recevras une réponse par courriel sous peu.
+    </div>
+  </div>
+
+  <div id="form-mandat" class="form-panel">
+    <h1>Confier mon immeuble</h1>
+    <p class="subtitle">Dis-nous en plus sur ton immeuble — un membre de notre équipe te contactera pour finaliser le mandat de gestion.</p>
+    <form onsubmit="submitInquiry(event, 'mandat')">
+      <div class="f"><label>Nom complet</label><input type="text" name="full_name" required></div>
+      <div class="f"><label>Courriel</label><input type="email" name="email" required></div>
+      <div class="f"><label>Téléphone</label><input type="tel" name="phone"></div>
+      <div class="f"><label>Parle-nous de ton immeuble</label><textarea name="message" placeholder="Adresse, nombre de logements, situation actuelle, etc." required></textarea></div>
+      <button class="submit" type="submit">Envoyer ma demande</button>
+      <p class="error" id="error-mandat"></p>
+    </form>
+    <div class="confirm" id="confirm-mandat">
+      <b>Demande envoyée !</b><br>Tu recevras une réponse par courriel sous peu.
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const params = new URLSearchParams(window.location.search);
+const unitId = params.get('unit');
+const initialTab = params.get('type') === 'mandat' ? 'mandat' : 'visite';
+
+function showFormTab(tab){
+  document.querySelectorAll('.form-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('form-' + tab).classList.add('active');
+  document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
+}
+showFormTab(initialTab);
+
+async function submitInquiry(event, type){
+  event.preventDefault();
+  const form = event.target;
+  const button = form.querySelector('button.submit');
+  const errorEl = document.getElementById('error-' + type);
+  errorEl.style.display = 'none';
+  button.disabled = true;
+
+  const payload = {
+    type,
+    full_name: form.full_name.value,
+    email: form.email.value,
+    phone: form.phone.value || null,
+    message: form.message?.value || null,
+  };
+  if(type === 'visite' && unitId){
+    payload.unit_id = unitId;
+  }
+
+  const { error } = await supabaseClient.from('inquiries').insert(payload);
+
+  if(error){
+    errorEl.textContent = "Une erreur est survenue, réessaie dans un instant.";
+    errorEl.style.display = 'block';
+    button.disabled = false;
+    return;
+  }
+
+  form.style.display = 'none';
+  document.getElementById('confirm-' + type).classList.add('active');
+}
+</script>
+</body>
+</html>
