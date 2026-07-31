@@ -21,7 +21,9 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
   "category": "une courte étiquette de catégorisation en français",
   "summary": "un résumé en 1-2 phrases en français, à l'intention du gestionnaire",
   "reply_subject": "un objet de courriel court et professionnel en français",
-  "reply_body": "un courriel de réponse chaleureux, professionnel et concis en français (3-5 phrases), qui confirme la réception de la demande, indique qu'un membre de l'équipe la contactera bientôt, et est signé 'L'équipe Portail'"
+  "reply_body": "un courriel de réponse chaleureux, professionnel et concis en français (3-5 phrases), qui confirme la réception de la demande, indique qu'un membre de l'équipe la contactera bientôt, et est signé 'L'équipe Portail'",
+  "estimated_units": "si le message mentionne le nombre de logements de l'immeuble, ce nombre (entier) ; sinon null",
+  "estimated_monthly_rent": "si le message permet d'estimer le loyer mensuel TOTAL de l'immeuble (somme de tous les logements), ce montant en dollars (nombre) ; sinon null"
 }`;
 
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -43,6 +45,16 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
     const cleaned = rawText.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleaned);
 
+    const managementRate = 0.06;
+    let replyBody = parsed.reply_body;
+    if (record.type === "mandat" && typeof parsed.estimated_monthly_rent === "number") {
+      const monthlyFee = Math.round(parsed.estimated_monthly_rent * managementRate * 100) / 100;
+      const unitsLine = typeof parsed.estimated_units === "number"
+        ? `pour ${parsed.estimated_units} logement(s), `
+        : "";
+      replyBody += `\n\nÀ titre indicatif seulement (${unitsLine}à confirmer avec un membre de notre équipe) : au taux de gestion de 6% du loyer perçu, les frais de gestion mensuels estimés seraient d'environ ${monthlyFee.toLocaleString("fr-CA")} $ sur un loyer total estimé de ${parsed.estimated_monthly_rent.toLocaleString("fr-CA")} $. Ce chiffre est une estimation préliminaire, pas un devis final.`;
+    }
+
     await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -53,7 +65,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
         from: "Portail <onboarding@resend.dev>",
         to: [record.email],
         subject: parsed.reply_subject,
-        text: parsed.reply_body,
+        text: replyBody,
       }),
     });
 
@@ -67,7 +79,9 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
       },
       body: JSON.stringify({
         ai_category: parsed.category,
-        ai_summary: parsed.summary,
+        ai_summary: replyBody.includes("frais de gestion")
+          ? `${parsed.summary} (estimation incluse dans la réponse : ${replyBody.split("À titre indicatif")[1]?.trim() || ""})`
+          : parsed.summary,
         ai_reply_sent: true,
       }),
     });
