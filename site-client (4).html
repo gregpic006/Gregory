@@ -10,6 +10,7 @@
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root{
     --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
@@ -300,30 +301,52 @@
 </div>
 
 <script>
-const logements = [
-  {addr:"1220 rue des Érables, unité 3", type:"4½", prix:1450, dispo:"1er sept.", statut:"Disponible"},
-  {addr:"48 av. Bellevue, unité 1", type:"3½", prix:1180, dispo:"15 août", statut:"Disponible"},
-  {addr:"1220 rue des Érables, unité 2", type:"5½", prix:1690, dispo:"1er oct.", statut:"Bientôt libre"},
-  {addr:"9 rue du Parc, unité 4", type:"2½", prix:950, dispo:"Immédiat", statut:"Disponible"},
-];
-const list = document.getElementById('listings');
-logements.forEach(l=>{
-  const card = document.createElement('div');
-  card.className='card';
-  card.innerHTML = `
-    <span class="badge">${l.statut}</span>
-    <div class="thumb">Photo à venir</div>
-    <div class="body">
-      <h3>${l.type} — ${l.addr.split(',')[1].trim()}</h3>
-      <p class="addr">${l.addr.split(',')[0]}</p>
-      <div class="meta">
-        <span class="price">${l.prix.toLocaleString('fr-CA')} $/mois</span>
-        <span>Dispo: ${l.dispo}</span>
-      </div>
-      <a class="apply" href="formulaires-gestion-immobiliere.html">Demander une visite</a>
-    </div>`;
-  list.appendChild(card);
-});
+/* ============================================================
+   CONFIGURATION — même projet Supabase que le portail propriétaire
+   ============================================================ */
+const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
+
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+async function loadLogements(){
+  const list = document.getElementById('listings');
+  const { data: units, error } = await supabaseClient
+    .from('units')
+    .select('id, unit_number, unit_type, rent, status, buildings(address), leases(end_date, status)')
+    .in('status', ['available', 'soon_available']);
+
+  if(error || !units || !units.length){
+    list.innerHTML = '<p style="color:var(--muted);font-size:14px;">Aucun logement disponible pour le moment. Revenez bientôt !</p>';
+    return;
+  }
+
+  list.innerHTML = '';
+  units.forEach(u=>{
+    const statut = u.status === 'available' ? 'Disponible' : 'Bientôt libre';
+    let dispo = 'Immédiat';
+    if(u.status === 'soon_available'){
+      const activeLease = (u.leases || []).find(l => l.status === 'active' || l.status === 'renewed');
+      dispo = activeLease?.end_date || 'À confirmer';
+    }
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <span class="badge">${statut}</span>
+      <div class="thumb">Photo à venir</div>
+      <div class="body">
+        <h3>${u.unit_type || ''} — Unité ${u.unit_number}</h3>
+        <p class="addr">${u.buildings?.address || ''}</p>
+        <div class="meta">
+          <span class="price">${Number(u.rent).toLocaleString('fr-CA')} $/mois</span>
+          <span>Dispo: ${dispo}</span>
+        </div>
+        <a class="apply" href="formulaires-gestion-immobiliere.html">Demander une visite</a>
+      </div>`;
+    list.appendChild(card);
+  });
+}
+loadLogements();
 
 function toggleChat(){ document.getElementById('chat-panel').classList.toggle('open'); }
 function toggleDropdown(){ document.getElementById('login-dropdown').classList.toggle('open'); }
