@@ -265,6 +265,11 @@ create policy "own messages insert" on messages for insert
 create policy "public read available units" on units for select
   using (status in ('available','soon_available'));
 
+-- Permet au site client de lire l'adresse d'un immeuble uniquement
+-- s'il a au moins une unité disponible (pour l'afficher sur l'annonce).
+create policy "public read buildings with available units" on buildings for select
+  using (id in (select building_id from units where status in ('available','soon_available')));
+
 -- workers : pas de RLS restrictif nécessaire pour l'instant
 -- (répertoire interne, accès géré via la clé service_role côté admin)
 create policy "authenticated read workers" on workers for select
