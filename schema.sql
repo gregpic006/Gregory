@@ -207,19 +207,49 @@ create table inquiries (
 -- ============================================================
 -- SÉCURITÉ — isolation stricte par propriétaire (RLS)
 -- ============================================================
--- Fonction utilitaire : retourne l'owner_id du propriétaire
--- actuellement connecté (ou NULL si aucun).
+-- Fonctions utilitaires : identité de l'utilisateur connecté et
+-- ensembles d'IDs qu'il possède/loue. SECURITY DEFINER + row_security
+-- off est nécessaire ici : sans ça, ces fonctions déclenchent le RLS
+-- des tables qu'elles interrogent, qui peut à son tour rappeler ces
+-- mêmes fonctions ailleurs dans le graphe de policies — provoquant
+-- une récursion infinie (erreur Postgres 42P17). Toute policy qui a
+-- besoin de traverser plusieurs tables (immeuble → logement → bail...)
+-- doit passer par une de ces fonctions plutôt que par une sous-requête
+-- directe sur une autre table protégée par RLS.
 create or replace function auth_owner_id()
-returns uuid language sql stable as $$
-  select id from owners where user_id = auth.uid()
-$$;
+returns uuid
+language sql stable security definer set search_path = public set row_security = off
+as $$ select id from owners where user_id = auth.uid() $$;
 
--- Fonction utilitaire : retourne le tenant_id du locataire
--- actuellement connecté (ou NULL si aucun).
 create or replace function auth_tenant_id()
-returns uuid language sql stable as $$
-  select id from tenants where user_id = auth.uid()
-$$;
+returns uuid
+language sql stable security definer set search_path = public set row_security = off
+as $$ select id from tenants where user_id = auth.uid() $$;
+
+create or replace function owned_building_ids()
+returns setof uuid
+language sql stable security definer set search_path = public set row_security = off
+as $$ select id from buildings where owner_id = auth_owner_id() $$;
+
+create or replace function owned_unit_ids()
+returns setof uuid
+language sql stable security definer set search_path = public set row_security = off
+as $$ select id from units where building_id in (select owned_building_ids()) $$;
+
+create or replace function owned_lease_ids()
+returns setof uuid
+language sql stable security definer set search_path = public set row_security = off
+as $$ select id from leases where unit_id in (select owned_unit_ids()) $$;
+
+create or replace function tenant_unit_ids()
+returns setof uuid
+language sql stable security definer set search_path = public set row_security = off
+as $$ select unit_id from leases where tenant_id = auth_tenant_id() $$;
+
+create or replace function tenant_building_ids()
+returns setof uuid
+language sql stable security definer set search_path = public set row_security = off
+as $$ select building_id from units where id in (select tenant_unit_ids()) $$;
 
 alter table users enable row level security;
 alter table owners enable row level security;
@@ -245,33 +275,25 @@ create policy "own buildings" on buildings for select
   using (owner_id = auth_owner_id());
 
 create policy "own units" on units for select
-  using (building_id in (select id from buildings where owner_id = auth_owner_id()));
+  using (building_id in (select owned_building_ids()));
 
 create policy "own tenants" on tenants for select
-  using (id in (
-    select tenant_id from leases where unit_id in (
-      select id from units where building_id in (
-        select id from buildings where owner_id = auth_owner_id()))));
+  using (id in (select tenant_id from leases where unit_id in (select owned_unit_ids())));
 
 create policy "own leases" on leases for select
-  using (unit_id in (select id from units where building_id in (
-    select id from buildings where owner_id = auth_owner_id())));
+  using (unit_id in (select owned_unit_ids()));
 
 create policy "own payments" on payments for select
-  using (lease_id in (select id from leases where unit_id in (
-    select id from units where building_id in (
-      select id from buildings where owner_id = auth_owner_id()))));
+  using (lease_id in (select owned_lease_ids()));
 
 create policy "own service_requests" on service_requests for select
-  using (unit_id in (select id from units where building_id in (
-    select id from buildings where owner_id = auth_owner_id())));
+  using (unit_id in (select owned_unit_ids()));
 
 create policy "own work_orders" on work_orders for select
-  using (unit_id in (select id from units where building_id in (
-    select id from buildings where owner_id = auth_owner_id())));
+  using (unit_id in (select owned_unit_ids()));
 
 create policy "own expenses" on expenses for select
-  using (building_id in (select id from buildings where owner_id = auth_owner_id()));
+  using (building_id in (select owned_building_ids()));
 
 create policy "own approvals" on approvals for select
   using (owner_id = auth_owner_id());
@@ -320,10 +342,9 @@ create policy "own leases as tenant" on leases for select
 create policy "own payments as tenant" on payments for select
   using (lease_id in (select id from leases where tenant_id = auth_tenant_id()));
 create policy "own unit as tenant" on units for select
-  using (id in (select unit_id from leases where tenant_id = auth_tenant_id()));
+  using (id in (select tenant_unit_ids()));
 create policy "own building as tenant" on buildings for select
-  using (id in (select building_id from units where id in (
-    select unit_id from leases where tenant_id = auth_tenant_id())));
+  using (id in (select tenant_building_ids()));
 create policy "own service_requests as tenant select" on service_requests for select
   using (tenant_id = auth_tenant_id());
 create policy "own service_requests as tenant insert" on service_requests for insert
