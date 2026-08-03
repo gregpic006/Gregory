@@ -213,10 +213,9 @@
         <div id="service-requests-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 
         <h3 style="font-family:'Fraunces',serif;font-size:15px;font-weight:600;margin:22px 0 10px;">Travaux en cours</h3>
-        <table><thead><tr><th>Unité</th><th>Description</th><th>Travailleur</th><th>Coût estimé</th><th>Statut</th><th></th></tr></thead>
-          <tbody id="workorders-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
+        <table><thead><tr><th>Unité</th><th>Description</th><th>Travailleur</th><th>Coût estimé</th><th>Statut</th></tr></thead>
+          <tbody id="workorders-body"><tr class="empty-row"><td colspan="5">Chargement...</td></tr></tbody>
         </table>
-        <input type="file" id="receipt-file-input" accept=".pdf,image/*" style="display:none;">
       </section>
 
       <section id="approvals" class="section">
@@ -284,7 +283,6 @@ const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
 
 let supabaseClient = null;
 let ownerRecord = null;
-let workersCache = [];
 
 function configIsSet(){
   return !SUPABASE_URL.startsWith('REMPLACER') && !SUPABASE_ANON_KEY.startsWith('REMPLACER');
@@ -471,10 +469,6 @@ async function loadExpenses(){
 }
 
 async function loadWorkTab(){
-  if(!workersCache.length){
-    const { data } = await supabaseClient.from('workers').select('*');
-    workersCache = data || [];
-  }
   await loadServiceRequests();
   await loadWorkOrders();
 }
@@ -494,8 +488,6 @@ async function loadServiceRequests(){
     return;
   }
 
-  const workerOptions = workersCache.map(w => `<option value="${w.id}">${w.name} — ${w.specialty || ''}</option>`).join('');
-
   const urgencyTag = { urgence:'urgent', élevé:'warn', normal:'neutral', faible:'neutral' };
 
   container.innerHTML = data.map(sr => {
@@ -509,61 +501,10 @@ async function loadServiceRequests(){
         <span>${sr.description}</span><br>${aiLine}
       </div>
       <div class="approve-actions">
-        <button onclick="toggleWoForm('${sr.id}')">Créer un travail</button>
+        <span class="tag neutral">Transmise à l'équipe Portail</span>
       </div>
-    </div>
-    <div class="wo-form" id="wo-form-${sr.id}">
-      <div class="f"><label>Travailleur</label>
-        <select id="wo-worker-${sr.id}"><option value="">— Choisir —</option>${workerOptions}</select>
-      </div>
-      <div class="f"><label>Description</label><input type="text" id="wo-desc-${sr.id}" value="${sr.description.replace(/"/g,'&quot;')}"></div>
-      <div class="f"><label>Paie du travailleur ($)</label><input type="number" id="wo-pay-${sr.id}" min="0" step="0.01" oninput="updateWoTotal('${sr.id}')"></div>
-      <div class="f"><label>Frais de coordination Portail (10 %)</label><input type="text" id="wo-fee-${sr.id}" disabled value="0,00 $"></div>
-      <div class="f"><label>Total facturé au propriétaire ($)</label><input type="text" id="wo-cost-${sr.id}" disabled value="0,00 $"></div>
-      <p style="font-size:11.5px;color:var(--muted);width:100%;">Estimation IA du coût des travaux : ${sr.ai_estimated_cost != null ? Number(sr.ai_estimated_cost).toLocaleString('fr-CA') + ' $' : 'non disponible'}</p>
-      <button onclick="createWorkOrder('${sr.id}', '${sr.unit_id}')">Assigner</button>
     </div>`;
   }).join('');
-}
-
-function toggleWoForm(serviceRequestId){
-  document.getElementById('wo-form-' + serviceRequestId).classList.toggle('open');
-}
-
-function updateWoTotal(serviceRequestId){
-  const pay = Number(document.getElementById('wo-pay-' + serviceRequestId).value) || 0;
-  const fee = Math.round(pay * 0.10 * 100) / 100;
-  const total = Math.round((pay + fee) * 100) / 100;
-  document.getElementById('wo-fee-' + serviceRequestId).value = fee.toLocaleString('fr-CA') + ' $';
-  document.getElementById('wo-cost-' + serviceRequestId).value = total.toLocaleString('fr-CA') + ' $';
-}
-
-async function createWorkOrder(serviceRequestId, unitId){
-  const workerId = document.getElementById('wo-worker-' + serviceRequestId).value;
-  const description = document.getElementById('wo-desc-' + serviceRequestId).value;
-  const workerPay = Number(document.getElementById('wo-pay-' + serviceRequestId).value);
-
-  if(!workerId || !description || !workerPay){
-    alert('Choisis un travailleur, une description et la paie du travailleur.');
-    return;
-  }
-  const coordinationFee = Math.round(workerPay * 0.10 * 100) / 100;
-  const totalCost = Math.round((workerPay + coordinationFee) * 100) / 100;
-
-  await supabaseClient.from('work_orders').insert({
-    service_request_id: serviceRequestId,
-    unit_id: unitId,
-    worker_id: workerId,
-    description,
-    worker_pay: workerPay,
-    coordination_fee: coordinationFee,
-    estimated_cost: totalCost,
-    status: 'assigned',
-  });
-  await supabaseClient.from('service_requests').update({ status: 'in_progress' }).eq('id', serviceRequestId);
-
-  await loadWorkTab();
-  await loadApprovals();
 }
 
 async function loadWorkOrders(){
@@ -577,7 +518,7 @@ async function loadWorkOrders(){
 
   const body = document.getElementById('workorders-body');
   if(!data || !data.length){
-    body.innerHTML = '<tr class="empty-row"><td colspan="6">Aucun travail en cours.</td></tr>';
+    body.innerHTML = '<tr class="empty-row"><td colspan="5">Aucun travail en cours.</td></tr>';
     return;
   }
   const statusLabel = { open:'Ouvert', assigned:'Assigné', in_progress:'En cours', completed:'Complété', cancelled:'Annulé' };
@@ -588,61 +529,7 @@ async function loadWorkOrders(){
       <td>${wo.workers?.name ?? '—'}</td>
       <td>${wo.estimated_cost != null ? Number(wo.estimated_cost).toLocaleString('fr-CA') + ' $' : '—'}</td>
       <td><span class="tag neutral">${statusLabel[wo.status] || wo.status}</span></td>
-      <td><button class="btn-small" onclick="completeWorkOrder('${wo.id}', '${wo.units.building_id}', '${wo.unit_id}', ${wo.estimated_cost})">Marquer complété</button></td>
     </tr>`).join('');
-}
-
-function pickReceiptFile(){
-  return new Promise(resolve => {
-    const input = document.getElementById('receipt-file-input');
-    input.value = '';
-    input.onchange = () => resolve(input.files[0] || null);
-    input.click();
-  });
-}
-
-async function completeWorkOrder(workOrderId, buildingId, unitId, estimatedCost){
-  const actualCost = prompt('Coût final réel ($) :', estimatedCost ?? 0);
-  if(actualCost === null) return;
-
-  const { data: wo } = await supabaseClient.from('work_orders').select('description, service_request_id').eq('id', workOrderId).single();
-
-  await supabaseClient.from('work_orders').update({ status: 'completed' }).eq('id', workOrderId);
-  if(wo?.service_request_id){
-    await supabaseClient.from('service_requests').update({ status: 'closed' }).eq('id', wo.service_request_id);
-  }
-
-  let receiptDocumentId = null;
-  if(confirm('Joindre la facture/le reçu de ce travail ?')){
-    const file = await pickReceiptFile();
-    if(file){
-      const path = `${ownerRecord.id}/${Date.now()}-${file.name}`;
-      const { error: uploadError } = await supabaseClient.storage.from('documents').upload(path, file);
-      if(!uploadError){
-        const { data: doc } = await supabaseClient.from('documents').insert({
-          owner_id: ownerRecord.id,
-          building_id: buildingId,
-          title: `Facture — ${wo?.description || 'travaux'}`,
-          doc_type: 'facture',
-          file_url: path,
-        }).select().single();
-        receiptDocumentId = doc?.id || null;
-      }
-    }
-  }
-
-  await supabaseClient.from('expenses').insert({
-    work_order_id: workOrderId,
-    building_id: buildingId,
-    unit_id: unitId,
-    description: wo?.description || 'Travaux complétés',
-    amount: Number(actualCost),
-    expense_date: new Date().toISOString().slice(0,10),
-    receipt_document_id: receiptDocumentId,
-  });
-
-  await loadWorkTab();
-  await loadExpenses();
 }
 
 async function loadApprovals(){
@@ -668,6 +555,8 @@ async function loadApprovals(){
       <div class="approve-actions">
         <button class="accept" onclick="decideApproval('${a.id}','approved')">Approuver</button>
         <button class="reject" onclick="decideApproval('${a.id}','rejected')">Refuser</button>
+        <button onclick="requestAnotherQuote('${a.id}')">Demander une autre soumission</button>
+        <button onclick="askApprovalQuestion('${a.id}')">Poser une question</button>
       </div>
     </div>`).join('');
 }
@@ -675,6 +564,28 @@ async function loadApprovals(){
 async function decideApproval(id, decision){
   await supabaseClient.from('approvals').update({ status: decision, decided_at: new Date().toISOString() }).eq('id', id);
   await loadApprovals();
+}
+
+async function requestAnotherQuote(approvalId){
+  await supabaseClient.from('messages').insert({
+    owner_id: ownerRecord.id,
+    sender: 'owner',
+    body: `Demande d'une autre soumission pour l'approbation #${approvalId.slice(0,8)} — merci de proposer un autre travailleur ou une autre estimation.`,
+  });
+  alert('Ta demande a été envoyée à l\'équipe Portail — consulte l\'onglet Messages pour suivre la réponse.');
+  await loadMessages();
+}
+
+async function askApprovalQuestion(approvalId){
+  const question = prompt('Ta question au sujet de cette approbation :');
+  if(!question) return;
+  await supabaseClient.from('messages').insert({
+    owner_id: ownerRecord.id,
+    sender: 'owner',
+    body: `Question sur l'approbation #${approvalId.slice(0,8)} : ${question}`,
+  });
+  alert('Ta question a été envoyée à l\'équipe Portail — consulte l\'onglet Messages pour suivre la réponse.');
+  await loadMessages();
 }
 
 async function loadDocuments(){

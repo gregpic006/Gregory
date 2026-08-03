@@ -400,7 +400,7 @@ create policy "own documents" on documents for select
 create policy "own documents insert" on documents for insert
   with check (owner_id = auth_owner_id());
 create policy "own documents delete" on documents for delete
-  using (owner_id = auth_owner_id());
+  using (owner_id = auth_owner_id() and doc_type <> 'facture');
 
 create policy "own messages" on messages for select
   using (owner_id = auth_owner_id());
@@ -458,21 +458,19 @@ create policy "own service_requests as tenant select" on service_requests for se
 create policy "own service_requests as tenant insert" on service_requests for insert
   with check (tenant_id = auth_tenant_id());
 
--- Gestion des travaux par le propriétaire : créer un work_order à
--- partir d'une demande de service, le mettre à jour (complétion),
--- enregistrer la dépense finale, et faire avancer le statut de la
--- demande de service.
 create policy "own reports" on reports for select
   using (owner_id = auth_owner_id());
 
-create policy "own work_orders insert" on work_orders for insert
-  with check (unit_id in (select owned_unit_ids()));
-create policy "own work_orders update" on work_orders for update
-  using (unit_id in (select owned_unit_ids()));
-create policy "own expenses insert" on expenses for insert
-  with check (building_id in (select owned_building_ids()));
-create policy "own service_requests update" on service_requests for update
-  using (unit_id in (select owned_unit_ids()));
+-- IMPORTANT : la création/assignation d'un work_order, sa complétion,
+-- l'enregistrement de la dépense finale et l'avancement du statut
+-- d'une demande de service ne passent PLUS par un accès direct du
+-- propriétaire à ces tables (aucune policy INSERT/UPDATE pour lui
+-- ici) — ce sont des actions opérationnelles/financières réservées
+-- à l'équipe, exécutées uniquement via la fonction Edge "ops-api"
+-- (service_role, gardée par is_admin). Le propriétaire garde un
+-- accès lecture seule (policies "own work_orders", "own expenses",
+-- "own service_requests" plus haut) et peut approuver/refuser une
+-- dépense (policy "own approvals update").
 
 -- ============================================================
 -- AUTOMATISATION IA — traitement des demandes du formulaire

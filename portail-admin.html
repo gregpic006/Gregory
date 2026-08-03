@@ -86,6 +86,14 @@
     <tbody id="clients-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
   </table>
 
+  <h1 style="margin-top:40px;font-size:22px;">Travaux — demandes ouvertes</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Sélection du travailleur, négociation de la paie et assignation</p>
+  <div id="service-requests-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
+  <h1 style="font-size:22px;">Travaux — en cours</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Complétion, facture et dépense</p>
+  <div id="work-orders-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
   <h1 style="margin-top:40px;font-size:22px;">Anomalies financières</h1>
   <p class="subtitle" style="margin-bottom:16px;">Détection automatique — factures en double, dépassements, écarts de loyer, reçus manquants</p>
   <table><thead><tr><th>Type</th><th>Client</th><th>Description</th><th>Sévérité</th><th></th></tr></thead>
@@ -184,7 +192,127 @@ async function loadAdminDashboard(){
       <td class="num">${c.monthly_revenue.toLocaleString('fr-CA')} $</td>
     </tr>`).join('') : '<tr class="empty-row"><td colspan="6">Aucun client.</td></tr>';
 
+  await loadOps();
   await loadProspects();
+}
+
+let workersDirectory = [];
+
+async function callOpsApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('ops-api', { body: payload });
+  if(error){ alert('Erreur : ' + error.message); return null; }
+  return data;
+}
+
+async function loadOps(){
+  if(!workersDirectory.length){
+    const wd = await callOpsApi({ action: 'list_workers' });
+    workersDirectory = wd?.workers || [];
+  }
+  await loadServiceRequestsAdmin();
+  await loadWorkOrdersAdmin();
+}
+
+function workerOptionsHtml(selectedId){
+  return workersDirectory.map(w => `<option value="${w.id}" ${w.id === selectedId ? 'selected' : ''}>${w.name} — ${w.specialty || ''}</option>`).join('');
+}
+
+async function loadServiceRequestsAdmin(){
+  const data = await callOpsApi({ action: 'list_service_requests' });
+  const container = document.getElementById('service-requests-body');
+  const requests = data?.service_requests || [];
+  if(!requests.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune demande de service ouverte.</p>';
+    return;
+  }
+  container.innerHTML = requests.map(sr => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${sr.tenants?.full_name ?? ''} — ${sr.units?.buildings?.address ?? ''}, unité ${sr.units?.unit_number ?? ''}</b>
+      <span style="font-size:12.5px;color:var(--muted);">${sr.description}${sr.ai_category ? ' — IA : ' + sr.ai_category + ' (' + (sr.ai_urgency || '') + ', estimation ' + (sr.ai_estimated_cost != null ? Number(sr.ai_estimated_cost).toLocaleString('fr-CA') + ' $' : '—') + ')' : ''}</span>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-top:10px;">
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Travailleur</label>
+          <select id="sr-worker-${sr.id}" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir —</option>${workerOptionsHtml()}</select>
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description du travail</label>
+          <input type="text" id="sr-desc-${sr.id}" value="${sr.description.replace(/"/g,'&quot;')}" style="padding:8px;border:1px solid var(--line);width:260px;">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Paie du travailleur ($)</label>
+          <input type="number" id="sr-pay-${sr.id}" min="0" step="0.01" style="padding:8px;border:1px solid var(--line);width:110px;">
+        </div>
+        <button onclick="assignServiceRequest('${sr.id}', '${sr.unit_id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Assigner</button>
+      </div>
+    </div>`).join('');
+}
+
+async function assignServiceRequest(serviceRequestId, unitId){
+  const worker_id = document.getElementById('sr-worker-' + serviceRequestId).value;
+  const description = document.getElementById('sr-desc-' + serviceRequestId).value;
+  const worker_pay = document.getElementById('sr-pay-' + serviceRequestId).value;
+  if(!worker_id || !description || !worker_pay){
+    alert('Choisis un travailleur, une description et la paie du travailleur.');
+    return;
+  }
+  const res = await callOpsApi({ action: 'create_work_order', service_request_id: serviceRequestId, unit_id: unitId, worker_id, description, worker_pay: Number(worker_pay) });
+  if(res?.ok){ await loadOps(); }
+}
+
+async function loadWorkOrdersAdmin(){
+  const data = await callOpsApi({ action: 'list_work_orders' });
+  const container = document.getElementById('work-orders-body');
+  const orders = data?.work_orders || [];
+  if(!orders.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun travail en cours.</p>';
+    return;
+  }
+  const statusLabel = { open:'Ouvert', assigned:'Assigné', in_progress:'En cours' };
+  container.innerHTML = orders.map(wo => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${wo.units?.buildings?.address ?? ''}, unité ${wo.units?.unit_number ?? ''} — ${wo.description}</b>
+      <span style="font-size:12.5px;color:var(--muted);">Travailleur : ${wo.workers?.name ?? '—'} (${wo.workers?.phone ?? '—'}) — Paie : ${wo.worker_pay != null ? Number(wo.worker_pay).toLocaleString('fr-CA') + ' $' : '—'} + 10% coordination — Statut : ${statusLabel[wo.status] || wo.status}</span>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-top:10px;">
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Réassigner</label>
+          <select onchange="reassignWorkOrder('${wo.id}', this.value)" style="padding:8px;border:1px solid var(--line);"><option value="">—</option>${workerOptionsHtml(wo.worker_id)}</select>
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Coût final réel ($)</label>
+          <input type="number" id="wo-final-${wo.id}" min="0" step="0.01" value="${wo.estimated_cost ?? ''}" style="padding:8px;border:1px solid var(--line);width:110px;">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Facture/reçu (optionnel)</label>
+          <input type="file" id="wo-receipt-${wo.id}" accept=".pdf,image/*">
+        </div>
+        <button onclick="completeWorkOrderAdmin('${wo.id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Marquer complété</button>
+      </div>
+    </div>`).join('');
+}
+
+async function reassignWorkOrder(work_order_id, worker_id){
+  if(!worker_id) return;
+  await callOpsApi({ action: 'reassign_work_order', work_order_id, worker_id });
+  await loadWorkOrdersAdmin();
+}
+
+function readFileAsBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function completeWorkOrderAdmin(work_order_id){
+  const actualCost = document.getElementById('wo-final-' + work_order_id).value;
+  if(!actualCost){ alert('Indique le coût final.'); return; }
+  const fileInput = document.getElementById('wo-receipt-' + work_order_id);
+  const file = fileInput.files[0];
+
+  const payload = { action: 'complete_work_order', work_order_id, actual_cost: Number(actualCost) };
+  if(file){
+    payload.receipt_base64 = await readFileAsBase64(file);
+    payload.receipt_filename = file.name;
+    payload.receipt_content_type = file.type;
+  }
+  const res = await callOpsApi(payload);
+  if(res?.ok){ await loadOps(); }
 }
 
 const stageLabel = { new:'Nouveau', contacted:'Contacté', interested:'Intéressé', proposal_sent:'Proposition envoyée', signed:'Signé', lost:'Perdu' };
