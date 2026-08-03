@@ -151,7 +151,7 @@ create table work_orders (
   worker_pay numeric(10,2),        -- montant payé au travailleur pour ce travail
   worker_notified boolean default false,
   status text default 'open'
-    check (status in ('open','assigned','in_progress','completed')),
+    check (status in ('open','assigned','in_progress','completed','cancelled')),
   created_at timestamptz default now()
 );
 
@@ -528,22 +528,44 @@ select cron.schedule('daily-payment-reminders', '0 13 * * *', $$select trigger_p
 -- envoie au travailleur un courriel avec les détails du travail et
 -- la paie prévue (worker_pay). Un seul envoi par affectation
 -- (worker_notified).
+--
+-- IMPORTANT : si le coût estimé dépasse le plafond du propriétaire
+-- (donc qu'une approbation est requise, voir check_work_order_approval
+-- ci-dessus), on NE notifie PAS le travailleur tout de suite — il
+-- sera avisé seulement après la décision du propriétaire (voir
+-- handle_approval_decision plus bas).
 create or replace function notify_worker_new_job()
 returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_cap numeric;
+  v_needs_approval boolean := false;
 begin
   if new.worker_id is not null
      and (TG_OP = 'INSERT' or old.worker_id is distinct from new.worker_id)
      and coalesce(new.worker_notified, false) = false then
-    perform net.http_post(
-      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-worker-job-assigned',
-      body := jsonb_build_object('work_order_id', new.id),
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
-        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
-      )
-    );
-    new.worker_notified := true;
+
+    select o.spending_cap into v_cap
+    from owners o
+    join buildings b on b.owner_id = o.id
+    join units u on u.building_id = b.id
+    where u.id = new.unit_id;
+
+    if new.estimated_cost is not null and v_cap is not null and new.estimated_cost > v_cap then
+      v_needs_approval := true;
+    end if;
+
+    if not v_needs_approval then
+      perform net.http_post(
+        url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-worker-job-assigned',
+        body := jsonb_build_object('work_order_id', new.id),
+        headers := jsonb_build_object(
+          'Content-Type', 'application/json',
+          'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+          'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+        )
+      );
+      new.worker_notified := true;
+    end if;
   end if;
   return new;
 end;
@@ -552,6 +574,58 @@ $$;
 create trigger on_work_order_worker_assigned
   before insert or update on work_orders
   for each row execute function notify_worker_new_job();
+
+-- ============================================================
+-- DÉCISION D'APPROBATION — ferme automatiquement la boucle
+-- ============================================================
+-- Quand le propriétaire approuve ou refuse une dépense (table
+-- approvals), déclenche automatiquement la suite :
+--   approuvée -> avise le travailleur (mandat) + avise le locataire
+--   refusée   -> annule le work_order + avise le locataire
+create or replace function handle_approval_decision()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if old.status = 'pending' and new.status = 'approved' then
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-worker-job-assigned',
+      body := jsonb_build_object('work_order_id', new.work_order_id),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+    update work_orders set worker_notified = true where id = new.work_order_id;
+
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-approval-decision',
+      body := jsonb_build_object('approval_id', new.id, 'decision', 'approved'),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+  elsif old.status = 'pending' and new.status = 'rejected' then
+    update work_orders set status = 'cancelled' where id = new.work_order_id;
+
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-approval-decision',
+      body := jsonb_build_object('approval_id', new.id, 'decision', 'rejected'),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+  end if;
+  return new;
+end;
+$$;
+
+create trigger on_approval_decided
+  after update on approvals
+  for each row execute function handle_approval_decision();
 
 -- ============================================================
 -- STOCKAGE — upload de documents (baux, mandats, rapports)

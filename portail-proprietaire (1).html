@@ -532,14 +532,14 @@ async function loadWorkOrders(){
     .from('work_orders')
     .select('*, units(unit_number, building_id), workers(name)')
     .in('unit_id', unitIds)
-    .neq('status', 'completed');
+    .not('status', 'in', '(completed,cancelled)');
 
   const body = document.getElementById('workorders-body');
   if(!data || !data.length){
     body.innerHTML = '<tr class="empty-row"><td colspan="6">Aucun travail en cours.</td></tr>';
     return;
   }
-  const statusLabel = { open:'Ouvert', assigned:'Assigné', in_progress:'En cours', completed:'Complété' };
+  const statusLabel = { open:'Ouvert', assigned:'Assigné', in_progress:'En cours', completed:'Complété', cancelled:'Annulé' };
   body.innerHTML = data.map(wo => `
     <tr>
       <td>Unité ${wo.units?.unit_number ?? ''}</td>
