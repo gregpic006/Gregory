@@ -177,6 +177,10 @@ const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+function esc(str){
+  return (str == null ? '' : String(str)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 let tenantRecord = null;
 let currentLease = null;
 
@@ -292,12 +296,12 @@ function renderOverview(lease){
   sub.textContent = (unit?.buildings?.address || '') + (unit ? ', unité ' + unit.unit_number : '');
 
   details.innerHTML = `
-    <div class="kv"><span>Adresse</span><span>${unit?.buildings?.address || '—'}</span></div>
-    <div class="kv"><span>Unité</span><span>${unit?.unit_number || '—'} (${unit?.unit_type || '—'})</span></div>
+    <div class="kv"><span>Adresse</span><span>${esc(unit?.buildings?.address) || '—'}</span></div>
+    <div class="kv"><span>Unité</span><span>${esc(unit?.unit_number) || '—'} (${esc(unit?.unit_type) || '—'})</span></div>
     <div class="kv"><span>Loyer mensuel</span><span>${Number(lease.monthly_rent).toLocaleString('fr-CA')} $</span></div>
-    <div class="kv"><span>Début du bail</span><span>${lease.start_date || '—'}</span></div>
-    <div class="kv"><span>Fin du bail</span><span>${lease.end_date || '—'}</span></div>
-    <div class="kv"><span>Statut</span><span><span class="tag ok">${lease.status}</span></span></div>
+    <div class="kv"><span>Début du bail</span><span>${esc(lease.start_date) || '—'}</span></div>
+    <div class="kv"><span>Fin du bail</span><span>${esc(lease.end_date) || '—'}</span></div>
+    <div class="kv"><span>Statut</span><span><span class="tag ok">${esc(lease.status)}</span></span></div>
   `;
 }
 
@@ -331,10 +335,10 @@ async function loadRequests(){
     body.innerHTML = '<tr class="empty-row"><td colspan="2">Aucune demande envoyée.</td></tr>';
     return;
   }
-  const tagClass = { open: 'urgent', in_progress: 'warn', closed: 'ok' };
+  const tagClass = { open: 'neutral', in_progress: 'warn', closed: 'ok' };
   const tagLabel = { open: 'Ouverte', in_progress: 'En cours', closed: 'Fermée' };
   body.innerHTML = data.map(r => `<tr>
-    <td>${r.description}</td>
+    <td>${esc(r.description)}</td>
     <td><span class="tag ${tagClass[r.status]}">${tagLabel[r.status]}</span></td>
   </tr>`).join('');
 }

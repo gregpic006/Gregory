@@ -284,6 +284,10 @@ const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
 let supabaseClient = null;
 let ownerRecord = null;
 
+function esc(str){
+  return (str == null ? '' : String(str)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 function configIsSet(){
   return !SUPABASE_URL.startsWith('REMPLACER') && !SUPABASE_ANON_KEY.startsWith('REMPLACER');
 }
@@ -430,7 +434,7 @@ function renderOverview(buildings){
 function renderBuildingsTab(buildings){
   const body = document.getElementById('buildings-body');
   if(!buildings.length){ body.innerHTML = '<tr class="empty-row"><td colspan="3">Aucun immeuble.</td></tr>'; return; }
-  body.innerHTML = buildings.map(b => `<tr><td>${b.address}</td><td>${b.unit_count}</td><td>${b.year_built ?? '—'}</td></tr>`).join('');
+  body.innerHTML = buildings.map(b => `<tr><td>${esc(b.address)}</td><td>${esc(b.unit_count)}</td><td>${esc(b.year_built) ?? '—'}</td></tr>`).join('');
 }
 
 function renderUnitsTab(buildings){
@@ -442,7 +446,7 @@ function renderUnitsTab(buildings){
     const rent = u.rent ? u.rent.toLocaleString('fr-CA') + ' $' : '—';
     const end = lease?.end_date || '—';
     const statusTag = u.status === 'occupied' ? '<span class="tag ok">Occupée</span>' : '<span class="tag neutral">Disponible</span>';
-    rows.push(`<tr><td>Unité ${u.unit_number}</td><td>${tenant}</td><td>${rent}</td><td>${end}</td><td>${statusTag}</td></tr>`);
+    rows.push(`<tr><td>Unité ${esc(u.unit_number)}</td><td>${esc(tenant)}</td><td>${esc(rent)}</td><td>${esc(end)}</td><td>${statusTag}</td></tr>`);
   }));
   body.innerHTML = rows.length ? rows.join('') : '<tr class="empty-row"><td colspan="5">Aucun logement.</td></tr>';
 }
@@ -454,7 +458,7 @@ function renderPaymentsTab(buildings){
     const tenant = l.tenants?.full_name || '—';
     const tagClass = p.status === 'paid' ? 'ok' : p.status === 'late' ? 'urgent' : 'warn';
     const tagLabel = p.status === 'paid' ? 'Payé' : p.status === 'late' ? 'En retard' : 'En attente';
-    rows.push(`<tr><td>${tenant}</td><td>${Number(p.amount).toLocaleString('fr-CA')} $</td><td>${p.due_date}</td><td><span class="tag ${tagClass}">${tagLabel}</span></td></tr>`);
+    rows.push(`<tr><td>${esc(tenant)}</td><td>${Number(p.amount).toLocaleString('fr-CA')} $</td><td>${esc(p.due_date)}</td><td><span class="tag ${tagClass}">${tagLabel}</span></td></tr>`);
   }))));
   body.innerHTML = rows.length ? rows.join('') : '<tr class="empty-row"><td colspan="4">Aucun paiement.</td></tr>';
 }
@@ -464,7 +468,7 @@ async function loadExpenses(){
   const { data } = await supabaseClient.from('expenses').select('*').in('building_id', buildingIds);
   const body = document.getElementById('expenses-body');
   body.innerHTML = (data && data.length)
-    ? data.map(e => `<tr><td>${e.description}</td><td>${Number(e.amount).toLocaleString('fr-CA')} $</td><td>${e.expense_date}</td></tr>`).join('')
+    ? data.map(e => `<tr><td>${esc(e.description)}</td><td>${Number(e.amount).toLocaleString('fr-CA')} $</td><td>${esc(e.expense_date)}</td></tr>`).join('')
     : '<tr class="empty-row"><td colspan="3">Aucune dépense.</td></tr>';
 }
 
@@ -492,13 +496,13 @@ async function loadServiceRequests(){
 
   container.innerHTML = data.map(sr => {
     const aiLine = sr.ai_category
-      ? `<span><span class="tag ${urgencyTag[sr.ai_urgency] || 'neutral'}">${sr.ai_urgency || ''}</span> IA : ${sr.ai_category} — estimation ${sr.ai_estimated_cost != null ? Number(sr.ai_estimated_cost).toLocaleString('fr-CA') + ' $' : '—'}</span>`
+      ? `<span><span class="tag ${urgencyTag[sr.ai_urgency] || 'neutral'}">${esc(sr.ai_urgency) || ''}</span> IA : ${esc(sr.ai_category)} — estimation ${sr.ai_estimated_cost != null ? Number(sr.ai_estimated_cost).toLocaleString('fr-CA') + ' $' : '—'}</span>`
       : `<span style="color:var(--muted);">Estimation IA en traitement…</span>`;
     return `
     <div class="approve-row">
       <div class="desc">
-        <b>Unité ${sr.units?.unit_number ?? ''} — ${sr.tenants?.full_name ?? ''}</b>
-        <span>${sr.description}</span><br>${aiLine}
+        <b>Unité ${esc(sr.units?.unit_number) ?? ''} — ${esc(sr.tenants?.full_name) ?? ''}</b>
+        <span>${esc(sr.description)}</span><br>${aiLine}
       </div>
       <div class="approve-actions">
         <span class="tag neutral">Transmise à l'équipe Portail</span>
@@ -524,9 +528,9 @@ async function loadWorkOrders(){
   const statusLabel = { open:'Ouvert', assigned:'Assigné', in_progress:'En cours', completed:'Complété', cancelled:'Annulé' };
   body.innerHTML = data.map(wo => `
     <tr>
-      <td>Unité ${wo.units?.unit_number ?? ''}</td>
-      <td>${wo.description}</td>
-      <td>${wo.workers?.name ?? '—'}</td>
+      <td>Unité ${esc(wo.units?.unit_number) ?? ''}</td>
+      <td>${esc(wo.description)}</td>
+      <td>${esc(wo.workers?.name) ?? '—'}</td>
       <td>${wo.estimated_cost != null ? Number(wo.estimated_cost).toLocaleString('fr-CA') + ' $' : '—'}</td>
       <td><span class="tag neutral">${statusLabel[wo.status] || wo.status}</span></td>
     </tr>`).join('');
@@ -549,7 +553,7 @@ async function loadApprovals(){
   container.innerHTML = data.map(a => `
     <div class="approve-row">
       <div class="desc">
-        <b>${a.work_orders?.description || 'Travaux'} — Unité ${a.work_orders?.units?.unit_number ?? ''}</b>
+        <b>${esc(a.work_orders?.description) || 'Travaux'} — Unité ${esc(a.work_orders?.units?.unit_number) ?? ''}</b>
         <span>Coût demandé : ${Number(a.requested_amount).toLocaleString('fr-CA')} $ — dépasse votre plafond de ${Number(a.spending_cap_at_request).toLocaleString('fr-CA')} $</span>
       </div>
       <div class="approve-actions">
@@ -606,14 +610,14 @@ async function loadDocuments(){
     }
     let analysis = '<span style="color:var(--muted);">En traitement…</span>';
     if(d.ai_processed){
-      const bits = [d.ai_summary || ''];
-      if(d.ai_expiry_date) bits.push(`Échéance : ${d.ai_expiry_date}`);
+      const bits = [esc(d.ai_summary) || ''];
+      if(d.ai_expiry_date) bits.push(`Échéance : ${esc(d.ai_expiry_date)}`);
       if(d.ai_key_amount != null) bits.push(`${Number(d.ai_key_amount).toLocaleString('fr-CA')} $`);
       analysis = bits.filter(Boolean).join(' — ');
     }
     return `<tr>
-      <td>${d.title}</td>
-      <td>${typeLabel[d.doc_type] || d.doc_type || '—'}</td>
+      <td>${esc(d.title)}</td>
+      <td>${typeLabel[d.doc_type] || esc(d.doc_type) || '—'}</td>
       <td style="font-size:12.5px;">${analysis}</td>
       <td>${link}</td>
       <td><button class="btn-small" onclick="deleteDocument('${d.id}', '${d.file_url || ''}')">Supprimer</button></td>
@@ -696,7 +700,7 @@ async function loadMessages(){
     <div class="approve-row" style="justify-content:flex-start;">
       <div class="desc">
         <b>${m.sender === 'owner' ? 'Toi' : 'Équipe Portail'} · ${new Date(m.created_at).toLocaleString('fr-CA')}</b>
-        <span>${m.body}</span>
+        <span>${esc(m.body)}</span>
       </div>
     </div>`).join('');
 }
@@ -716,7 +720,7 @@ async function loadReports(){
   body.innerHTML = data.map(r => `
     <div class="approve-row" style="flex-direction:column;align-items:flex-start;gap:10px;">
       <b>${new Date(r.period_start).toLocaleDateString('fr-CA', {month:'long', year:'numeric'})}</b>
-      <span style="color:var(--muted);font-size:13px;">${r.summary || ''}</span>
+      <span style="color:var(--muted);font-size:13px;">${esc(r.summary) || ''}</span>
       <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:12.5px;">
         <span>Loyers reçus : <b>${Number(r.rent_received ?? 0).toLocaleString('fr-CA')} $</b> / ${Number(r.rent_expected ?? 0).toLocaleString('fr-CA')} $</span>
         <span>Retards : <b>${r.late_count ?? 0}</b></span>
@@ -760,8 +764,8 @@ async function loadRentals(){
     const unitCandidates = (candidates || []).filter(c => c.unit_id === u.id);
     return `
     <div class="approve-row" style="flex-direction:column;align-items:flex-start;gap:8px;">
-      <b>${u.unit_type || ''} — Unité ${u.unit_number} — ${u.buildings?.address || ''}</b>
-      <span style="font-size:12.5px;color:var(--muted);">${u.listing_description || 'Annonce en cours de rédaction par l\'IA…'}</span>
+      <b>${esc(u.unit_type) || ''} — Unité ${esc(u.unit_number)} — ${esc(u.buildings?.address) || ''}</b>
+      <span style="font-size:12.5px;color:var(--muted);">${esc(u.listing_description) || 'Annonce en cours de rédaction par l\'IA…'}</span>
       <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;align-items:center;">
         <span>Loyer actuel : <b>${u.rent != null ? Number(u.rent).toLocaleString('fr-CA') + ' $' : '—'}</b></span>
         <span>Loyer suggéré par l'IA : <b>${u.suggested_rent != null ? Number(u.suggested_rent).toLocaleString('fr-CA') + ' $' : '—'}</b></span>
@@ -773,9 +777,9 @@ async function loadRentals(){
         <tbody>
           ${unitCandidates.map(c => `
           <tr>
-            <td>${c.full_name}<br><span style="color:var(--muted);font-size:11.5px;">${c.email}</span></td>
-            <td style="font-size:12px;">${c.ai_summary || c.message || ''}</td>
-            <td><span class="tag neutral">${statusLabel[c.status] || c.status}</span></td>
+            <td>${esc(c.full_name)}<br><span style="color:var(--muted);font-size:11.5px;">${esc(c.email)}</span></td>
+            <td style="font-size:12px;">${esc(c.ai_summary) || esc(c.message) || ''}</td>
+            <td><span class="tag neutral">${statusLabel[c.status] || esc(c.status)}</span></td>
             <td>
               <button class="btn-small" onclick="markCandidateStatus('${c.id}','contacted')">Contacté</button>
               <button class="btn-small" onclick="markCandidateStatus('${c.id}','closed')">Retenu / Fermer</button>
@@ -825,9 +829,9 @@ async function loadInquiries(){
       : '';
     return `<tr>
       <td>${typeLabel}</td>
-      <td>${i.ai_category || (i.ai_summary ? '' : 'En traitement…')}</td>
-      <td>${i.full_name}<br><span style="color:var(--muted);font-size:12px;">${i.email}${i.phone ? ' · ' + i.phone : ''}</span></td>
-      <td>${i.ai_summary || i.message || '—'}</td>
+      <td>${esc(i.ai_category) || (i.ai_summary ? '' : 'En traitement…')}</td>
+      <td>${esc(i.full_name)}<br><span style="color:var(--muted);font-size:12px;">${esc(i.email)}${i.phone ? ' · ' + esc(i.phone) : ''}</span></td>
+      <td>${esc(i.ai_summary) || esc(i.message) || '—'}</td>
       <td><span class="tag ${statusTag[i.status]}">${statusLabel[i.status]}</span><br>${actionBtn}</td>
     </tr>`;
   }).join('');
