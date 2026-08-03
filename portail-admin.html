@@ -79,10 +79,17 @@
     <div class="metric"><div class="label">Revenu de gestion mensuel</div><div class="val" id="m-revenue">—</div></div>
     <div class="metric flag"><div class="label">Travaux en attente d'approbation</div><div class="val" id="m-approvals">—</div></div>
     <div class="metric flag"><div class="label">Nouvelles demandes</div><div class="val" id="m-inquiries">—</div></div>
+    <div class="metric flag"><div class="label">Anomalies financières ouvertes</div><div class="val" id="m-anomalies">—</div></div>
   </div>
 
   <table><thead><tr><th>Client</th><th>Téléphone</th><th class="num">Immeubles</th><th class="num">Logements</th><th class="num">Occupés</th><th class="num">Revenu/mois</th></tr></thead>
     <tbody id="clients-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
+  </table>
+
+  <h1 style="margin-top:40px;font-size:22px;">Anomalies financières</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Détection automatique — factures en double, dépassements, écarts de loyer, reçus manquants</p>
+  <table><thead><tr><th>Type</th><th>Client</th><th>Description</th><th>Sévérité</th><th></th></tr></thead>
+    <tbody id="anomalies-body"><tr class="empty-row"><td colspan="5">Chargement...</td></tr></tbody>
   </table>
 
   <h1 style="margin-top:40px;font-size:22px;">CRM — Prospects propriétaires</h1>
@@ -143,13 +150,28 @@ async function loadAdminDashboard(){
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-shell').style.display = 'block';
 
-  const { totals, clients } = data;
+  const { totals, clients, anomalies } = data;
   document.getElementById('m-clients').textContent = totals.clients_count;
   document.getElementById('m-buildings').textContent = totals.buildings_count;
   document.getElementById('m-units').textContent = totals.units_count;
   document.getElementById('m-revenue').textContent = totals.monthly_revenue.toLocaleString('fr-CA') + ' $';
   document.getElementById('m-approvals').textContent = totals.pending_approvals;
   document.getElementById('m-inquiries').textContent = totals.new_inquiries;
+  document.getElementById('m-anomalies').textContent = totals.open_anomalies;
+
+  const anomalyTypeLabel = { facture_dupliquee:'Facture en double', depassement_cout:'Dépassement de coût', loyer_montant_incorrect:'Loyer — montant incorrect', recu_manquant:'Reçu manquant' };
+  const anomalyBody = document.getElementById('anomalies-body');
+  anomalyBody.innerHTML = (anomalies && anomalies.length) ? anomalies.map(a => `
+    <tr>
+      <td>${anomalyTypeLabel[a.type] || a.type}</td>
+      <td>${a.owners?.full_name || '—'}</td>
+      <td style="font-size:12.5px;">${a.description}</td>
+      <td>${a.severity}</td>
+      <td>
+        <button onclick="updateAnomaly('${a.id}','resolved')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Résolu</button>
+        <button onclick="updateAnomaly('${a.id}','dismissed')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Ignorer</button>
+      </td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Aucune anomalie détectée.</td></tr>';
 
   const body = document.getElementById('clients-body');
   body.innerHTML = clients.length ? clients.map(c => `
@@ -213,6 +235,12 @@ async function createProspect(){
 async function updateProspectStage(prospect_id, stage){
   await callCrmApi({ action: 'update_stage', prospect_id, stage });
   await loadProspects();
+}
+
+async function updateAnomaly(anomaly_id, status){
+  const { error } = await supabaseClient.functions.invoke('admin-api', { body: { action: 'update_anomaly', anomaly_id, status } });
+  if(error){ alert('Erreur : ' + error.message); return; }
+  await loadAdminDashboard();
 }
 
 async function promptAddCall(prospect_id){

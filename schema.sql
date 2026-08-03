@@ -205,6 +205,22 @@ create table prospects (
 -- Pas de policy RLS ouverte : accessible uniquement via le rôle
 -- service_role (fonction Edge "crm-api", gardée par is_admin).
 
+-- ============ FINANCIAL ANOMALIES (contrôle interne) ============
+create table financial_anomalies (
+  id uuid primary key default gen_random_uuid(),
+  type text not null check (type in ('facture_dupliquee','depassement_cout','loyer_montant_incorrect','recu_manquant')),
+  severity text not null default 'moyen' check (severity in ('critique','eleve','moyen')),
+  description text not null,
+  owner_id uuid references owners(id),
+  related_expense_id uuid references expenses(id),
+  related_payment_id uuid references payments(id),
+  related_work_order_id uuid references work_orders(id),
+  status text default 'open' check (status in ('open','resolved','dismissed')),
+  created_at timestamptz default now()
+);
+-- Pas de policy RLS ouverte : accessible uniquement via le rôle
+-- service_role (fonction Edge "admin-api", gardée par is_admin).
+
 -- ============ REPORTS (rapports mensuels propriétaires) ============
 create table reports (
   id uuid primary key default gen_random_uuid(),
@@ -242,6 +258,10 @@ create table documents (
   ai_extracted jsonb,
   created_at timestamptz default now()
 );
+
+-- Ajoutée après "documents" pour respecter l'ordre des références
+-- (une dépense peut pointer vers son reçu/sa facture téléversée).
+alter table expenses add column receipt_document_id uuid references documents(id);
 
 -- ============ MESSAGES ============
 create table messages (
@@ -334,6 +354,7 @@ alter table workers enable row level security;
 alter table inquiries enable row level security;
 alter table reports enable row level security;
 alter table prospects enable row level security;
+alter table financial_anomalies enable row level security;
 
 create policy "self" on users for select using (id = auth.uid());
 
@@ -817,6 +838,82 @@ $$;
 create trigger on_mandat_inquiry_insert
   after insert on inquiries
   for each row execute function notify_new_mandat_inquiry();
+
+-- ============================================================
+-- COMPTABILITÉ OPÉRATIONNELLE — détection d'anomalies
+-- ============================================================
+-- Purement déterministe (aucun appel IA nécessaire) : comparaisons
+-- de données directes. Tourne une fois par jour, ajoute une ligne
+-- dans "financial_anomalies" pour chaque cas détecté qui n'a pas
+-- déjà été signalé (et pas rejeté manuellement).
+create or replace function detect_financial_anomalies()
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  -- 1. Factures en double : même immeuble, même montant, à 3 jours d'écart ou moins
+  insert into financial_anomalies (type, severity, description, owner_id, related_expense_id)
+  select 'facture_dupliquee', 'eleve',
+    'Deux dépenses similaires (' || e1.amount || ' $) pour le même immeuble à ' || abs(e1.expense_date - e2.expense_date) || ' jour(s) d''écart.',
+    b.owner_id, e1.id
+  from expenses e1
+  join expenses e2 on e2.building_id = e1.building_id
+    and e2.amount = e1.amount
+    and e2.id <> e1.id
+    and abs(e1.expense_date - e2.expense_date) <= 3
+  join buildings b on b.id = e1.building_id
+  where e1.id < e2.id
+    and not exists (
+      select 1 from financial_anomalies fa
+      where fa.type = 'facture_dupliquee' and fa.related_expense_id = e1.id and fa.status <> 'dismissed'
+    );
+
+  -- 2. Dépassement de coût : dépense finale > 120% du coût estimé du travail
+  insert into financial_anomalies (type, severity, description, owner_id, related_expense_id, related_work_order_id)
+  select 'depassement_cout', 'moyen',
+    'Coût final (' || e.amount || ' $) supérieur de plus de 20% à l''estimation (' || wo.estimated_cost || ' $).',
+    b.owner_id, e.id, wo.id
+  from expenses e
+  join work_orders wo on wo.id = e.work_order_id
+  join buildings b on b.id = e.building_id
+  where wo.estimated_cost is not null
+    and e.amount > wo.estimated_cost * 1.2
+    and not exists (
+      select 1 from financial_anomalies fa
+      where fa.type = 'depassement_cout' and fa.related_expense_id = e.id and fa.status <> 'dismissed'
+    );
+
+  -- 3. Loyer reçu avec un montant différent de celui du bail
+  insert into financial_anomalies (type, severity, description, owner_id, related_payment_id)
+  select 'loyer_montant_incorrect', 'moyen',
+    'Paiement de ' || p.amount || ' $ reçu alors que le loyer du bail est de ' || l.monthly_rent || ' $.',
+    b.owner_id, p.id
+  from payments p
+  join leases l on l.id = p.lease_id
+  join units u on u.id = l.unit_id
+  join buildings b on b.id = u.building_id
+  where p.status = 'paid'
+    and p.amount <> l.monthly_rent
+    and not exists (
+      select 1 from financial_anomalies fa
+      where fa.type = 'loyer_montant_incorrect' and fa.related_payment_id = p.id and fa.status <> 'dismissed'
+    );
+
+  -- 4. Dépense sans facture/reçu joint (au-delà d'un petit montant, pour limiter le bruit)
+  insert into financial_anomalies (type, severity, description, owner_id, related_expense_id)
+  select 'recu_manquant', 'moyen',
+    'Dépense de ' || e.amount || ' $ enregistrée sans facture/reçu joint.',
+    b.owner_id, e.id
+  from expenses e
+  join buildings b on b.id = e.building_id
+  where e.receipt_document_id is null
+    and e.amount > 50
+    and not exists (
+      select 1 from financial_anomalies fa
+      where fa.type = 'recu_manquant' and fa.related_expense_id = e.id and fa.status <> 'dismissed'
+    );
+end;
+$$;
+
+select cron.schedule('daily-financial-anomalies', '0 12 * * *', $$select detect_financial_anomalies()$$);
 
 -- ============================================================
 -- STOCKAGE — upload de documents (baux, mandats, rapports)

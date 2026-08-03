@@ -216,6 +216,7 @@
         <table><thead><tr><th>Unité</th><th>Description</th><th>Travailleur</th><th>Coût estimé</th><th>Statut</th><th></th></tr></thead>
           <tbody id="workorders-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
         </table>
+        <input type="file" id="receipt-file-input" accept=".pdf,image/*" style="display:none;">
       </section>
 
       <section id="approvals" class="section">
@@ -572,6 +573,15 @@ async function loadWorkOrders(){
     </tr>`).join('');
 }
 
+function pickReceiptFile(){
+  return new Promise(resolve => {
+    const input = document.getElementById('receipt-file-input');
+    input.value = '';
+    input.onchange = () => resolve(input.files[0] || null);
+    input.click();
+  });
+}
+
 async function completeWorkOrder(workOrderId, buildingId, unitId, estimatedCost){
   const actualCost = prompt('Coût final réel ($) :', estimatedCost ?? 0);
   if(actualCost === null) return;
@@ -582,6 +592,26 @@ async function completeWorkOrder(workOrderId, buildingId, unitId, estimatedCost)
   if(wo?.service_request_id){
     await supabaseClient.from('service_requests').update({ status: 'closed' }).eq('id', wo.service_request_id);
   }
+
+  let receiptDocumentId = null;
+  if(confirm('Joindre la facture/le reçu de ce travail ?')){
+    const file = await pickReceiptFile();
+    if(file){
+      const path = `${ownerRecord.id}/${Date.now()}-${file.name}`;
+      const { error: uploadError } = await supabaseClient.storage.from('documents').upload(path, file);
+      if(!uploadError){
+        const { data: doc } = await supabaseClient.from('documents').insert({
+          owner_id: ownerRecord.id,
+          building_id: buildingId,
+          title: `Facture — ${wo?.description || 'travaux'}`,
+          doc_type: 'facture',
+          file_url: path,
+        }).select().single();
+        receiptDocumentId = doc?.id || null;
+      }
+    }
+  }
+
   await supabaseClient.from('expenses').insert({
     work_order_id: workOrderId,
     building_id: buildingId,
@@ -589,6 +619,7 @@ async function completeWorkOrder(workOrderId, buildingId, unitId, estimatedCost)
     description: wo?.description || 'Travaux complétés',
     amount: Number(actualCost),
     expense_date: new Date().toISOString().slice(0,10),
+    receipt_document_id: receiptDocumentId,
   });
 
   await loadWorkTab();
