@@ -86,6 +86,75 @@
     <tbody id="clients-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
   </table>
 
+  <h1 style="margin-top:40px;font-size:22px;">Onboarding — nouveau client</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Crée le compte, l'accès au portail et envoie les identifiants automatiquement — aucune manipulation SQL requise</p>
+
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
+    <h3 style="font-size:14px;margin-bottom:10px;">1. Compte propriétaire</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom complet</label><input type="text" id="ob-owner-name" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel</label><input type="email" id="ob-owner-email" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone</label><input type="text" id="ob-owner-phone" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Entreprise</label><input type="text" id="ob-owner-company" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Taux de gestion (%)</label><input type="number" id="ob-owner-rate" value="6" step="0.1" style="padding:8px;border:1px solid var(--line);width:80px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Plafond de dépenses ($)</label><input type="number" id="ob-owner-cap" value="300" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+      <button onclick="obCreateOwner()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Créer le compte + envoyer l'accès</button>
+    </div>
+    <p id="ob-owner-msg" style="font-size:12.5px;margin-top:8px;"></p>
+  </div>
+
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
+    <h3 style="font-size:14px;margin-bottom:10px;">2. Immeuble</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Propriétaire</label>
+        <select id="ob-building-owner" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir —</option></select>
+      </div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Adresse</label><input type="text" id="ob-building-address" style="padding:8px;border:1px solid var(--line);width:240px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nombre d'unités</label><input type="number" id="ob-building-count" value="1" min="1" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Année</label><input type="number" id="ob-building-year" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
+      <button onclick="obAddBuilding()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter l'immeuble</button>
+    </div>
+    <p id="ob-building-msg" style="font-size:12.5px;margin-top:8px;"></p>
+  </div>
+
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
+    <h3 style="font-size:14px;margin-bottom:10px;">3. Unité</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Immeuble</label>
+        <select id="ob-unit-building" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir un propriétaire d'abord —</option></select>
+      </div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Numéro</label><input type="text" id="ob-unit-number" style="padding:8px;border:1px solid var(--line);width:80px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Type</label><input type="text" id="ob-unit-type" placeholder="4½" style="padding:8px;border:1px solid var(--line);width:70px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Loyer ($)</label><input type="number" id="ob-unit-rent" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Statut</label>
+        <select id="ob-unit-status" style="padding:8px;border:1px solid var(--line);">
+          <option value="occupied">Occupée</option>
+          <option value="available">Disponible</option>
+          <option value="soon_available">Bientôt libre</option>
+        </select>
+      </div>
+      <button onclick="obAddUnit()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter l'unité</button>
+    </div>
+    <p id="ob-unit-msg" style="font-size:12.5px;margin-top:8px;"></p>
+  </div>
+
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:32px;">
+    <h3 style="font-size:14px;margin-bottom:10px;">4. Locataire + bail</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Unité</label>
+        <select id="ob-tenant-unit" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir un immeuble d'abord —</option></select>
+      </div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom complet</label><input type="text" id="ob-tenant-name" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel</label><input type="email" id="ob-tenant-email" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone</label><input type="text" id="ob-tenant-phone" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Loyer mensuel ($)</label><input type="number" id="ob-tenant-rent" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Début du bail</label><input type="date" id="ob-tenant-start" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fin du bail (optionnel)</label><input type="date" id="ob-tenant-end" style="padding:8px;border:1px solid var(--line);"></div>
+      <button onclick="obCreateTenant()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Créer le compte + envoyer l'accès</button>
+    </div>
+    <p id="ob-tenant-msg" style="font-size:12.5px;margin-top:8px;"></p>
+  </div>
+
   <h1 style="margin-top:40px;font-size:22px;">Journal d'audit</h1>
   <p class="subtitle" style="margin-bottom:16px;">Dernières décisions et actions sensibles — 100 plus récentes</p>
   <table><thead><tr><th>Date</th><th>Acteur</th><th>Action</th><th>Détails</th></tr></thead>
@@ -205,6 +274,105 @@ async function loadAdminDashboard(){
   await loadOps();
   await loadProspects();
   await loadAuditLog();
+  await obInit();
+}
+
+async function callOnboardingApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('onboarding-api', { body: payload });
+  if(error){ return { error: error.message }; }
+  return data;
+}
+
+async function obInit(){
+  const data = await callOnboardingApi({ action: 'list_owners' });
+  const select = document.getElementById('ob-building-owner');
+  select.innerHTML = '<option value="">— Choisir —</option>' + (data?.owners || []).map(o => `<option value="${o.id}">${esc(o.full_name)}${o.company_name ? ' — ' + esc(o.company_name) : ''}</option>`).join('');
+}
+
+async function obCreateOwner(){
+  const full_name = document.getElementById('ob-owner-name').value;
+  const email = document.getElementById('ob-owner-email').value;
+  const phone = document.getElementById('ob-owner-phone').value;
+  const company_name = document.getElementById('ob-owner-company').value;
+  const management_rate = Number(document.getElementById('ob-owner-rate').value);
+  const spending_cap = Number(document.getElementById('ob-owner-cap').value);
+  const msg = document.getElementById('ob-owner-msg');
+  if(!full_name || !email){ msg.textContent = 'Nom et courriel requis.'; return; }
+  msg.textContent = 'Création en cours...';
+  const res = await callOnboardingApi({ action: 'create_owner', full_name, email, phone, company_name, management_rate, spending_cap });
+  if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
+  msg.textContent = 'Compte créé et identifiants envoyés à ' + email + ' !';
+  document.getElementById('ob-owner-name').value = '';
+  document.getElementById('ob-owner-email').value = '';
+  document.getElementById('ob-owner-phone').value = '';
+  document.getElementById('ob-owner-company').value = '';
+  await obInit();
+}
+
+async function obAddBuilding(){
+  const owner_id = document.getElementById('ob-building-owner').value;
+  const address = document.getElementById('ob-building-address').value;
+  const unit_count = Number(document.getElementById('ob-building-count').value);
+  const year_built = document.getElementById('ob-building-year').value ? Number(document.getElementById('ob-building-year').value) : null;
+  const msg = document.getElementById('ob-building-msg');
+  if(!owner_id || !address){ msg.textContent = 'Propriétaire et adresse requis.'; return; }
+  msg.textContent = 'Ajout en cours...';
+  const res = await callOnboardingApi({ action: 'add_building', owner_id, address, unit_count, year_built });
+  if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
+  msg.textContent = 'Immeuble ajouté !';
+  document.getElementById('ob-building-address').value = '';
+  await obLoadBuildingsForUnit(owner_id);
+}
+
+async function obLoadBuildingsForUnit(owner_id){
+  const data = await callOnboardingApi({ action: 'list_buildings', owner_id });
+  const select = document.getElementById('ob-unit-building');
+  select.innerHTML = '<option value="">— Choisir —</option>' + (data?.buildings || []).map(b => `<option value="${b.id}">${esc(b.address)}</option>`).join('');
+}
+document.getElementById('ob-building-owner').addEventListener('change', (e) => obLoadBuildingsForUnit(e.target.value));
+
+async function obAddUnit(){
+  const building_id = document.getElementById('ob-unit-building').value;
+  const unit_number = document.getElementById('ob-unit-number').value;
+  const unit_type = document.getElementById('ob-unit-type').value;
+  const rent = document.getElementById('ob-unit-rent').value ? Number(document.getElementById('ob-unit-rent').value) : null;
+  const status = document.getElementById('ob-unit-status').value;
+  const msg = document.getElementById('ob-unit-msg');
+  if(!building_id || !unit_number){ msg.textContent = 'Immeuble et numéro requis.'; return; }
+  msg.textContent = 'Ajout en cours...';
+  const res = await callOnboardingApi({ action: 'add_unit', building_id, unit_number, unit_type, rent, status });
+  if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
+  msg.textContent = 'Unité ajoutée !';
+  document.getElementById('ob-unit-number').value = '';
+  document.getElementById('ob-unit-rent').value = '';
+  await obLoadUnitsForTenant(building_id);
+}
+
+async function obLoadUnitsForTenant(building_id){
+  const data = await callOnboardingApi({ action: 'list_units', building_id });
+  const select = document.getElementById('ob-tenant-unit');
+  select.innerHTML = '<option value="">— Choisir —</option>' + (data?.units || []).map(u => `<option value="${u.id}">Unité ${esc(u.unit_number)} (${esc(u.status)})</option>`).join('');
+}
+document.getElementById('ob-unit-building').addEventListener('change', (e) => obLoadUnitsForTenant(e.target.value));
+
+async function obCreateTenant(){
+  const unit_id = document.getElementById('ob-tenant-unit').value;
+  const full_name = document.getElementById('ob-tenant-name').value;
+  const email = document.getElementById('ob-tenant-email').value;
+  const phone = document.getElementById('ob-tenant-phone').value;
+  const monthly_rent = Number(document.getElementById('ob-tenant-rent').value);
+  const start_date = document.getElementById('ob-tenant-start').value;
+  const end_date = document.getElementById('ob-tenant-end').value || null;
+  const msg = document.getElementById('ob-tenant-msg');
+  if(!unit_id || !full_name || !email || !monthly_rent || !start_date){ msg.textContent = 'Tous les champs sauf téléphone et fin de bail sont requis.'; return; }
+  msg.textContent = 'Création en cours...';
+  const res = await callOnboardingApi({ action: 'create_tenant', full_name, email, phone, unit_id, monthly_rent, start_date, end_date });
+  if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
+  msg.textContent = 'Compte créé et identifiants envoyés à ' + email + ' !';
+  document.getElementById('ob-tenant-name').value = '';
+  document.getElementById('ob-tenant-email').value = '';
+  document.getElementById('ob-tenant-phone').value = '';
+  document.getElementById('ob-tenant-rent').value = '';
 }
 
 const auditActionLabel = {
