@@ -24,7 +24,8 @@
 
   header{position:sticky;top:0;background:var(--paper);border-bottom:1px solid var(--ink);z-index:30;}
   nav{display:flex;justify-content:space-between;align-items:center;padding:16px 0;flex-wrap:wrap;gap:10px;}
-  .brand{font-family:'Fraunces',serif;font-weight:600;font-size:20px;letter-spacing:-0.01em;}
+  .brand{font-family:'Fraunces',serif;font-weight:600;font-size:20px;letter-spacing:-0.01em;line-height:1.15;}
+  .brand .tagline{display:block;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:9.5px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);}
   .navlinks{display:flex;gap:20px;font-size:13.5px;align-items:center;flex-wrap:wrap;}
   .navlinks a{text-decoration:none;border-bottom:1px solid transparent;transition:border-color .15s;white-space:nowrap;}
   .navlinks a:hover{border-color:var(--brass);}
@@ -128,7 +129,7 @@
 
 <header>
   <nav class="wrap">
-    <div class="brand">Portail</div>
+    <div class="brand">PORTAIL<span class="tagline">Gestion immobilière</span></div>
     <div class="navlinks">
       <a href="#">Accueil</a>
       <a href="#services">Services</a>
