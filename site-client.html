@@ -310,6 +310,10 @@ const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+function esc(str){
+  return (str == null ? '' : String(str)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 async function loadLogements(){
   const list = document.getElementById('listings');
   const { data: units, error } = await supabaseClient
@@ -336,12 +340,12 @@ async function loadLogements(){
       <span class="badge">${statut}</span>
       <div class="thumb">Photo à venir</div>
       <div class="body">
-        <h3>${u.unit_type || ''} — Unité ${u.unit_number}</h3>
-        <p class="addr">${u.buildings?.address || ''}</p>
-        ${u.listing_description ? `<p style="font-size:13px;color:var(--muted);margin:6px 0;">${u.listing_description}</p>` : ''}
+        <h3>${esc(u.unit_type) || ''} — Unité ${esc(u.unit_number)}</h3>
+        <p class="addr">${esc(u.buildings?.address) || ''}</p>
+        ${u.listing_description ? `<p style="font-size:13px;color:var(--muted);margin:6px 0;">${esc(u.listing_description)}</p>` : ''}
         <div class="meta">
           <span class="price">${Number(u.rent).toLocaleString('fr-CA')} $/mois</span>
-          <span>Dispo: ${dispo}</span>
+          <span>Dispo: ${esc(dispo)}</span>
         </div>
         <a class="apply" href="formulaires-gestion-immobiliere.html?type=visite&unit=${u.id}">Demander une visite</a>
       </div>`;

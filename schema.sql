@@ -222,6 +222,15 @@ create table financial_anomalies (
 -- Pas de policy RLS ouverte : accessible uniquement via le rôle
 -- service_role (fonction Edge "admin-api", gardée par is_admin).
 
+-- ============ PUBLIC SUBMISSION LOG (limite de débit anti-spam) ============
+create table public_submission_log (
+  id uuid primary key default gen_random_uuid(),
+  ip_address text,
+  created_at timestamptz default now()
+);
+-- Pas de policy RLS ouverte : écrit/lu uniquement par la fonction
+-- Edge "handle-public-inquiry" (service_role).
+
 -- ============ REPORTS (rapports mensuels propriétaires) ============
 create table reports (
   id uuid primary key default gen_random_uuid(),
@@ -361,6 +370,7 @@ alter table inquiries enable row level security;
 alter table reports enable row level security;
 alter table prospects enable row level security;
 alter table financial_anomalies enable row level security;
+alter table public_submission_log enable row level security;
 
 create policy "self" on users for select using (id = auth.uid());
 
@@ -424,14 +434,17 @@ create policy "public read buildings with available units" on buildings for sele
 create policy "owner or admin read workers" on workers for select
   using (auth_is_admin() or auth_owner_id() is not null);
 
--- inquiries : n'importe qui peut soumettre une demande via le
--- formulaire public. La lecture/mise à jour complète est réservée
--- à l'admin (les demandes de mandat sont des prospects commerciaux
--- confidentiels — un propriétaire ne doit JAMAIS voir les demandes
--- d'un autre client ni celles d'autres prospects). Un propriétaire
--- ne peut voir/gérer que les demandes de visite pour SES unités.
-create policy "public insert inquiries" on inquiries for insert
-  with check (true);
+-- inquiries : la soumission publique NE passe PLUS par un insert
+-- direct depuis le navigateur (aucune policy INSERT publique ici) —
+-- elle passe obligatoirement par la fonction Edge
+-- "handle-public-inquiry" (service_role), qui valide les champs,
+-- vérifie le honeypot, limite le débit par IP et confirme que
+-- l'unité existe/est disponible avant d'insérer. La lecture/mise à
+-- jour complète est réservée à l'admin (les demandes de mandat sont
+-- des prospects commerciaux confidentiels — un propriétaire ne doit
+-- JAMAIS voir les demandes d'un autre client ni celles d'autres
+-- prospects). Un propriétaire ne peut voir/gérer que les demandes
+-- de visite pour SES unités.
 create policy "admin read inquiries" on inquiries for select
   using (auth_is_admin());
 create policy "admin update inquiries" on inquiries for update

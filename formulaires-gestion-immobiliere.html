@@ -61,6 +61,13 @@
       <div class="f"><label>Courriel</label><input type="email" name="email" required></div>
       <div class="f"><label>Téléphone</label><input type="tel" name="phone"></div>
       <div class="f"><label>Message (optionnel)</label><textarea name="message" placeholder="Dates préférées, questions sur le logement, etc."></textarea></div>
+      <div style="position:absolute;left:-9999px;" aria-hidden="true">
+        <label>Site web</label><input type="text" name="website" tabindex="-1" autocomplete="off">
+      </div>
+      <div class="f" style="display:flex;align-items:flex-start;gap:8px;">
+        <input type="checkbox" name="consent" required style="width:auto;margin-top:3px;">
+        <label style="font-weight:400;">J'accepte que mes informations soient utilisées par Portail pour me contacter au sujet de cette demande. Voir notre politique de confidentialité.</label>
+      </div>
       <button class="submit" type="submit">Envoyer la demande</button>
       <p class="error" id="error-visite"></p>
     </form>
@@ -77,6 +84,13 @@
       <div class="f"><label>Courriel</label><input type="email" name="email" required></div>
       <div class="f"><label>Téléphone</label><input type="tel" name="phone"></div>
       <div class="f"><label>Parle-nous de ton immeuble</label><textarea name="message" placeholder="Adresse, nombre de logements, situation actuelle, etc." required></textarea></div>
+      <div style="position:absolute;left:-9999px;" aria-hidden="true">
+        <label>Site web</label><input type="text" name="website" tabindex="-1" autocomplete="off">
+      </div>
+      <div class="f" style="display:flex;align-items:flex-start;gap:8px;">
+        <input type="checkbox" name="consent" required style="width:auto;margin-top:3px;">
+        <label style="font-weight:400;">J'accepte que mes informations soient utilisées par Portail pour me contacter au sujet de cette demande. Voir notre politique de confidentialité.</label>
+      </div>
       <button class="submit" type="submit">Envoyer ma demande</button>
       <p class="error" id="error-mandat"></p>
     </form>
@@ -117,14 +131,28 @@ async function submitInquiry(event, type){
     email: form.email.value,
     phone: form.phone.value || null,
     message: form.message?.value || null,
+    website: form.website.value || '',
+    consent: form.consent.checked,
   };
   if(type === 'visite' && unitId){
     payload.unit_id = unitId;
   }
 
-  const { error } = await supabaseClient.from('inquiries').insert(payload);
-
-  if(error){
+  let result;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/handle-public-inquiry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify(payload),
+    });
+    result = await res.json();
+    if(!res.ok || result.error){
+      errorEl.textContent = result.error || "Une erreur est survenue, réessaie dans un instant.";
+      errorEl.style.display = 'block';
+      button.disabled = false;
+      return;
+    }
+  } catch (e) {
     errorEl.textContent = "Une erreur est survenue, réessaie dans un instant.";
     errorEl.style.display = 'block';
     button.disabled = false;
