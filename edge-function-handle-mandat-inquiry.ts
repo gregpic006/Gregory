@@ -17,16 +17,30 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: false, error: "inquiry not found" }), { status: 404 });
     }
 
-    const prompt = `Tu es l'assistant CRM de "Portail", une entreprise de gestion immobilière résidentielle au Québec. Un prospect (propriétaire d'immeuble potentiel) a soumis une demande de mandat de gestion. Analyse son message et extrais, si mentionné, le nombre de portes/logements qu'il possède et son loyer moyen approximatif.
+    // Les champs sont maintenant fournis directement par le
+    // formulaire structuré (plus d'extraction IA nécessaire pour
+    // ces chiffres — plus fiable). L'IA sert seulement à rédiger un
+    // court résumé lisible pour l'équipe commerciale.
+    const numDoors = inquiry.num_doors ?? null;
+    const avgRent = inquiry.avg_rent ?? null;
+    const potentialRevenue = numDoors && avgRent ? Math.round(numDoors * avgRent * 0.06 * 100) / 100 : null;
 
-Message du prospect: "${inquiry.message || ""}"
+    const ownershipLabel = inquiry.ownership === "societe" ? "par une société" : inquiry.ownership === "personnel" ? "personnellement" : "non précisé";
+    const managementLabel = inquiry.current_management === "sous_gestion" ? "déjà sous gestion" : inquiry.current_management === "autogere" ? "autogéré" : "non précisé";
+
+    const prompt = `Tu es l'assistant CRM de "Portail", une entreprise de gestion immobilière résidentielle au Québec. Rédige un résumé en une phrase pour l'équipe commerciale à partir de cette demande de mandat.
+
+Secteur : ${inquiry.sector || "non précisé"}
+Portes : ${numDoors ?? "non précisé"}
+Loyer moyen : ${avgRent ?? "non précisé"}
+Détenu : ${ownershipLabel}
+Situation actuelle : ${managementLabel}
+Services recherchés : ${inquiry.services_needed || "non précisé"}
+Problème principal : ${inquiry.main_problem || "non précisé"}
+Message additionnel : ${inquiry.message || "aucun"}
 
 Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
-{
-  "num_doors": un nombre entier si mentionné/déductible, sinon null,
-  "avg_rent": un nombre si un loyer moyen est mentionné/déductible, sinon null,
-  "summary": "résumé en une phrase de la demande"
-}`;
+{ "summary": "résumé en une phrase" }`;
 
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -37,7 +51,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 300,
+        max_tokens: 200,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -50,10 +64,6 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
     } catch {
       parsed = {};
     }
-
-    const numDoors = parsed.num_doors ?? null;
-    const avgRent = parsed.avg_rent ?? null;
-    const potentialRevenue = numDoors && avgRent ? Math.round(numDoors * avgRent * 0.06 * 100) / 100 : null;
 
     await fetch(`${supabaseUrl}/rest/v1/prospects`, {
       method: "POST",

@@ -50,7 +50,7 @@
 
   <div class="tabs">
     <button class="tab-btn active" data-tab="visite" onclick="showFormTab('visite')">Demander une visite</button>
-    <button class="tab-btn" data-tab="mandat" onclick="showFormTab('mandat')">Confier mon immeuble</button>
+    <button class="tab-btn" data-tab="mandat" onclick="showFormTab('mandat')">Obtenir une évaluation gratuite</button>
   </div>
 
   <div id="form-visite" class="form-panel active">
@@ -77,13 +77,34 @@
   </div>
 
   <div id="form-mandat" class="form-panel">
-    <h1>Confier mon immeuble</h1>
-    <p class="subtitle">Dis-nous en plus sur ton immeuble — un membre de notre équipe te contactera pour finaliser le mandat de gestion.</p>
+    <h1>Obtenir une évaluation gratuite</h1>
+    <p class="subtitle">Dis-nous en plus sur ton immeuble — un membre de notre équipe te contactera, sans engagement, pour discuter d'un mandat de gestion.</p>
     <form onsubmit="submitInquiry(event, 'mandat')">
       <div class="f"><label>Nom complet</label><input type="text" name="full_name" required></div>
       <div class="f"><label>Courriel</label><input type="email" name="email" required></div>
       <div class="f"><label>Téléphone</label><input type="tel" name="phone"></div>
-      <div class="f"><label>Parle-nous de ton immeuble</label><textarea name="message" placeholder="Adresse, nombre de logements, situation actuelle, etc." required></textarea></div>
+      <div class="f"><label>Adresse ou secteur de l'immeuble</label><input type="text" name="sector" required></div>
+      <div class="f"><label>Nombre de logements</label><input type="number" name="num_doors" min="1"></div>
+      <div class="f"><label>Loyer mensuel moyen approximatif ($)</label><input type="number" name="avg_rent" min="0"></div>
+      <div class="f"><label>L'immeuble est détenu</label>
+        <select name="ownership">
+          <option value="">— Choisir —</option>
+          <option value="personnel">Personnellement</option>
+          <option value="societe">Par une société</option>
+        </select>
+      </div>
+      <div class="f"><label>Actuellement</label>
+        <select name="current_management">
+          <option value="">— Choisir —</option>
+          <option value="autogere">Autogéré</option>
+          <option value="sous_gestion">Déjà sous gestion (autre entreprise)</option>
+        </select>
+      </div>
+      <div class="f"><label>Services recherchés</label><input type="text" name="services_needed" placeholder="Ex. : gestion complète, location seulement, coordination des travaux..."></div>
+      <div class="f"><label>Principal problème à résoudre</label><input type="text" name="main_problem" placeholder="Ex. : retards de loyer fréquents, roulement de locataires, manque de temps..."></div>
+      <div class="f"><label>Date souhaitée de début</label><input type="date" name="desired_start_date"></div>
+      <div class="f"><label>Meilleur moment pour t'appeler</label><input type="text" name="best_call_time" placeholder="Ex. : en soirée, jour de semaine en après-midi..."></div>
+      <div class="f"><label>Autre chose à ajouter (optionnel)</label><textarea name="message" placeholder="Tout autre détail utile"></textarea></div>
       <div style="position:absolute;left:-9999px;" aria-hidden="true">
         <label>Site web</label><input type="text" name="website" tabindex="-1" autocomplete="off">
       </div>
@@ -136,6 +157,17 @@ async function submitInquiry(event, type){
   };
   if(type === 'visite' && unitId){
     payload.unit_id = unitId;
+  }
+  if(type === 'mandat'){
+    payload.sector = form.sector?.value || null;
+    payload.num_doors = form.num_doors?.value ? Number(form.num_doors.value) : null;
+    payload.avg_rent = form.avg_rent?.value ? Number(form.avg_rent.value) : null;
+    payload.ownership = form.ownership?.value || null;
+    payload.current_management = form.current_management?.value || null;
+    payload.services_needed = form.services_needed?.value || null;
+    payload.main_problem = form.main_problem?.value || null;
+    payload.desired_start_date = form.desired_start_date?.value || null;
+    payload.best_call_time = form.best_call_time?.value || null;
   }
 
   let result;

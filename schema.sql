@@ -308,6 +308,18 @@ create table inquiries (
   email text not null,
   phone text,
   message text,
+  -- Champs structurés propres aux demandes de mandat (type='mandat') :
+  -- remplacent la zone de texte libre pour une meilleure qualification
+  -- des prospects par le CRM.
+  sector text,
+  num_doors int,
+  avg_rent numeric(10,2),
+  ownership text check (ownership in ('personnel','societe')),
+  current_management text check (current_management in ('autogere','sous_gestion')),
+  services_needed text,
+  main_problem text,
+  desired_start_date date,
+  best_call_time text,
   ai_category text,
   ai_summary text,
   ai_reply_sent boolean default false,

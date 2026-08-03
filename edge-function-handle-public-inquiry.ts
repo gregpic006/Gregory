@@ -13,7 +13,11 @@ Deno.serve(async (req) => {
   }
   try {
     const body = await req.json().catch(() => ({}));
-    const { type, unit_id, full_name, email, phone, message, website, consent } = body;
+    const {
+      type, unit_id, full_name, email, phone, message, website, consent,
+      sector, num_doors, avg_rent, ownership, current_management,
+      services_needed, main_problem, desired_start_date, best_call_time,
+    } = body;
 
     // Honeypot : un bot remplit ce champ invisible, un humain ne le voit jamais.
     if (website) {
@@ -84,6 +88,18 @@ Deno.serve(async (req) => {
       message: message ? String(message).trim().slice(0, MESSAGE_MAX_LENGTH) : null,
     };
     if (type === "visite" && unit_id) insertPayload.unit_id = unit_id;
+
+    if (type === "mandat") {
+      if (sector) insertPayload.sector = String(sector).trim().slice(0, 300);
+      if (num_doors != null && Number.isFinite(Number(num_doors))) insertPayload.num_doors = Math.max(0, Math.round(Number(num_doors)));
+      if (avg_rent != null && Number.isFinite(Number(avg_rent))) insertPayload.avg_rent = Math.max(0, Number(avg_rent));
+      if (["personnel", "societe"].includes(ownership)) insertPayload.ownership = ownership;
+      if (["autogere", "sous_gestion"].includes(current_management)) insertPayload.current_management = current_management;
+      if (services_needed) insertPayload.services_needed = String(services_needed).trim().slice(0, 300);
+      if (main_problem) insertPayload.main_problem = String(main_problem).trim().slice(0, 300);
+      if (desired_start_date) insertPayload.desired_start_date = desired_start_date;
+      if (best_call_time) insertPayload.best_call_time = String(best_call_time).trim().slice(0, 100);
+    }
 
     const insertRes = await fetch(`${supabaseUrl}/rest/v1/inquiries`, {
       method: "POST", headers: adminHeaders, body: JSON.stringify(insertPayload),
