@@ -182,6 +182,29 @@ create table approvals (
   created_at timestamptz default now()
 );
 
+-- ============ PROSPECTS (pipeline CRM — acquisition propriétaires) ============
+create table prospects (
+  id uuid primary key default gen_random_uuid(),
+  inquiry_id uuid references inquiries(id),
+  full_name text not null,
+  email text,
+  phone text,
+  company_name text,
+  num_doors int,
+  avg_rent numeric(10,2),
+  potential_monthly_revenue numeric(10,2),   -- num_doors * avg_rent * 6%
+  stage text default 'new'
+    check (stage in ('new','contacted','interested','proposal_sent','signed','lost')),
+  interest_level text check (interest_level in ('chaud','tiede','froid')),
+  assigned_to text,
+  next_followup_date date,
+  call_history jsonb default '[]'::jsonb,
+  notes text,
+  created_at timestamptz default now()
+);
+-- Pas de policy RLS ouverte : accessible uniquement via le rôle
+-- service_role (fonction Edge "crm-api", gardée par is_admin).
+
 -- ============ REPORTS (rapports mensuels propriétaires) ============
 create table reports (
   id uuid primary key default gen_random_uuid(),
@@ -310,6 +333,7 @@ alter table messages enable row level security;
 alter table workers enable row level security;
 alter table inquiries enable row level security;
 alter table reports enable row level security;
+alter table prospects enable row level security;
 
 create policy "self" on users for select using (id = auth.uid());
 
@@ -762,6 +786,37 @@ $$;
 create trigger on_unit_listing_change
   before insert or update on units
   for each row execute function notify_listing_needed();
+
+-- ============================================================
+-- CRM COMMERCIAL — création automatique d'un prospect
+-- ============================================================
+-- Chaque demande de mandat (inquiries.type = 'mandat', soumise
+-- depuis le site public) déclenche la fonction Edge
+-- "handle-mandat-inquiry" : elle tente d'extraire le nombre de
+-- portes et le loyer moyen mentionnés dans le message, calcule la
+-- valeur potentielle (portes × loyer moyen × 6 %) et crée la ligne
+-- correspondante dans le pipeline "prospects".
+create or replace function notify_new_mandat_inquiry()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.type = 'mandat' then
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-mandat-inquiry',
+      body := jsonb_build_object('inquiry_id', new.id),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+  end if;
+  return new;
+end;
+$$;
+
+create trigger on_mandat_inquiry_insert
+  after insert on inquiries
+  for each row execute function notify_new_mandat_inquiry();
 
 -- ============================================================
 -- STOCKAGE — upload de documents (baux, mandats, rapports)

@@ -84,6 +84,22 @@
   <table><thead><tr><th>Client</th><th>Téléphone</th><th class="num">Immeubles</th><th class="num">Logements</th><th class="num">Occupés</th><th class="num">Revenu/mois</th></tr></thead>
     <tbody id="clients-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
   </table>
+
+  <h1 style="margin-top:40px;font-size:22px;">CRM — Prospects propriétaires</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Pipeline d'acquisition, trié par valeur potentielle</p>
+
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom</label><input type="text" id="pr-name" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel</label><input type="email" id="pr-email" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone</label><input type="text" id="pr-phone" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Portes</label><input type="number" id="pr-doors" style="padding:8px;border:1px solid var(--line);width:80px;"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Loyer moyen</label><input type="number" id="pr-rent" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+    <button onclick="createProspect()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter un prospect</button>
+  </div>
+
+  <table><thead><tr><th>Prospect</th><th class="num">Portes</th><th class="num">Revenu potentiel/mois</th><th>Intérêt</th><th>Statut</th><th>Prochain suivi</th><th></th></tr></thead>
+    <tbody id="prospects-body"><tr class="empty-row"><td colspan="7">Chargement...</td></tr></tbody>
+  </table>
 </div>
 
 <script>
@@ -145,6 +161,65 @@ async function loadAdminDashboard(){
       <td class="num">${c.occupied_count}</td>
       <td class="num">${c.monthly_revenue.toLocaleString('fr-CA')} $</td>
     </tr>`).join('') : '<tr class="empty-row"><td colspan="6">Aucun client.</td></tr>';
+
+  await loadProspects();
+}
+
+const stageLabel = { new:'Nouveau', contacted:'Contacté', interested:'Intéressé', proposal_sent:'Proposition envoyée', signed:'Signé', lost:'Perdu' };
+const stageOptions = Object.keys(stageLabel).map(s => `<option value="${s}">${stageLabel[s]}</option>`).join('');
+
+async function callCrmApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('crm-api', { body: payload });
+  if(error){ alert('Erreur CRM : ' + error.message); return null; }
+  return data;
+}
+
+async function loadProspects(){
+  const data = await callCrmApi({ action: 'list' });
+  const body = document.getElementById('prospects-body');
+  const prospects = data?.prospects || [];
+  if(!prospects.length){
+    body.innerHTML = '<tr class="empty-row"><td colspan="7">Aucun prospect.</td></tr>';
+    return;
+  }
+  body.innerHTML = prospects.map(p => `
+    <tr>
+      <td>${p.full_name}<br><span style="color:var(--muted);font-size:11.5px;">${p.email || ''} ${p.phone || ''}</span></td>
+      <td class="num">${p.num_doors ?? '—'}</td>
+      <td class="num">${p.potential_monthly_revenue != null ? Number(p.potential_monthly_revenue).toLocaleString('fr-CA') + ' $' : '—'}</td>
+      <td>${p.interest_level || '—'}</td>
+      <td><select onchange="updateProspectStage('${p.id}', this.value)">${stageOptions.replace(`value="${p.stage}"`, `value="${p.stage}" selected`)}</select></td>
+      <td>${p.next_followup_date || '—'}</td>
+      <td><button onclick="promptAddCall('${p.id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">+ Appel</button></td>
+    </tr>`).join('');
+}
+
+async function createProspect(){
+  const full_name = document.getElementById('pr-name').value;
+  const email = document.getElementById('pr-email').value;
+  const phone = document.getElementById('pr-phone').value;
+  const num_doors = document.getElementById('pr-doors').value;
+  const avg_rent = document.getElementById('pr-rent').value;
+  if(!full_name){ alert('Le nom est requis.'); return; }
+  await callCrmApi({ action: 'create', full_name, email, phone, num_doors: num_doors ? Number(num_doors) : null, avg_rent: avg_rent ? Number(avg_rent) : null });
+  document.getElementById('pr-name').value = '';
+  document.getElementById('pr-email').value = '';
+  document.getElementById('pr-phone').value = '';
+  document.getElementById('pr-doors').value = '';
+  document.getElementById('pr-rent').value = '';
+  await loadProspects();
+}
+
+async function updateProspectStage(prospect_id, stage){
+  await callCrmApi({ action: 'update_stage', prospect_id, stage });
+  await loadProspects();
+}
+
+async function promptAddCall(prospect_id){
+  const transcript = prompt('Résumé ou transcription de l\'appel :');
+  if(!transcript) return;
+  await callCrmApi({ action: 'add_call', prospect_id, transcript });
+  await loadProspects();
 }
 
 init();
