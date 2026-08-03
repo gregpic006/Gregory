@@ -22,7 +22,7 @@ create extension if not exists "pgcrypto";
 create table users (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null,
-  role text not null check (role in ('owner','tenant','admin')),
+  role text not null check (role in ('owner','tenant','admin','worker')),
   is_admin boolean default false,
   created_at timestamptz default now()
 );
@@ -110,16 +110,20 @@ create table payments (
   due_date date not null,
   paid_date date,
   status text default 'pending' check (status in ('paid','late','pending')),
+  reminder_upcoming_sent boolean default false,
+  reminder_late_sent boolean default false,
   created_at timestamptz default now()
 );
 
 -- ============ WORKERS (répertoire) ============
 create table workers (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid references users(id),   -- nullable: accès portail travailleur optionnel
   name text not null,
   specialty text,
   rbq_license text,
   phone text,
+  email text,
   created_at timestamptz default now()
 );
 
@@ -144,6 +148,8 @@ create table work_orders (
   worker_id uuid references workers(id),
   description text not null,
   estimated_cost numeric(10,2),
+  worker_pay numeric(10,2),        -- montant payé au travailleur pour ce travail
+  worker_notified boolean default false,
   status text default 'open'
     check (status in ('open','assigned','in_progress','completed')),
   created_at timestamptz default now()
@@ -456,6 +462,96 @@ $$;
 create trigger on_service_request_insert
   after insert on service_requests
   for each row execute function notify_new_service_request();
+
+-- ============================================================
+-- RAPPELS DE PAIEMENT AUTOMATIQUES
+-- ============================================================
+-- Tâche cron quotidienne (pg_cron) : marque les paiements en retard
+-- (status 'pending' dont l'échéance est passée -> 'late'), puis
+-- déclenche la fonction Edge "handle-payment-reminder" pour chaque
+-- paiement qui approche de son échéance (rappel préventif, 3 jours
+-- avant) ou qui vient de passer en retard. Chaque rappel n'est
+-- envoyé qu'une seule fois par paiement (colonnes reminder_*_sent).
+create extension if not exists pg_cron with schema extensions;
+
+create or replace function trigger_payment_reminders()
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  p record;
+begin
+  update payments set status = 'late'
+  where status = 'pending' and due_date < current_date;
+
+  for p in
+    select id from payments
+    where status = 'pending'
+    and due_date between current_date and current_date + interval '3 days'
+    and reminder_upcoming_sent = false
+  loop
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-payment-reminder',
+      body := jsonb_build_object('payment_id', p.id, 'reminder_type', 'upcoming'),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+    update payments set reminder_upcoming_sent = true where id = p.id;
+  end loop;
+
+  for p in
+    select id from payments
+    where status = 'late' and reminder_late_sent = false
+  loop
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-payment-reminder',
+      body := jsonb_build_object('payment_id', p.id, 'reminder_type', 'late'),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+    update payments set reminder_late_sent = true where id = p.id;
+  end loop;
+end;
+$$;
+
+select cron.schedule('daily-payment-reminders', '0 13 * * *', $$select trigger_payment_reminders()$$);
+
+-- ============================================================
+-- NOTIFICATION DES TRAVAILLEURS — nouvelle job assignée
+-- ============================================================
+-- Dès qu'un work_order se voit attribuer (ou changer) un worker_id,
+-- déclenche la fonction Edge "handle-worker-job-assigned" qui
+-- envoie au travailleur un courriel avec les détails du travail et
+-- la paie prévue (worker_pay). Un seul envoi par affectation
+-- (worker_notified).
+create or replace function notify_worker_new_job()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.worker_id is not null
+     and (TG_OP = 'INSERT' or old.worker_id is distinct from new.worker_id)
+     and coalesce(new.worker_notified, false) = false then
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-worker-job-assigned',
+      body := jsonb_build_object('work_order_id', new.id),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+    new.worker_notified := true;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger on_work_order_worker_assigned
+  before insert or update on work_orders
+  for each row execute function notify_worker_new_job();
 
 -- ============================================================
 -- STOCKAGE — upload de documents (baux, mandats, rapports)
