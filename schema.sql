@@ -23,8 +23,13 @@ create table users (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null,
   role text not null check (role in ('owner','tenant','admin')),
+  is_admin boolean default false,
   created_at timestamptz default now()
 );
+-- is_admin est distinct de "role" : un même compte peut être à la
+-- fois "owner" (rôle métier, gère ses propres immeubles) ET admin
+-- (accès à portail-admin.html, vue multi-clients). Marquer un compte
+-- admin : update users set is_admin = true where id = '<uuid>';
 
 -- Crée automatiquement une ligne "users" quand un compte Auth est créé.
 -- Le rôle par défaut est 'owner' — à ajuster à l'inscription si besoin.
