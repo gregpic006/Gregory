@@ -125,6 +125,9 @@ create table service_requests (
   tenant_id uuid references tenants(id),
   description text not null,
   status text default 'open' check (status in ('open','in_progress','closed')),
+  ai_category text,
+  ai_estimated_cost numeric(10,2),
+  ai_urgency text,
   created_at timestamptz default now()
 );
 
@@ -350,6 +353,19 @@ create policy "own service_requests as tenant select" on service_requests for se
 create policy "own service_requests as tenant insert" on service_requests for insert
   with check (tenant_id = auth_tenant_id());
 
+-- Gestion des travaux par le propriétaire : créer un work_order à
+-- partir d'une demande de service, le mettre à jour (complétion),
+-- enregistrer la dépense finale, et faire avancer le statut de la
+-- demande de service.
+create policy "own work_orders insert" on work_orders for insert
+  with check (unit_id in (select owned_unit_ids()));
+create policy "own work_orders update" on work_orders for update
+  using (unit_id in (select owned_unit_ids()));
+create policy "own expenses insert" on expenses for insert
+  with check (building_id in (select owned_building_ids()));
+create policy "own service_requests update" on service_requests for update
+  using (unit_id in (select owned_unit_ids()));
+
 -- ============================================================
 -- AUTOMATISATION IA — traitement des demandes du formulaire
 -- ============================================================
@@ -380,6 +396,57 @@ $$;
 create trigger on_inquiry_insert
   after insert on inquiries
   for each row execute function notify_new_inquiry();
+
+-- Approuve automatiquement (crée une ligne "approvals" en attente)
+-- tout work_order dont le coût estimé dépasse le plafond du
+-- propriétaire concerné.
+create or replace function check_work_order_approval()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_owner_id uuid;
+  v_cap numeric;
+begin
+  select o.id, o.spending_cap into v_owner_id, v_cap
+  from owners o
+  join buildings b on b.owner_id = o.id
+  join units u on u.building_id = b.id
+  where u.id = NEW.unit_id;
+
+  if NEW.estimated_cost is not null and NEW.estimated_cost > v_cap then
+    insert into approvals (work_order_id, owner_id, requested_amount, spending_cap_at_request, status)
+    values (NEW.id, v_owner_id, NEW.estimated_cost, v_cap, 'pending');
+  end if;
+  return NEW;
+end;
+$$;
+
+create trigger on_work_order_insert
+  after insert on work_orders
+  for each row execute function check_work_order_approval();
+
+-- Déclenche la fonction Edge "handle-service-request" à chaque
+-- nouvelle demande de service : l'IA catégorise le problème, propose
+-- une estimation de coût préliminaire et un niveau d'urgence, affichés
+-- directement dans l'onglet "Travaux" du propriétaire.
+create or replace function notify_new_service_request()
+returns trigger language plpgsql as $$
+begin
+  perform net.http_post(
+    url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-service-request',
+    body := jsonb_build_object('type', 'INSERT', 'table', 'service_requests', 'record', to_jsonb(NEW)),
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+      'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+    )
+  );
+  return NEW;
+end;
+$$;
+
+create trigger on_service_request_insert
+  after insert on service_requests
+  for each row execute function notify_new_service_request();
 
 -- ============================================================
 -- NOTE IMPORTANTE
