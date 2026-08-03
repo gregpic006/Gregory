@@ -155,6 +155,7 @@
       <button class="tab-btn" data-tab="inquiries" onclick="showTab('inquiries')">Demandes</button>
       <button class="tab-btn" data-tab="documents" onclick="showTab('documents')">Documents</button>
       <button class="tab-btn" data-tab="messages" onclick="showTab('messages')">Messages</button>
+      <button class="tab-btn" data-tab="reports" onclick="showTab('reports')">Rapports mensuels</button>
       <div class="signout">
         <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
       </div>
@@ -249,6 +250,11 @@
         <div id="messages-body" style="margin-bottom:16px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
         <div class="f"><label>Nouveau message</label><textarea id="message-text" style="width:100%;padding:11px 12px;border:1px solid var(--line);background:var(--paper-2);font-size:13.5px;font-family:'Inter',sans-serif;min-height:80px;"></textarea></div>
         <button class="btn-small" onclick="sendMessage()">Envoyer</button>
+      </section>
+
+      <section id="reports" class="section">
+        <div class="toolbar"><h2>Rapports mensuels</h2></div>
+        <div id="reports-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
       </section>
     </main>
   </div>
@@ -381,6 +387,7 @@ async function loadBuildings(){
   await loadInquiries();
   await loadDocuments();
   await loadMessages();
+  await loadReports();
 }
 
 function renderOverview(buildings){
@@ -683,6 +690,34 @@ async function loadMessages(){
       <div class="desc">
         <b>${m.sender === 'owner' ? 'Toi' : 'Équipe Portail'} · ${new Date(m.created_at).toLocaleString('fr-CA')}</b>
         <span>${m.body}</span>
+      </div>
+    </div>`).join('');
+}
+
+async function loadReports(){
+  const { data } = await supabaseClient
+    .from('reports')
+    .select('*')
+    .eq('owner_id', ownerRecord.id)
+    .order('period_start', { ascending: false });
+
+  const body = document.getElementById('reports-body');
+  if(!data || !data.length){
+    body.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun rapport disponible pour l\'instant. Le premier rapport sera généré automatiquement au début du mois prochain.</p>';
+    return;
+  }
+  body.innerHTML = data.map(r => `
+    <div class="approve-row" style="flex-direction:column;align-items:flex-start;gap:10px;">
+      <b>${new Date(r.period_start).toLocaleDateString('fr-CA', {month:'long', year:'numeric'})}</b>
+      <span style="color:var(--muted);font-size:13px;">${r.summary || ''}</span>
+      <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:12.5px;">
+        <span>Loyers reçus : <b>${Number(r.rent_received ?? 0).toLocaleString('fr-CA')} $</b> / ${Number(r.rent_expected ?? 0).toLocaleString('fr-CA')} $</span>
+        <span>Retards : <b>${r.late_count ?? 0}</b></span>
+        <span>Occupation : <b>${r.occupancy_rate ?? 0} %</b></span>
+        <span>Dépenses : <b>${Number(r.expenses_total ?? 0).toLocaleString('fr-CA')} $</b></span>
+        <span>Frais de gestion : <b>${Number(r.management_fee ?? 0).toLocaleString('fr-CA')} $</b></span>
+        <span>Renouvellements à venir : <b>${r.renewals_upcoming ?? 0}</b></span>
+        <span>Net à te remettre : <b>${Number(r.net_due_to_owner ?? 0).toLocaleString('fr-CA')} $</b></span>
       </div>
     </div>`).join('');
 }

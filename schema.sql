@@ -179,6 +179,26 @@ create table approvals (
   created_at timestamptz default now()
 );
 
+-- ============ REPORTS (rapports mensuels propriétaires) ============
+create table reports (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid references owners(id) on delete cascade,
+  period_start date not null,
+  period_end date not null,
+  rent_expected numeric(10,2),
+  rent_received numeric(10,2),
+  late_count int,
+  occupancy_rate numeric(5,2),
+  expenses_total numeric(10,2),
+  work_orders_completed int,
+  work_orders_in_progress int,
+  management_fee numeric(10,2),
+  net_due_to_owner numeric(10,2),
+  renewals_upcoming int,
+  summary text,
+  created_at timestamptz default now()
+);
+
 -- ============ DOCUMENTS ============
 create table documents (
   id uuid primary key default gen_random_uuid(),
@@ -280,6 +300,7 @@ alter table documents enable row level security;
 alter table messages enable row level security;
 alter table workers enable row level security;
 alter table inquiries enable row level security;
+alter table reports enable row level security;
 
 create policy "self" on users for select using (id = auth.uid());
 
@@ -372,6 +393,9 @@ create policy "own service_requests as tenant insert" on service_requests for in
 -- partir d'une demande de service, le mettre à jour (complétion),
 -- enregistrer la dépense finale, et faire avancer le statut de la
 -- demande de service.
+create policy "own reports" on reports for select
+  using (owner_id = auth_owner_id());
+
 create policy "own work_orders insert" on work_orders for insert
   with check (unit_id in (select owned_unit_ids()));
 create policy "own work_orders update" on work_orders for update
@@ -626,6 +650,40 @@ $$;
 create trigger on_approval_decided
   after update on approvals
   for each row execute function handle_approval_decision();
+
+-- ============================================================
+-- RAPPORTS PROPRIÉTAIRES MENSUELS
+-- ============================================================
+-- Le 1er de chaque mois à 7h (heure de l'Est), génère le rapport du
+-- mois précédent pour chaque propriétaire en déclenchant la fonction
+-- Edge "generate-owner-report", qui calcule les chiffres et rédige
+-- un résumé via l'IA, puis insère la ligne dans la table "reports".
+create or replace function trigger_monthly_owner_reports()
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  o record;
+  v_period_start date := date_trunc('month', current_date - interval '1 month')::date;
+  v_period_end date := (date_trunc('month', current_date) - interval '1 day')::date;
+begin
+  for o in select id from owners loop
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/generate-owner-report',
+      body := jsonb_build_object(
+        'owner_id', o.id,
+        'period_start', v_period_start,
+        'period_end', v_period_end
+      ),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+  end loop;
+end;
+$$;
+
+select cron.schedule('monthly-owner-reports', '0 11 1 * *', $$select trigger_monthly_owner_reports()$$);
 
 -- ============================================================
 -- STOCKAGE — upload de documents (baux, mandats, rapports)
