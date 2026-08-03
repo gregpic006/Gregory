@@ -77,6 +77,16 @@
   .approve-actions button{border:1px solid var(--ink);background:none;padding:7px 14px;font-size:12.5px;cursor:pointer;font-family:'Inter',sans-serif;}
   .approve-actions button.accept:hover{background:var(--sage);border-color:var(--sage);color:var(--paper);}
   .approve-actions button.reject:hover{background:var(--rust);border-color:var(--rust);color:var(--paper);}
+
+  .wo-form{display:none;background:var(--paper);border:1px solid var(--line);padding:14px 16px;margin:-8px 0 12px;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  .wo-form.open{display:flex;}
+  .wo-form .f{display:flex;flex-direction:column;gap:4px;}
+  .wo-form label{font-size:11px;color:var(--muted);}
+  .wo-form select, .wo-form input{padding:8px 10px;border:1px solid var(--line);background:var(--paper-2);font-size:13px;font-family:'Inter',sans-serif;}
+  .wo-form button{border:1px solid var(--ink);background:var(--ink);color:var(--paper);padding:8px 16px;font-size:12.5px;cursor:pointer;font-family:'Inter',sans-serif;}
+  .wo-form button:hover{background:var(--brass-dark);border-color:var(--brass-dark);}
+  .btn-small{border:1px solid var(--ink);background:none;padding:6px 12px;font-size:11.5px;cursor:pointer;font-family:'Inter',sans-serif;}
+  .btn-small:hover{background:var(--ink);color:var(--paper);}
 </style>
 </head>
 <body>
@@ -107,6 +117,7 @@
       <button class="tab-btn" data-tab="units" onclick="showTab('units')">Logements et locataires</button>
       <button class="tab-btn" data-tab="payments" onclick="showTab('payments')">Loyers et paiements</button>
       <button class="tab-btn" data-tab="expenses" onclick="showTab('expenses')">Dépenses</button>
+      <button class="tab-btn" data-tab="workorders" onclick="showTab('workorders')">Travaux</button>
       <button class="tab-btn" data-tab="approvals" onclick="showTab('approvals')">Travaux à approuver</button>
       <button class="tab-btn" data-tab="inquiries" onclick="showTab('inquiries')">Demandes</button>
       <div class="signout">
@@ -154,6 +165,17 @@
         </table>
       </section>
 
+      <section id="workorders" class="section">
+        <div class="toolbar"><h2>Travaux</h2></div>
+        <h3 style="font-family:'Fraunces',serif;font-size:15px;font-weight:600;margin-bottom:10px;">Demandes de service ouvertes</h3>
+        <div id="service-requests-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
+        <h3 style="font-family:'Fraunces',serif;font-size:15px;font-weight:600;margin:22px 0 10px;">Travaux en cours</h3>
+        <table><thead><tr><th>Unité</th><th>Description</th><th>Travailleur</th><th>Coût estimé</th><th>Statut</th><th></th></tr></thead>
+          <tbody id="workorders-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
+        </table>
+      </section>
+
       <section id="approvals" class="section">
         <div class="toolbar"><h2>Travaux à approuver</h2></div>
         <div id="approvals-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
@@ -179,6 +201,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
 
 let supabaseClient = null;
 let ownerRecord = null;
+let workersCache = [];
 
 function configIsSet(){
   return !SUPABASE_URL.startsWith('REMPLACER') && !SUPABASE_ANON_KEY.startsWith('REMPLACER');
@@ -245,6 +268,7 @@ async function loadBuildings(){
   renderUnitsTab(buildings || []);
   renderPaymentsTab(buildings || []);
   await loadExpenses();
+  await loadWorkTab();
   await loadApprovals();
   await loadInquiries();
 }
@@ -307,6 +331,129 @@ async function loadExpenses(){
   body.innerHTML = (data && data.length)
     ? data.map(e => `<tr><td>${e.description}</td><td>${Number(e.amount).toLocaleString('fr-CA')} $</td><td>${e.expense_date}</td></tr>`).join('')
     : '<tr class="empty-row"><td colspan="3">Aucune dépense.</td></tr>';
+}
+
+async function loadWorkTab(){
+  if(!workersCache.length){
+    const { data } = await supabaseClient.from('workers').select('*');
+    workersCache = data || [];
+  }
+  await loadServiceRequests();
+  await loadWorkOrders();
+}
+
+async function loadServiceRequests(){
+  const buildingIds = (await supabaseClient.from('buildings').select('id').eq('owner_id', ownerRecord.id)).data?.map(b=>b.id) || [];
+  const unitIds = (await supabaseClient.from('units').select('id').in('building_id', buildingIds)).data?.map(u=>u.id) || [];
+  const { data } = await supabaseClient
+    .from('service_requests')
+    .select('*, units(unit_number), tenants(full_name)')
+    .in('unit_id', unitIds)
+    .eq('status', 'open');
+
+  const container = document.getElementById('service-requests-body');
+  if(!data || !data.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune demande de service ouverte.</p>';
+    return;
+  }
+
+  const workerOptions = workersCache.map(w => `<option value="${w.id}">${w.name} — ${w.specialty || ''}</option>`).join('');
+
+  container.innerHTML = data.map(sr => `
+    <div class="approve-row">
+      <div class="desc">
+        <b>Unité ${sr.units?.unit_number ?? ''} — ${sr.tenants?.full_name ?? ''}</b>
+        <span>${sr.description}</span>
+      </div>
+      <div class="approve-actions">
+        <button onclick="toggleWoForm('${sr.id}')">Créer un travail</button>
+      </div>
+    </div>
+    <div class="wo-form" id="wo-form-${sr.id}">
+      <div class="f"><label>Travailleur</label>
+        <select id="wo-worker-${sr.id}"><option value="">— Choisir —</option>${workerOptions}</select>
+      </div>
+      <div class="f"><label>Description</label><input type="text" id="wo-desc-${sr.id}" value="${sr.description.replace(/"/g,'&quot;')}"></div>
+      <div class="f"><label>Coût estimé ($)</label><input type="number" id="wo-cost-${sr.id}" min="0" step="0.01"></div>
+      <button onclick="createWorkOrder('${sr.id}', '${sr.unit_id}')">Assigner</button>
+    </div>`).join('');
+}
+
+function toggleWoForm(serviceRequestId){
+  document.getElementById('wo-form-' + serviceRequestId).classList.toggle('open');
+}
+
+async function createWorkOrder(serviceRequestId, unitId){
+  const workerId = document.getElementById('wo-worker-' + serviceRequestId).value;
+  const description = document.getElementById('wo-desc-' + serviceRequestId).value;
+  const cost = document.getElementById('wo-cost-' + serviceRequestId).value;
+
+  if(!workerId || !description || !cost){
+    alert('Choisis un travailleur, une description et un coût estimé.');
+    return;
+  }
+
+  await supabaseClient.from('work_orders').insert({
+    service_request_id: serviceRequestId,
+    unit_id: unitId,
+    worker_id: workerId,
+    description,
+    estimated_cost: Number(cost),
+    status: 'assigned',
+  });
+  await supabaseClient.from('service_requests').update({ status: 'in_progress' }).eq('id', serviceRequestId);
+
+  await loadWorkTab();
+  await loadApprovals();
+}
+
+async function loadWorkOrders(){
+  const buildingIds = (await supabaseClient.from('buildings').select('id').eq('owner_id', ownerRecord.id)).data?.map(b=>b.id) || [];
+  const unitIds = (await supabaseClient.from('units').select('id').in('building_id', buildingIds)).data?.map(u=>u.id) || [];
+  const { data } = await supabaseClient
+    .from('work_orders')
+    .select('*, units(unit_number, building_id), workers(name)')
+    .in('unit_id', unitIds)
+    .neq('status', 'completed');
+
+  const body = document.getElementById('workorders-body');
+  if(!data || !data.length){
+    body.innerHTML = '<tr class="empty-row"><td colspan="6">Aucun travail en cours.</td></tr>';
+    return;
+  }
+  const statusLabel = { open:'Ouvert', assigned:'Assigné', in_progress:'En cours', completed:'Complété' };
+  body.innerHTML = data.map(wo => `
+    <tr>
+      <td>Unité ${wo.units?.unit_number ?? ''}</td>
+      <td>${wo.description}</td>
+      <td>${wo.workers?.name ?? '—'}</td>
+      <td>${wo.estimated_cost != null ? Number(wo.estimated_cost).toLocaleString('fr-CA') + ' $' : '—'}</td>
+      <td><span class="tag neutral">${statusLabel[wo.status] || wo.status}</span></td>
+      <td><button class="btn-small" onclick="completeWorkOrder('${wo.id}', '${wo.units.building_id}', '${wo.unit_id}', ${wo.estimated_cost})">Marquer complété</button></td>
+    </tr>`).join('');
+}
+
+async function completeWorkOrder(workOrderId, buildingId, unitId, estimatedCost){
+  const actualCost = prompt('Coût final réel ($) :', estimatedCost ?? 0);
+  if(actualCost === null) return;
+
+  const { data: wo } = await supabaseClient.from('work_orders').select('description, service_request_id').eq('id', workOrderId).single();
+
+  await supabaseClient.from('work_orders').update({ status: 'completed' }).eq('id', workOrderId);
+  if(wo?.service_request_id){
+    await supabaseClient.from('service_requests').update({ status: 'closed' }).eq('id', wo.service_request_id);
+  }
+  await supabaseClient.from('expenses').insert({
+    work_order_id: workOrderId,
+    building_id: buildingId,
+    unit_id: unitId,
+    description: wo?.description || 'Travaux complétés',
+    amount: Number(actualCost),
+    expense_date: new Date().toISOString().slice(0,10),
+  });
+
+  await loadWorkTab();
+  await loadExpenses();
 }
 
 async function loadApprovals(){
