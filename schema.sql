@@ -152,6 +152,7 @@ create table work_orders (
   description text not null,
   estimated_cost numeric(10,2),
   worker_pay numeric(10,2),        -- montant payé au travailleur pour ce travail
+  coordination_fee numeric(10,2),  -- frais Portail (10 % de worker_pay), facturés au propriétaire
   worker_notified boolean default false,
   status text default 'open'
     check (status in ('open','assigned','in_progress','completed','cancelled')),
@@ -307,6 +308,11 @@ returns uuid
 language sql stable security definer set search_path = public set row_security = off
 as $$ select id from owners where user_id = auth.uid() $$;
 
+create or replace function auth_is_admin()
+returns boolean
+language sql stable security definer set search_path = public set row_security = off
+as $$ select coalesce((select is_admin from users where id = auth.uid()), false) $$;
+
 create or replace function auth_tenant_id()
 returns uuid
 language sql stable security definer set search_path = public set row_security = off
@@ -411,20 +417,29 @@ create policy "public read available units" on units for select
 create policy "public read buildings with available units" on buildings for select
   using (id in (select building_id from units where status in ('available','soon_available')));
 
--- workers : pas de RLS restrictif nécessaire pour l'instant
--- (répertoire interne, accès géré via la clé service_role côté admin)
-create policy "authenticated read workers" on workers for select
-  using (auth.role() = 'authenticated');
+-- workers : répertoire interne. Un propriétaire doit pouvoir voir
+-- les travailleurs (pour les afficher dans ses travaux/candidats),
+-- un admin aussi. Un locataire ou un visiteur n'a aucune raison
+-- d'y avoir accès (nom, téléphone, courriel, licence RBQ).
+create policy "owner or admin read workers" on workers for select
+  using (auth_is_admin() or auth_owner_id() is not null);
 
 -- inquiries : n'importe qui peut soumettre une demande via le
--- formulaire public ; seul un compte connecté (le gestionnaire)
--- peut les consulter et les mettre à jour.
+-- formulaire public. La lecture/mise à jour complète est réservée
+-- à l'admin (les demandes de mandat sont des prospects commerciaux
+-- confidentiels — un propriétaire ne doit JAMAIS voir les demandes
+-- d'un autre client ni celles d'autres prospects). Un propriétaire
+-- ne peut voir/gérer que les demandes de visite pour SES unités.
 create policy "public insert inquiries" on inquiries for insert
   with check (true);
-create policy "authenticated read inquiries" on inquiries for select
-  using (auth.role() = 'authenticated');
-create policy "authenticated update inquiries" on inquiries for update
-  using (auth.role() = 'authenticated');
+create policy "admin read inquiries" on inquiries for select
+  using (auth_is_admin());
+create policy "admin update inquiries" on inquiries for update
+  using (auth_is_admin());
+create policy "owner read own unit visit inquiries" on inquiries for select
+  using (type = 'visite' and unit_id in (select owned_unit_ids()));
+create policy "owner update own unit visit inquiries" on inquiries for update
+  using (type = 'visite' and unit_id in (select owned_unit_ids()));
 
 -- Accès en libre-service pour un locataire connecté à son propre
 -- bail, unité, immeuble, paiements et demandes de service.

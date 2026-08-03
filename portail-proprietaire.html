@@ -409,12 +409,17 @@ function renderOverview(buildings){
   const addr = buildings.map(b=>b.address).join(', ') || 'Aucun immeuble';
   document.getElementById('owner-subtitle').textContent = addr;
 
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().slice(0,10);
+
   let occupied = 0, total = 0, revenue = 0, late = 0;
   buildings.forEach(b => (b.units||[]).forEach(u => {
     total++;
     if(u.status === 'occupied') occupied++;
     (u.leases||[]).forEach(l => (l.payments||[]).forEach(p => {
-      if(p.status === 'paid') revenue += Number(p.amount);
+      const inCurrentMonth = p.due_date >= monthStart && p.due_date < monthEnd;
+      if(p.status === 'paid' && inCurrentMonth) revenue += Number(p.amount);
       if(p.status === 'late') late++;
     }));
   }));
@@ -512,8 +517,10 @@ async function loadServiceRequests(){
         <select id="wo-worker-${sr.id}"><option value="">— Choisir —</option>${workerOptions}</select>
       </div>
       <div class="f"><label>Description</label><input type="text" id="wo-desc-${sr.id}" value="${sr.description.replace(/"/g,'&quot;')}"></div>
-      <div class="f"><label>Coût estimé ($)</label><input type="number" id="wo-cost-${sr.id}" min="0" step="0.01" value="${sr.ai_estimated_cost ?? ''}"></div>
-      <div class="f"><label>Paie du travailleur ($)</label><input type="number" id="wo-pay-${sr.id}" min="0" step="0.01"></div>
+      <div class="f"><label>Paie du travailleur ($)</label><input type="number" id="wo-pay-${sr.id}" min="0" step="0.01" oninput="updateWoTotal('${sr.id}')"></div>
+      <div class="f"><label>Frais de coordination Portail (10 %)</label><input type="text" id="wo-fee-${sr.id}" disabled value="0,00 $"></div>
+      <div class="f"><label>Total facturé au propriétaire ($)</label><input type="text" id="wo-cost-${sr.id}" disabled value="0,00 $"></div>
+      <p style="font-size:11.5px;color:var(--muted);width:100%;">Estimation IA du coût des travaux : ${sr.ai_estimated_cost != null ? Number(sr.ai_estimated_cost).toLocaleString('fr-CA') + ' $' : 'non disponible'}</p>
       <button onclick="createWorkOrder('${sr.id}', '${sr.unit_id}')">Assigner</button>
     </div>`;
   }).join('');
@@ -523,22 +530,34 @@ function toggleWoForm(serviceRequestId){
   document.getElementById('wo-form-' + serviceRequestId).classList.toggle('open');
 }
 
+function updateWoTotal(serviceRequestId){
+  const pay = Number(document.getElementById('wo-pay-' + serviceRequestId).value) || 0;
+  const fee = Math.round(pay * 0.10 * 100) / 100;
+  const total = Math.round((pay + fee) * 100) / 100;
+  document.getElementById('wo-fee-' + serviceRequestId).value = fee.toLocaleString('fr-CA') + ' $';
+  document.getElementById('wo-cost-' + serviceRequestId).value = total.toLocaleString('fr-CA') + ' $';
+}
+
 async function createWorkOrder(serviceRequestId, unitId){
   const workerId = document.getElementById('wo-worker-' + serviceRequestId).value;
   const description = document.getElementById('wo-desc-' + serviceRequestId).value;
-  const cost = document.getElementById('wo-cost-' + serviceRequestId).value;
+  const workerPay = Number(document.getElementById('wo-pay-' + serviceRequestId).value);
 
-  if(!workerId || !description || !cost){
-    alert('Choisis un travailleur, une description et un coût estimé.');
+  if(!workerId || !description || !workerPay){
+    alert('Choisis un travailleur, une description et la paie du travailleur.');
     return;
   }
+  const coordinationFee = Math.round(workerPay * 0.10 * 100) / 100;
+  const totalCost = Math.round((workerPay + coordinationFee) * 100) / 100;
 
   await supabaseClient.from('work_orders').insert({
     service_request_id: serviceRequestId,
     unit_id: unitId,
     worker_id: workerId,
     description,
-    estimated_cost: Number(cost),
+    worker_pay: workerPay,
+    coordination_fee: coordinationFee,
+    estimated_cost: totalCost,
     status: 'assigned',
   });
   await supabaseClient.from('service_requests').update({ status: 'in_progress' }).eq('id', serviceRequestId);
