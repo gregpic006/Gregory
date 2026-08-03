@@ -313,7 +313,7 @@ async function loadLogements(){
   const list = document.getElementById('listings');
   const { data: units, error } = await supabaseClient
     .from('units')
-    .select('id, unit_number, unit_type, rent, status, buildings(address), leases(end_date, status)')
+    .select('id, unit_number, unit_type, rent, status, listing_description, buildings(address), leases(end_date, status)')
     .in('status', ['available', 'soon_available']);
 
   if(error || !units || !units.length){
@@ -337,6 +337,7 @@ async function loadLogements(){
       <div class="body">
         <h3>${u.unit_type || ''} — Unité ${u.unit_number}</h3>
         <p class="addr">${u.buildings?.address || ''}</p>
+        ${u.listing_description ? `<p style="font-size:13px;color:var(--muted);margin:6px 0;">${u.listing_description}</p>` : ''}
         <div class="meta">
           <span class="price">${Number(u.rent).toLocaleString('fr-CA')} $/mois</span>
           <span>Dispo: ${dispo}</span>

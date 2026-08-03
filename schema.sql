@@ -77,6 +77,9 @@ create table units (
   rent numeric(10,2),
   status text not null default 'occupied'
     check (status in ('occupied','available','soon_available')),
+  status_changed_at timestamptz default now(),
+  listing_description text,
+  suggested_rent numeric(10,2),
   created_at timestamptz default now()
 );
 
@@ -719,6 +722,46 @@ $$;
 create trigger on_document_insert
   after insert on documents
   for each row execute function notify_new_document();
+
+-- ============================================================
+-- LOCATION DES LOGEMENTS — annonce générée automatiquement
+-- ============================================================
+-- Dès qu'une unité devient "available"/"soon_available" (ou que son
+-- loyer est ajusté pendant qu'elle l'est déjà), déclenche la
+-- fonction Edge "generate-listing" qui rédige une annonce et
+-- suggère un loyer basé sur les unités comparables du portefeuille.
+-- status_changed_at sert à calculer depuis combien de temps le
+-- logement est vacant (détection d'anomalie côté portail).
+create or replace function notify_listing_needed()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.status in ('available','soon_available')
+     and (
+       TG_OP = 'INSERT'
+       or old.status is distinct from new.status
+       or old.rent is distinct from new.rent
+     )
+  then
+    if TG_OP = 'UPDATE' and old.status is distinct from new.status then
+      new.status_changed_at := now();
+    end if;
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/generate-listing',
+      body := jsonb_build_object('unit_id', new.id),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+  end if;
+  return new;
+end;
+$$;
+
+create trigger on_unit_listing_change
+  before insert or update on units
+  for each row execute function notify_listing_needed();
 
 -- ============================================================
 -- STOCKAGE — upload de documents (baux, mandats, rapports)

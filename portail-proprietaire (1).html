@@ -148,6 +148,7 @@
       <button class="tab-btn active" data-tab="overview" onclick="showTab('overview')">Vue d'ensemble</button>
       <button class="tab-btn" data-tab="buildings" onclick="showTab('buildings')">Immeubles</button>
       <button class="tab-btn" data-tab="units" onclick="showTab('units')">Logements et locataires</button>
+      <button class="tab-btn" data-tab="rentals" onclick="showTab('rentals')">Location</button>
       <button class="tab-btn" data-tab="payments" onclick="showTab('payments')">Loyers et paiements</button>
       <button class="tab-btn" data-tab="expenses" onclick="showTab('expenses')">Dépenses</button>
       <button class="tab-btn" data-tab="workorders" onclick="showTab('workorders')">Travaux</button>
@@ -185,6 +186,11 @@
         <table><thead><tr><th>Unité</th><th>Locataire</th><th>Loyer</th><th>Fin de bail</th><th>Statut</th></tr></thead>
           <tbody id="units-body"><tr class="empty-row"><td colspan="5">Chargement...</td></tr></tbody>
         </table>
+      </section>
+
+      <section id="rentals" class="section">
+        <div class="toolbar"><h2>Location</h2></div>
+        <div id="rentals-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
       </section>
 
       <section id="payments" class="section">
@@ -395,6 +401,7 @@ async function loadBuildings(){
   await loadDocuments();
   await loadMessages();
   await loadReports();
+  await loadRentals();
 }
 
 function renderOverview(buildings){
@@ -759,6 +766,69 @@ async function loadReports(){
         <span>Net à te remettre : <b>${Number(r.net_due_to_owner ?? 0).toLocaleString('fr-CA')} $</b></span>
       </div>
     </div>`).join('');
+}
+
+async function loadRentals(){
+  const buildingIds = (await supabaseClient.from('buildings').select('id').eq('owner_id', ownerRecord.id)).data?.map(b=>b.id) || [];
+  const { data: units } = await supabaseClient
+    .from('units')
+    .select('*, buildings(address)')
+    .in('building_id', buildingIds)
+    .in('status', ['available','soon_available']);
+
+  const body = document.getElementById('rentals-body');
+  if(!units || !units.length){
+    body.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun logement vacant en ce moment.</p>';
+    return;
+  }
+
+  const unitIds = units.map(u=>u.id);
+  const { data: candidates } = await supabaseClient
+    .from('inquiries')
+    .select('*')
+    .eq('type', 'visite')
+    .in('unit_id', unitIds)
+    .order('created_at', { ascending: false });
+
+  const statusLabel = { new:'Nouveau', contacted:'Contacté', closed:'Fermé' };
+
+  body.innerHTML = units.map(u => {
+    const daysVacant = u.status_changed_at ? Math.floor((Date.now() - new Date(u.status_changed_at).getTime()) / 86400000) : null;
+    const vacancyFlag = daysVacant != null && daysVacant > 21
+      ? `<span class="tag urgent">Vacant depuis ${daysVacant} jours — au-delà du délai normal</span>` : '';
+    const unitCandidates = (candidates || []).filter(c => c.unit_id === u.id);
+    return `
+    <div class="approve-row" style="flex-direction:column;align-items:flex-start;gap:8px;">
+      <b>${u.unit_type || ''} — Unité ${u.unit_number} — ${u.buildings?.address || ''}</b>
+      <span style="font-size:12.5px;color:var(--muted);">${u.listing_description || 'Annonce en cours de rédaction par l\'IA…'}</span>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;align-items:center;">
+        <span>Loyer actuel : <b>${u.rent != null ? Number(u.rent).toLocaleString('fr-CA') + ' $' : '—'}</b></span>
+        <span>Loyer suggéré par l'IA : <b>${u.suggested_rent != null ? Number(u.suggested_rent).toLocaleString('fr-CA') + ' $' : '—'}</b></span>
+        ${vacancyFlag}
+      </div>
+      ${unitCandidates.length ? `
+      <table style="width:100%;margin-top:6px;">
+        <thead><tr><th>Candidat</th><th>Résumé IA</th><th>Statut</th><th></th></tr></thead>
+        <tbody>
+          ${unitCandidates.map(c => `
+          <tr>
+            <td>${c.full_name}<br><span style="color:var(--muted);font-size:11.5px;">${c.email}</span></td>
+            <td style="font-size:12px;">${c.ai_summary || c.message || ''}</td>
+            <td><span class="tag neutral">${statusLabel[c.status] || c.status}</span></td>
+            <td>
+              <button class="btn-small" onclick="markCandidateStatus('${c.id}','contacted')">Contacté</button>
+              <button class="btn-small" onclick="markCandidateStatus('${c.id}','closed')">Retenu / Fermer</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>` : '<span style="font-size:12px;color:var(--muted);">Aucun candidat pour l\'instant.</span>'}
+    </div>`;
+  }).join('');
+}
+
+async function markCandidateStatus(id, status){
+  await supabaseClient.from('inquiries').update({ status }).eq('id', id);
+  await loadRentals();
 }
 
 async function sendMessage(){
