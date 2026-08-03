@@ -31,6 +31,13 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Accès refusé — compte non admin" }), { status: 403, headers: corsHeaders });
     }
 
+    const logAudit = (action: string, entityType: string, entityId: string | null, details: Record<string, unknown>) =>
+      fetch(`${supabaseUrl}/rest/v1/audit_log`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ actor_type: "admin", actor_id: userId, action, entity_type: entityType, entity_id: entityId, details }),
+      });
+
     const body = await req.json().catch(() => ({}));
     const action = body.action || "list_service_requests";
 
@@ -63,9 +70,9 @@ Deno.serve(async (req) => {
       const coordinationFee = Math.round(Number(worker_pay) * 0.10 * 100) / 100;
       const estimatedCost = Math.round((Number(worker_pay) + coordinationFee) * 100) / 100;
 
-      await fetch(`${supabaseUrl}/rest/v1/work_orders`, {
+      const woInsertRes = await fetch(`${supabaseUrl}/rest/v1/work_orders`, {
         method: "POST",
-        headers: adminHeaders,
+        headers: { ...adminHeaders, Prefer: "return=representation" },
         body: JSON.stringify({
           service_request_id: service_request_id || null,
           unit_id, worker_id, description,
@@ -75,11 +82,13 @@ Deno.serve(async (req) => {
           status: "assigned",
         }),
       });
+      const [newWorkOrder] = await woInsertRes.json();
       if (service_request_id) {
         await fetch(`${supabaseUrl}/rest/v1/service_requests?id=eq.${service_request_id}`, {
           method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "in_progress" }),
         });
       }
+      await logAudit("work_order.create", "work_orders", newWorkOrder?.id ?? null, { worker_id, worker_pay: Number(worker_pay), coordination_fee: coordinationFee, estimated_cost: estimatedCost });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
@@ -90,6 +99,7 @@ Deno.serve(async (req) => {
         headers: adminHeaders,
         body: JSON.stringify({ worker_id, worker_notified: false }),
       });
+      await logAudit("work_order.reassign", "work_orders", work_order_id, { new_worker_id: worker_id });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
@@ -157,6 +167,7 @@ Deno.serve(async (req) => {
         }),
       });
 
+      await logAudit("work_order.complete", "work_orders", work_order_id, { actual_cost: Number(actual_cost), receipt_document_id: receiptDocumentId });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 

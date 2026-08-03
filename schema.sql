@@ -222,6 +222,21 @@ create table financial_anomalies (
 -- Pas de policy RLS ouverte : accessible uniquement via le rôle
 -- service_role (fonction Edge "admin-api", gardée par is_admin).
 
+-- ============ AUDIT LOG (traçabilité des décisions) ============
+create table audit_log (
+  id uuid primary key default gen_random_uuid(),
+  actor_type text not null check (actor_type in ('admin','owner','tenant','system')),
+  actor_id uuid,
+  action text not null,
+  entity_type text,
+  entity_id uuid,
+  details jsonb,
+  created_at timestamptz default now()
+);
+-- Écriture uniquement via service_role (fonctions Edge et
+-- déclencheurs security definer) ; lecture réservée à l'admin
+-- (policy définie plus bas, après la fonction auth_is_admin()).
+
 -- ============ PUBLIC SUBMISSION LOG (limite de débit anti-spam) ============
 create table public_submission_log (
   id uuid primary key default gen_random_uuid(),
@@ -371,6 +386,7 @@ alter table reports enable row level security;
 alter table prospects enable row level security;
 alter table financial_anomalies enable row level security;
 alter table public_submission_log enable row level security;
+alter table audit_log enable row level security;
 
 create policy "self" on users for select using (id = auth.uid());
 
@@ -473,6 +489,9 @@ create policy "own service_requests as tenant insert" on service_requests for in
 
 create policy "own reports" on reports for select
   using (owner_id = auth_owner_id());
+
+create policy "admin read audit_log" on audit_log for select
+  using (auth_is_admin());
 
 -- IMPORTANT : la création/assignation d'un work_order, sa complétion,
 -- l'enregistrement de la dépense finale et l'avancement du statut
@@ -710,6 +729,9 @@ begin
         'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
       )
     );
+    insert into audit_log (actor_type, actor_id, action, entity_type, entity_id, details)
+    values ('owner', auth.uid(), 'approval.approved', 'approvals', new.id,
+      jsonb_build_object('work_order_id', new.work_order_id, 'requested_amount', new.requested_amount));
   elsif old.status = 'pending' and new.status = 'rejected' then
     update work_orders set status = 'cancelled' where id = new.work_order_id;
 
@@ -722,6 +744,9 @@ begin
         'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
       )
     );
+    insert into audit_log (actor_type, actor_id, action, entity_type, entity_id, details)
+    values ('owner', auth.uid(), 'approval.rejected', 'approvals', new.id,
+      jsonb_build_object('work_order_id', new.work_order_id, 'requested_amount', new.requested_amount));
   end if;
   return new;
 end;

@@ -43,6 +43,11 @@ Deno.serve(async (req) => {
         headers: adminHeaders,
         body: JSON.stringify({ status }),
       });
+      await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ actor_type: "admin", actor_id: userId, action: "anomaly.update", entity_type: "financial_anomalies", entity_id: anomaly_id, details: { new_status: status } }),
+      });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 

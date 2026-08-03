@@ -86,6 +86,12 @@
     <tbody id="clients-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
   </table>
 
+  <h1 style="margin-top:40px;font-size:22px;">Journal d'audit</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Dernières décisions et actions sensibles — 100 plus récentes</p>
+  <table><thead><tr><th>Date</th><th>Acteur</th><th>Action</th><th>Détails</th></tr></thead>
+    <tbody id="audit-log-body"><tr class="empty-row"><td colspan="4">Chargement...</td></tr></tbody>
+  </table>
+
   <h1 style="margin-top:40px;font-size:22px;">Travaux — demandes ouvertes</h1>
   <p class="subtitle" style="margin-bottom:16px;">Sélection du travailleur, négociation de la paie et assignation</p>
   <div id="service-requests-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
@@ -198,6 +204,33 @@ async function loadAdminDashboard(){
 
   await loadOps();
   await loadProspects();
+  await loadAuditLog();
+}
+
+const auditActionLabel = {
+  'approval.approved': 'Approbation acceptée', 'approval.rejected': 'Approbation refusée',
+  'work_order.create': 'Travail créé', 'work_order.reassign': 'Travail réassigné', 'work_order.complete': 'Travail complété',
+  'prospect.stage_change': 'Statut prospect modifié', 'anomaly.update': 'Anomalie mise à jour',
+};
+
+async function loadAuditLog(){
+  const { data } = await supabaseClient
+    .from('audit_log')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  const body = document.getElementById('audit-log-body');
+  if(!data || !data.length){
+    body.innerHTML = '<tr class="empty-row"><td colspan="4">Aucune entrée.</td></tr>';
+    return;
+  }
+  body.innerHTML = data.map(a => `
+    <tr>
+      <td>${new Date(a.created_at).toLocaleString('fr-CA')}</td>
+      <td>${esc(a.actor_type)}</td>
+      <td>${esc(auditActionLabel[a.action] || a.action)}</td>
+      <td style="font-size:12px;">${esc(JSON.stringify(a.details || {}))}</td>
+    </tr>`).join('');
 }
 
 let workersDirectory = [];
