@@ -359,11 +359,17 @@ async function loadServiceRequests(){
 
   const workerOptions = workersCache.map(w => `<option value="${w.id}">${w.name} — ${w.specialty || ''}</option>`).join('');
 
-  container.innerHTML = data.map(sr => `
+  const urgencyTag = { urgence:'urgent', élevé:'warn', normal:'neutral', faible:'neutral' };
+
+  container.innerHTML = data.map(sr => {
+    const aiLine = sr.ai_category
+      ? `<span><span class="tag ${urgencyTag[sr.ai_urgency] || 'neutral'}">${sr.ai_urgency || ''}</span> IA : ${sr.ai_category} — estimation ${sr.ai_estimated_cost != null ? Number(sr.ai_estimated_cost).toLocaleString('fr-CA') + ' $' : '—'}</span>`
+      : `<span style="color:var(--muted);">Estimation IA en traitement…</span>`;
+    return `
     <div class="approve-row">
       <div class="desc">
         <b>Unité ${sr.units?.unit_number ?? ''} — ${sr.tenants?.full_name ?? ''}</b>
-        <span>${sr.description}</span>
+        <span>${sr.description}</span><br>${aiLine}
       </div>
       <div class="approve-actions">
         <button onclick="toggleWoForm('${sr.id}')">Créer un travail</button>
@@ -374,9 +380,10 @@ async function loadServiceRequests(){
         <select id="wo-worker-${sr.id}"><option value="">— Choisir —</option>${workerOptions}</select>
       </div>
       <div class="f"><label>Description</label><input type="text" id="wo-desc-${sr.id}" value="${sr.description.replace(/"/g,'&quot;')}"></div>
-      <div class="f"><label>Coût estimé ($)</label><input type="number" id="wo-cost-${sr.id}" min="0" step="0.01"></div>
+      <div class="f"><label>Coût estimé ($)</label><input type="number" id="wo-cost-${sr.id}" min="0" step="0.01" value="${sr.ai_estimated_cost ?? ''}"></div>
       <button onclick="createWorkOrder('${sr.id}', '${sr.unit_id}')">Assigner</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function toggleWoForm(serviceRequestId){
