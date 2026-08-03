@@ -1,9 +1,17 @@
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
   try {
     const authHeader = req.headers.get("Authorization") || "";
     const jwt = authHeader.replace("Bearer ", "");
     if (!jwt) {
-      return new Response(JSON.stringify({ error: "Non authentifié" }), { status: 401 });
+      return new Response(JSON.stringify({ error: "Non authentifié" }), { status: 401, headers: corsHeaders });
     }
 
     const payloadBase64 = jwt.split(".")[1];
@@ -23,7 +31,7 @@ Deno.serve(async (req) => {
     });
     const userRows = await userRes.json();
     if (!userRows?.[0]?.is_admin) {
-      return new Response(JSON.stringify({ error: "Accès refusé — compte non admin" }), { status: 403 });
+      return new Response(JSON.stringify({ error: "Accès refusé — compte non admin" }), { status: 403, headers: corsHeaders });
     }
 
     const ownersRes = await fetch(
@@ -71,9 +79,9 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({ totals, clients }), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500 });
+    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });
   }
 });
