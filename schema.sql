@@ -305,6 +305,10 @@ create policy "own approvals update" on approvals for update
 
 create policy "own documents" on documents for select
   using (owner_id = auth_owner_id());
+create policy "own documents insert" on documents for insert
+  with check (owner_id = auth_owner_id());
+create policy "own documents delete" on documents for delete
+  using (owner_id = auth_owner_id());
 
 create policy "own messages" on messages for select
   using (owner_id = auth_owner_id());
@@ -447,6 +451,22 @@ $$;
 create trigger on_service_request_insert
   after insert on service_requests
   for each row execute function notify_new_service_request();
+
+-- ============================================================
+-- STOCKAGE — upload de documents (baux, mandats, rapports)
+-- ============================================================
+-- Bucket privé : chaque propriétaire ne peut lire/écrire que dans
+-- son propre dossier (nommé d'après son owner_id).
+insert into storage.buckets (id, name, public)
+values ('documents', 'documents', false)
+on conflict (id) do nothing;
+
+create policy "owner upload own documents" on storage.objects for insert
+  with check (bucket_id = 'documents' and (storage.foldername(name))[1] = auth_owner_id()::text);
+create policy "owner read own documents" on storage.objects for select
+  using (bucket_id = 'documents' and (storage.foldername(name))[1] = auth_owner_id()::text);
+create policy "owner delete own documents" on storage.objects for delete
+  using (bucket_id = 'documents' and (storage.foldername(name))[1] = auth_owner_id()::text);
 
 -- ============================================================
 -- NOTE IMPORTANTE

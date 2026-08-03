@@ -235,10 +235,11 @@
               <option value="rapport">Rapport</option>
             </select>
           </div>
-          <div class="f"><label>Lien (URL)</label><input type="text" id="doc-url" placeholder="https://..."></div>
-          <button onclick="addDocument()">Ajouter</button>
+          <div class="f"><label>Fichier</label><input type="file" id="doc-file"></div>
+          <button onclick="addDocument()" id="doc-submit-btn">Téléverser</button>
+          <p class="login-error" id="doc-error"></p>
         </div>
-        <table><thead><tr><th>Titre</th><th>Type</th><th>Lien</th></tr></thead>
+        <table><thead><tr><th>Titre</th><th>Type</th><th>Fichier</th><th></th></tr></thead>
           <tbody id="documents-body"><tr class="empty-row"><td colspan="3">Chargement...</td></tr></tbody>
         </table>
       </section>
@@ -608,19 +609,64 @@ async function loadDocuments(){
   const { data } = await supabaseClient.from('documents').select('*').eq('owner_id', ownerRecord.id).order('created_at', { ascending: false });
   const body = document.getElementById('documents-body');
   const typeLabel = { bail:'Bail', mandat:'Mandat', reglement:'Règlement', rapport:'Rapport' };
-  body.innerHTML = (data && data.length)
-    ? data.map(d => `<tr><td>${d.title}</td><td>${typeLabel[d.doc_type] || d.doc_type || '—'}</td><td>${d.file_url ? `<a href="${d.file_url}" target="_blank" rel="noopener">Ouvrir</a>` : '—'}</td></tr>`).join('')
-    : '<tr class="empty-row"><td colspan="3">Aucun document.</td></tr>';
+
+  if(!data || !data.length){
+    body.innerHTML = '<tr class="empty-row"><td colspan="4">Aucun document.</td></tr>';
+    return;
+  }
+
+  const rows = await Promise.all(data.map(async d => {
+    let link = '—';
+    if(d.file_url){
+      const { data: signed } = await supabaseClient.storage.from('documents').createSignedUrl(d.file_url, 3600);
+      if(signed?.signedUrl) link = `<a href="${signed.signedUrl}" target="_blank" rel="noopener">Ouvrir</a>`;
+    }
+    return `<tr>
+      <td>${d.title}</td>
+      <td>${typeLabel[d.doc_type] || d.doc_type || '—'}</td>
+      <td>${link}</td>
+      <td><button class="btn-small" onclick="deleteDocument('${d.id}', '${d.file_url || ''}')">Supprimer</button></td>
+    </tr>`;
+  }));
+  body.innerHTML = rows.join('');
 }
 
 async function addDocument(){
   const title = document.getElementById('doc-title').value;
   const doc_type = document.getElementById('doc-type').value;
-  const file_url = document.getElementById('doc-url').value;
-  if(!title){ alert('Donne un titre au document.'); return; }
-  await supabaseClient.from('documents').insert({ owner_id: ownerRecord.id, title, doc_type, file_url: file_url || null });
+  const fileInput = document.getElementById('doc-file');
+  const file = fileInput.files[0];
+  const errEl = document.getElementById('doc-error');
+  errEl.style.display = 'none';
+
+  if(!title || !file){ errEl.textContent = 'Donne un titre et choisis un fichier.'; errEl.style.display = 'block'; return; }
+
+  const btn = document.getElementById('doc-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Téléversement...';
+
+  const path = `${ownerRecord.id}/${Date.now()}_${file.name}`;
+  const { error: uploadError } = await supabaseClient.storage.from('documents').upload(path, file);
+  if(uploadError){
+    errEl.textContent = uploadError.message;
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Téléverser';
+    return;
+  }
+
+  await supabaseClient.from('documents').insert({ owner_id: ownerRecord.id, title, doc_type, file_url: path });
+
   document.getElementById('doc-title').value = '';
-  document.getElementById('doc-url').value = '';
+  fileInput.value = '';
+  btn.disabled = false;
+  btn.textContent = 'Téléverser';
+  await loadDocuments();
+}
+
+async function deleteDocument(id, filePath){
+  if(filePath){ await supabaseClient.storage.from('documents').remove([filePath]); }
+  await supabaseClient.from('documents').delete().eq('id', id);
   await loadDocuments();
 }
 
