@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portail — Admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
+    --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;}
+
+  #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;}
+  .login-box{width:100%;max-width:340px;padding:36px;background:var(--paper-2);border:1px solid var(--line);}
+  .login-box .brand{font-family:'Fraunces',serif;font-weight:600;font-size:22px;margin-bottom:4px;}
+  .login-box .sub{font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:24px;}
+  .login-box label{display:block;font-size:12.5px;font-weight:500;margin-bottom:6px;}
+  .login-box .f{margin-bottom:14px;}
+  .login-box input{width:100%;padding:10px 12px;border:1px solid var(--line);background:var(--paper);font-size:13.5px;font-family:'Inter',sans-serif;}
+  .login-box button{width:100%;background:var(--ink);color:var(--paper);border:none;padding:12px;font-size:13.5px;font-weight:500;cursor:pointer;margin-top:6px;}
+  .login-box button:hover{background:var(--brass-dark);}
+  .login-error{color:var(--rust);font-size:12.5px;margin-top:10px;display:none;}
+
+  #app-shell{display:none;padding:32px 40px;max-width:1100px;margin:0 auto;}
+  .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;}
+  h1{font-family:'Fraunces',serif;font-weight:600;font-size:26px;}
+  .subtitle{color:var(--muted);font-size:13.5px;}
+  button.signout{background:none;border:1px solid var(--ink);padding:8px 16px;font-size:12.5px;cursor:pointer;font-family:'Inter',sans-serif;}
+  button.signout:hover{background:var(--ink);color:var(--paper);}
+
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:32px;}
+  .metric{background:var(--paper-2);border:1px solid var(--line);padding:16px;}
+  .metric.flag{border-color:var(--rust);}
+  .metric .label{font-size:12px;color:var(--muted);margin-bottom:6px;}
+  .metric .val{font-family:'Fraunces',serif;font-size:26px;font-weight:600;}
+  .metric.flag .val{color:var(--rust);}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--paper-2);border:1px solid var(--line);}
+  th{text-align:left;padding:10px 14px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);border-bottom:1px solid var(--ink);font-weight:500;}
+  td{padding:11px 14px;border-bottom:1px solid var(--line);}
+  tr:last-child td{border-bottom:none;}
+  .empty-row td{color:var(--muted);font-style:italic;}
+  .num{font-family:'JetBrains Mono',monospace;}
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box">
+    <div class="brand"><a href="site-client.html" style="color:inherit;text-decoration:none;">Portail</a></div>
+    <div class="sub">Admin</div>
+    <div class="f"><label>Courriel</label><input type="email" id="login-email"></div>
+    <div class="f"><label>Mot de passe</label><input type="password" id="login-password"></div>
+    <button onclick="handleLogin()">Se connecter</button>
+    <p class="login-error" id="login-error"></p>
+  </div>
+</div>
+
+<div id="app-shell">
+  <div class="topbar">
+    <div>
+      <h1>Vue d'ensemble</h1>
+      <p class="subtitle">Tous les clients, tous les immeubles</p>
+    </div>
+    <button class="signout" onclick="handleSignOut()">Se déconnecter</button>
+  </div>
+
+  <div class="metrics">
+    <div class="metric"><div class="label">Clients actifs</div><div class="val" id="m-clients">—</div></div>
+    <div class="metric"><div class="label">Immeubles gérés</div><div class="val" id="m-buildings">—</div></div>
+    <div class="metric"><div class="label">Logements sous gestion</div><div class="val" id="m-units">—</div></div>
+    <div class="metric"><div class="label">Revenu de gestion mensuel</div><div class="val" id="m-revenue">—</div></div>
+    <div class="metric flag"><div class="label">Travaux en attente d'approbation</div><div class="val" id="m-approvals">—</div></div>
+    <div class="metric flag"><div class="label">Nouvelles demandes</div><div class="val" id="m-inquiries">—</div></div>
+    <div class="metric flag"><div class="label">Anomalies financières ouvertes</div><div class="val" id="m-anomalies">—</div></div>
+  </div>
+
+  <table><thead><tr><th>Client</th><th>Téléphone</th><th class="num">Immeubles</th><th class="num">Logements</th><th class="num">Occupés</th><th class="num">Revenu/mois</th></tr></thead>
+    <tbody id="clients-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
+  </table>
+
+  <h1 style="margin-top:40px;font-size:22px;">Journal d'audit</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Dernières décisions et actions sensibles — 100 plus récentes</p>
+  <table><thead><tr><th>Date</th><th>Acteur</th><th>Action</th><th>Détails</th></tr></thead>
+    <tbody id="audit-log-body"><tr class="empty-row"><td colspan="4">Chargement...</td></tr></tbody>
+  </table>
+
+  <h1 style="margin-top:40px;font-size:22px;">Travaux — demandes ouvertes</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Sélection du travailleur, négociation de la paie et assignation</p>
+  <div id="service-requests-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
+  <h1 style="font-size:22px;">Travaux — en cours</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Complétion, facture et dépense</p>
+  <div id="work-orders-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
+  <h1 style="margin-top:40px;font-size:22px;">Anomalies financières</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Détection automatique — factures en double, dépassements, écarts de loyer, reçus manquants</p>
+  <table><thead><tr><th>Type</th><th>Client</th><th>Description</th><th>Sévérité</th><th></th></tr></thead>
+    <tbody id="anomalies-body"><tr class="empty-row"><td colspan="5">Chargement...</td></tr></tbody>
+  </table>
+
+  <h1 style="margin-top:40px;font-size:22px;">CRM — Prospects propriétaires</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Pipeline d'acquisition, trié par valeur potentielle</p>
+
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom</label><input type="text" id="pr-name" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel</label><input type="email" id="pr-email" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone</label><input type="text" id="pr-phone" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Portes</label><input type="number" id="pr-doors" style="padding:8px;border:1px solid var(--line);width:80px;"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Loyer moyen</label><input type="number" id="pr-rent" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+    <button onclick="createProspect()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter un prospect</button>
+  </div>
+
+  <table><thead><tr><th>Prospect</th><th class="num">Portes</th><th class="num">Revenu potentiel/mois</th><th>Intérêt</th><th>Statut</th><th>Prochain suivi</th><th></th></tr></thead>
+    <tbody id="prospects-body"><tr class="empty-row"><td colspan="7">Chargement...</td></tr></tbody>
+  </table>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+function esc(str){
+  return (str == null ? '' : String(str)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function init(){
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(session) await loadAdminDashboard();
+}
+
+async function handleLogin(){
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if(error){ showLoginError(error.message); return; }
+  await loadAdminDashboard();
+}
+
+async function handleSignOut(){
+  await supabaseClient.auth.signOut();
+  document.getElementById('app-shell').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+}
+
+function showLoginError(msg){
+  const el = document.getElementById('login-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function loadAdminDashboard(){
+  const { data, error } = await supabaseClient.functions.invoke('admin-api');
+  if(error){
+    showLoginError('Accès refusé — ce compte n\'est pas administrateur.');
+    await supabaseClient.auth.signOut();
+    return;
+  }
+
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-shell').style.display = 'block';
+
+  const { totals, clients, anomalies } = data;
+  document.getElementById('m-clients').textContent = totals.clients_count;
+  document.getElementById('m-buildings').textContent = totals.buildings_count;
+  document.getElementById('m-units').textContent = totals.units_count;
+  document.getElementById('m-revenue').textContent = totals.monthly_revenue.toLocaleString('fr-CA') + ' $';
+  document.getElementById('m-approvals').textContent = totals.pending_approvals;
+  document.getElementById('m-inquiries').textContent = totals.new_inquiries;
+  document.getElementById('m-anomalies').textContent = totals.open_anomalies;
+
+  const anomalyTypeLabel = { facture_dupliquee:'Facture en double', depassement_cout:'Dépassement de coût', loyer_montant_incorrect:'Loyer — montant incorrect', recu_manquant:'Reçu manquant' };
+  const anomalyBody = document.getElementById('anomalies-body');
+  anomalyBody.innerHTML = (anomalies && anomalies.length) ? anomalies.map(a => `
+    <tr>
+      <td>${anomalyTypeLabel[a.type] || esc(a.type)}</td>
+      <td>${esc(a.owners?.full_name) || '—'}</td>
+      <td style="font-size:12.5px;">${esc(a.description)}</td>
+      <td>${esc(a.severity)}</td>
+      <td>
+        <button onclick="updateAnomaly('${a.id}','resolved')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Résolu</button>
+        <button onclick="updateAnomaly('${a.id}','dismissed')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Ignorer</button>
+      </td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Aucune anomalie détectée.</td></tr>';
+
+  const body = document.getElementById('clients-body');
+  body.innerHTML = clients.length ? clients.map(c => `
+    <tr>
+      <td>${esc(c.full_name)}</td>
+      <td>${esc(c.phone) || '—'}</td>
+      <td class="num">${c.buildings_count}</td>
+      <td class="num">${c.units_count}</td>
+      <td class="num">${c.occupied_count}</td>
+      <td class="num">${c.monthly_revenue.toLocaleString('fr-CA')} $</td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="6">Aucun client.</td></tr>';
+
+  await loadOps();
+  await loadProspects();
+  await loadAuditLog();
+}
+
+const auditActionLabel = {
+  'approval.approved': 'Approbation acceptée', 'approval.rejected': 'Approbation refusée',
+  'work_order.create': 'Travail créé', 'work_order.reassign': 'Travail réassigné', 'work_order.complete': 'Travail complété',
+  'prospect.stage_change': 'Statut prospect modifié', 'anomaly.update': 'Anomalie mise à jour',
+};
+
+async function loadAuditLog(){
+  const { data } = await supabaseClient
+    .from('audit_log')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  const body = document.getElementById('audit-log-body');
+  if(!data || !data.length){
+    body.innerHTML = '<tr class="empty-row"><td colspan="4">Aucune entrée.</td></tr>';
+    return;
+  }
+  body.innerHTML = data.map(a => `
+    <tr>
+      <td>${new Date(a.created_at).toLocaleString('fr-CA')}</td>
+      <td>${esc(a.actor_type)}</td>
+      <td>${esc(auditActionLabel[a.action] || a.action)}</td>
+      <td style="font-size:12px;">${esc(JSON.stringify(a.details || {}))}</td>
+    </tr>`).join('');
+}
+
+let workersDirectory = [];
+
+async function callOpsApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('ops-api', { body: payload });
+  if(error){ alert('Erreur : ' + error.message); return null; }
+  return data;
+}
+
+async function loadOps(){
+  if(!workersDirectory.length){
+    const wd = await callOpsApi({ action: 'list_workers' });
+    workersDirectory = wd?.workers || [];
+  }
+  await loadServiceRequestsAdmin();
+  await loadWorkOrdersAdmin();
+}
+
+function workerOptionsHtml(selectedId){
+  return workersDirectory.map(w => `<option value="${w.id}" ${w.id === selectedId ? 'selected' : ''}>${esc(w.name)} — ${esc(w.specialty) || ''}</option>`).join('');
+}
+
+async function loadServiceRequestsAdmin(){
+  const data = await callOpsApi({ action: 'list_service_requests' });
+  const container = document.getElementById('service-requests-body');
+  const requests = data?.service_requests || [];
+  if(!requests.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune demande de service ouverte.</p>';
+    return;
+  }
+  container.innerHTML = requests.map(sr => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${esc(sr.tenants?.full_name) ?? ''} — ${esc(sr.units?.buildings?.address) ?? ''}, unité ${esc(sr.units?.unit_number) ?? ''}</b>
+      <span style="font-size:12.5px;color:var(--muted);">${esc(sr.description)}${sr.ai_category ? ' — IA : ' + esc(sr.ai_category) + ' (' + esc(sr.ai_urgency || '') + ', estimation ' + (sr.ai_estimated_cost != null ? Number(sr.ai_estimated_cost).toLocaleString('fr-CA') + ' $' : '—') + ')' : ''}</span>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-top:10px;">
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Travailleur</label>
+          <select id="sr-worker-${sr.id}" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir —</option>${workerOptionsHtml()}</select>
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description du travail</label>
+          <input type="text" id="sr-desc-${sr.id}" value="${esc(sr.description)}" style="padding:8px;border:1px solid var(--line);width:260px;">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Paie du travailleur ($)</label>
+          <input type="number" id="sr-pay-${sr.id}" min="0" step="0.01" style="padding:8px;border:1px solid var(--line);width:110px;">
+        </div>
+        <button onclick="assignServiceRequest('${sr.id}', '${sr.unit_id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Assigner</button>
+      </div>
+    </div>`).join('');
+}
+
+async function assignServiceRequest(serviceRequestId, unitId){
+  const worker_id = document.getElementById('sr-worker-' + serviceRequestId).value;
+  const description = document.getElementById('sr-desc-' + serviceRequestId).value;
+  const worker_pay = document.getElementById('sr-pay-' + serviceRequestId).value;
+  if(!worker_id || !description || !worker_pay){
+    alert('Choisis un travailleur, une description et la paie du travailleur.');
+    return;
+  }
+  const res = await callOpsApi({ action: 'create_work_order', service_request_id: serviceRequestId, unit_id: unitId, worker_id, description, worker_pay: Number(worker_pay) });
+  if(res?.ok){ await loadOps(); }
+}
+
+async function loadWorkOrdersAdmin(){
+  const data = await callOpsApi({ action: 'list_work_orders' });
+  const container = document.getElementById('work-orders-body');
+  const orders = data?.work_orders || [];
+  if(!orders.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun travail en cours.</p>';
+    return;
+  }
+  const statusLabel = { open:'Ouvert', assigned:'Assigné', in_progress:'En cours' };
+  container.innerHTML = orders.map(wo => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${esc(wo.units?.buildings?.address) ?? ''}, unité ${esc(wo.units?.unit_number) ?? ''} — ${esc(wo.description)}</b>
+      <span style="font-size:12.5px;color:var(--muted);">Travailleur : ${esc(wo.workers?.name) ?? '—'} (${esc(wo.workers?.phone) ?? '—'}) — Paie : ${wo.worker_pay != null ? Number(wo.worker_pay).toLocaleString('fr-CA') + ' $' : '—'} + 10% coordination — Statut : ${statusLabel[wo.status] || esc(wo.status)}</span>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-top:10px;">
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Réassigner</label>
+          <select onchange="reassignWorkOrder('${wo.id}', this.value)" style="padding:8px;border:1px solid var(--line);"><option value="">—</option>${workerOptionsHtml(wo.worker_id)}</select>
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Coût final réel ($)</label>
+          <input type="number" id="wo-final-${wo.id}" min="0" step="0.01" value="${wo.estimated_cost ?? ''}" style="padding:8px;border:1px solid var(--line);width:110px;">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Facture/reçu (optionnel)</label>
+          <input type="file" id="wo-receipt-${wo.id}" accept=".pdf,image/*">
+        </div>
+        <button onclick="completeWorkOrderAdmin('${wo.id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Marquer complété</button>
+      </div>
+    </div>`).join('');
+}
+
+async function reassignWorkOrder(work_order_id, worker_id){
+  if(!worker_id) return;
+  await callOpsApi({ action: 'reassign_work_order', work_order_id, worker_id });
+  await loadWorkOrdersAdmin();
+}
+
+function readFileAsBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function completeWorkOrderAdmin(work_order_id){
+  const actualCost = document.getElementById('wo-final-' + work_order_id).value;
+  if(!actualCost){ alert('Indique le coût final.'); return; }
+  const fileInput = document.getElementById('wo-receipt-' + work_order_id);
+  const file = fileInput.files[0];
+
+  const payload = { action: 'complete_work_order', work_order_id, actual_cost: Number(actualCost) };
+  if(file){
+    payload.receipt_base64 = await readFileAsBase64(file);
+    payload.receipt_filename = file.name;
+    payload.receipt_content_type = file.type;
+  }
+  const res = await callOpsApi(payload);
+  if(res?.ok){ await loadOps(); }
+}
+
+const stageLabel = { new:'Nouveau', contacted:'Contacté', interested:'Intéressé', proposal_sent:'Proposition envoyée', signed:'Signé', lost:'Perdu' };
+const stageOptions = Object.keys(stageLabel).map(s => `<option value="${s}">${stageLabel[s]}</option>`).join('');
+
+async function callCrmApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('crm-api', { body: payload });
+  if(error){ alert('Erreur CRM : ' + error.message); return null; }
+  return data;
+}
+
+async function loadProspects(){
+  const data = await callCrmApi({ action: 'list' });
+  const body = document.getElementById('prospects-body');
+  const prospects = data?.prospects || [];
+  if(!prospects.length){
+    body.innerHTML = '<tr class="empty-row"><td colspan="7">Aucun prospect.</td></tr>';
+    return;
+  }
+  body.innerHTML = prospects.map(p => `
+    <tr>
+      <td>${esc(p.full_name)}<br><span style="color:var(--muted);font-size:11.5px;">${esc(p.email) || ''} ${esc(p.phone) || ''}</span></td>
+      <td class="num">${p.num_doors ?? '—'}</td>
+      <td class="num">${p.potential_monthly_revenue != null ? Number(p.potential_monthly_revenue).toLocaleString('fr-CA') + ' $' : '—'}</td>
+      <td>${p.interest_level || '—'}</td>
+      <td><select onchange="updateProspectStage('${p.id}', this.value)">${stageOptions.replace(`value="${p.stage}"`, `value="${p.stage}" selected`)}</select></td>
+      <td>${p.next_followup_date || '—'}</td>
+      <td><button onclick="promptAddCall('${p.id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">+ Appel</button></td>
+    </tr>`).join('');
+}
+
+async function createProspect(){
+  const full_name = document.getElementById('pr-name').value;
+  const email = document.getElementById('pr-email').value;
+  const phone = document.getElementById('pr-phone').value;
+  const num_doors = document.getElementById('pr-doors').value;
+  const avg_rent = document.getElementById('pr-rent').value;
+  if(!full_name){ alert('Le nom est requis.'); return; }
+  await callCrmApi({ action: 'create', full_name, email, phone, num_doors: num_doors ? Number(num_doors) : null, avg_rent: avg_rent ? Number(avg_rent) : null });
+  document.getElementById('pr-name').value = '';
+  document.getElementById('pr-email').value = '';
+  document.getElementById('pr-phone').value = '';
+  document.getElementById('pr-doors').value = '';
+  document.getElementById('pr-rent').value = '';
+  await loadProspects();
+}
+
+async function updateProspectStage(prospect_id, stage){
+  await callCrmApi({ action: 'update_stage', prospect_id, stage });
+  await loadProspects();
+}
+
+async function updateAnomaly(anomaly_id, status){
+  const { error } = await supabaseClient.functions.invoke('admin-api', { body: { action: 'update_anomaly', anomaly_id, status } });
+  if(error){ alert('Erreur : ' + error.message); return; }
+  await loadAdminDashboard();
+}
+
+async function promptAddCall(prospect_id){
+  const transcript = prompt('Résumé ou transcription de l\'appel :');
+  if(!transcript) return;
+  await callCrmApi({ action: 'add_call', prospect_id, transcript });
+  await loadProspects();
+}
+
+init();
+</script>
+</body>
+</html>

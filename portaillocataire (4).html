@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portail locataire</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
+    --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E; --amber:#B98A2E;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;}
+
+  #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;}
+  .login-box{width:100%;max-width:340px;padding:36px;background:var(--paper-2);border:1px solid var(--line);}
+  .login-box .brand{font-family:'Fraunces',serif;font-weight:600;font-size:22px;margin-bottom:4px;}
+  .login-box .sub{font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:24px;}
+  .login-box label{display:block;font-size:12.5px;font-weight:500;margin-bottom:6px;}
+  .login-box .f{margin-bottom:14px;}
+  .login-box input{width:100%;padding:10px 12px;border:1px solid var(--line);background:var(--paper);font-size:13.5px;font-family:'Inter',sans-serif;}
+  .login-box input:focus{outline:none;border-color:var(--brass);}
+  .login-box button{width:100%;background:var(--ink);color:var(--paper);border:none;padding:12px;font-size:13.5px;font-weight:500;cursor:pointer;margin-top:6px;}
+  .login-box button:hover{background:var(--brass-dark);}
+  .login-error{color:var(--rust);font-size:12.5px;margin-top:10px;display:none;}
+
+  #app-shell{display:none;min-height:100vh;}
+  .shell{display:flex;min-height:100vh;}
+  aside{width:230px;border-right:1px solid var(--ink);padding:24px 0;flex-shrink:0;}
+  .brand{font-family:'Fraunces',serif;font-weight:600;font-size:18px;padding:0 22px 6px;}
+  .brand-sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;padding:0 22px 20px;border-bottom:1px solid var(--line);margin-bottom:16px;display:block;}
+  .tab-btn{display:block;width:100%;text-align:left;background:none;border:none;padding:10px 22px;font-size:13.5px;color:var(--ink);cursor:pointer;border-left:2px solid transparent;font-family:'Inter',sans-serif;}
+  .tab-btn:hover{background:var(--paper-2);}
+  .tab-btn.active{border-left-color:var(--brass);background:var(--paper-2);font-weight:500;}
+  .signout{margin-top:20px;padding-top:16px;border-top:1px solid var(--line);}
+
+  main{flex:1;padding:32px 40px;max-width:900px;}
+  h1{font-family:'Fraunces',serif;font-weight:600;font-size:26px;margin-bottom:6px;}
+  .subtitle{color:var(--muted);font-size:13.5px;margin-bottom:24px;}
+
+  .card-box{background:var(--paper-2);border:1px solid var(--line);padding:22px;margin-bottom:20px;}
+  .card-box h3{font-family:'Fraunces',serif;font-size:17px;font-weight:600;margin-bottom:14px;}
+  .kv{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
+  .kv:last-child{border-bottom:none;}
+  .kv span:first-child{color:var(--muted);}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--paper-2);border:1px solid var(--line);}
+  th{text-align:left;padding:10px 14px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);border-bottom:1px solid var(--ink);font-weight:500;}
+  td{padding:11px 14px;border-bottom:1px solid var(--line);}
+  tr:last-child td{border-bottom:none;}
+  .empty-row td{color:var(--muted);font-style:italic;}
+
+  .tag{font-size:11px;padding:3px 9px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:0.04em;}
+  .tag.ok{background:var(--sage);color:var(--paper);}
+  .tag.warn{background:var(--amber);color:var(--paper);}
+  .tag.urgent{background:var(--rust);color:var(--paper);}
+  .tag.neutral{background:var(--line);color:var(--ink);}
+
+  .section{display:none;}
+  .section.active{display:block;}
+  .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
+  .toolbar h2{font-family:'Fraunces',serif;font-size:20px;font-weight:600;}
+
+  .f{margin-bottom:14px;}
+  label{display:block;font-size:12.5px;font-weight:500;margin-bottom:6px;}
+  textarea{width:100%;padding:11px 12px;border:1px solid var(--line);background:var(--paper);font-size:13.5px;font-family:'Inter',sans-serif;min-height:100px;resize:vertical;}
+  textarea:focus{outline:none;border-color:var(--brass);}
+  button.submit{background:var(--ink);color:var(--paper);border:none;padding:12px 24px;font-size:13.5px;font-weight:500;cursor:pointer;}
+  button.submit:hover{background:var(--brass-dark);}
+  .form-note{color:var(--muted);font-size:12.5px;margin-top:8px;display:none;}
+
+  @media (max-width:760px){
+    .shell{flex-direction:column;}
+    aside{width:100%;border-right:none;border-bottom:1px solid var(--ink);padding:10px 0;display:flex;align-items:center;overflow-x:auto;white-space:nowrap;}
+    aside .brand, aside .brand-sub{display:none;}
+    .tab-btn{display:inline-block;width:auto;border-left:none;border-bottom:2px solid transparent;padding:10px 14px;flex-shrink:0;}
+    .tab-btn.active{border-left:none;border-bottom-color:var(--brass);}
+    .signout{margin-top:0;padding-top:0;border-top:none;display:inline-block;flex-shrink:0;}
+    main{padding:20px 16px;max-width:100%;}
+    table{display:block;overflow-x:auto;}
+  }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box">
+    <div class="brand"><a href="site-client.html" style="color:inherit;text-decoration:none;">Portail</a></div>
+    <div class="sub">Espace locataire</div>
+    <div class="f"><label>Courriel</label><input type="email" id="login-email"></div>
+    <div class="f"><label>Mot de passe</label><input type="password" id="login-password"></div>
+    <button onclick="handleLogin()">Se connecter</button>
+    <p class="login-error" id="login-error"></p>
+    <p style="text-align:center;margin-top:12px;"><a href="#" onclick="showResetForm();return false;" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Mot de passe oublié ?</a></p>
+  </div>
+
+  <div class="login-box" id="reset-box" style="display:none;">
+    <div class="brand"><a href="site-client.html" style="color:inherit;text-decoration:none;">Portail</a></div>
+    <div class="sub">Réinitialiser le mot de passe</div>
+    <div class="f"><label>Courriel</label><input type="email" id="reset-email"></div>
+    <button onclick="sendResetLink()">Envoyer le lien</button>
+    <p class="login-error" id="reset-error"></p>
+    <p class="login-error" id="reset-success" style="color:var(--sage);"></p>
+    <p style="text-align:center;margin-top:12px;"><a href="#" onclick="showLoginForm();return false;" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Retour à la connexion</a></p>
+  </div>
+
+  <div class="login-box" id="newpw-box" style="display:none;">
+    <div class="brand"><a href="site-client.html" style="color:inherit;text-decoration:none;">Portail</a></div>
+    <div class="sub">Choisir un nouveau mot de passe</div>
+    <div class="f"><label>Nouveau mot de passe</label><input type="password" id="newpw-value"></div>
+    <button onclick="confirmNewPassword()">Confirmer</button>
+    <p class="login-error" id="newpw-error"></p>
+  </div>
+</div>
+
+<div id="app-shell">
+  <div class="shell">
+    <aside>
+      <div class="brand"><a href="site-client.html" style="color:inherit;text-decoration:none;">Portail</a></div>
+      <span class="brand-sub">Espace locataire</span>
+      <button class="tab-btn active" data-tab="overview" onclick="showTab('overview')">Mon logement</button>
+      <button class="tab-btn" data-tab="payments" onclick="showTab('payments')">Mes paiements</button>
+      <button class="tab-btn" data-tab="requests" onclick="showTab('requests')">Signaler un problème</button>
+      <div class="signout">
+        <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
+      </div>
+    </aside>
+
+    <main>
+      <section id="overview" class="section active">
+        <h1 id="tenant-greeting">Bonjour</h1>
+        <p class="subtitle" id="tenant-subtitle">Chargement...</p>
+        <div class="card-box">
+          <h3>Mon bail</h3>
+          <div id="lease-details">
+            <div class="kv"><span>Chargement...</span><span></span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="payments" class="section">
+        <div class="toolbar"><h2>Mes paiements</h2></div>
+        <table><thead><tr><th>Montant</th><th>Échéance</th><th>Statut</th></tr></thead>
+          <tbody id="payments-body"><tr class="empty-row"><td colspan="3">Chargement...</td></tr></tbody>
+        </table>
+      </section>
+
+      <section id="requests" class="section">
+        <div class="toolbar"><h2>Signaler un problème</h2></div>
+        <div class="card-box">
+          <form onsubmit="submitServiceRequest(event)">
+            <div class="f">
+              <label>Décris le problème</label>
+              <textarea id="request-message" required placeholder="Ex: Le chauffe-eau ne chauffe plus."></textarea>
+            </div>
+            <button class="submit" type="submit">Envoyer la demande</button>
+            <p class="form-note" id="request-note"></p>
+          </form>
+        </div>
+
+        <h3 style="font-family:'Fraunces',serif;font-size:17px;font-weight:600;margin:24px 0 14px;">Mes demandes précédentes</h3>
+        <table><thead><tr><th>Description</th><th>Statut</th></tr></thead>
+          <tbody id="requests-body"><tr class="empty-row"><td colspan="2">Chargement...</td></tr></tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
+
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+function esc(str){
+  return (str == null ? '' : String(str)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+let tenantRecord = null;
+let currentLease = null;
+
+supabaseClient.auth.onAuthStateChange((event) => {
+  if(event === 'PASSWORD_RECOVERY'){
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('app-shell').style.display = 'none';
+    showNewPasswordForm();
+  }
+});
+
+function showResetForm(){
+  document.querySelector('#login-screen .login-box').style.display = 'none';
+  document.getElementById('reset-box').style.display = 'block';
+}
+function showLoginForm(){
+  document.getElementById('reset-box').style.display = 'none';
+  document.getElementById('newpw-box').style.display = 'none';
+  document.querySelector('#login-screen .login-box').style.display = 'block';
+}
+function showNewPasswordForm(){
+  document.querySelector('#login-screen .login-box').style.display = 'none';
+  document.getElementById('reset-box').style.display = 'none';
+  document.getElementById('newpw-box').style.display = 'block';
+}
+
+async function sendResetLink(){
+  const email = document.getElementById('reset-email').value;
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.href.split('#')[0].split('?')[0],
+  });
+  const errEl = document.getElementById('reset-error');
+  const okEl = document.getElementById('reset-success');
+  if(error){ errEl.textContent = error.message; errEl.style.display = 'block'; okEl.style.display = 'none'; return; }
+  errEl.style.display = 'none';
+  okEl.textContent = 'Lien envoyé ! Vérifie ta boîte courriel.';
+  okEl.style.display = 'block';
+}
+
+async function confirmNewPassword(){
+  const newPassword = document.getElementById('newpw-value').value;
+  const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+  const errEl = document.getElementById('newpw-error');
+  if(error){ errEl.textContent = error.message; errEl.style.display = 'block'; return; }
+  await supabaseClient.auth.signOut();
+  showLoginForm();
+  showLoginError('Mot de passe mis à jour — reconnecte-toi.');
+}
+
+async function init(){
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(session) await loadTenantDashboard(session.user.id);
+}
+
+async function handleLogin(){
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if(error){ showLoginError(error.message); return; }
+  await loadTenantDashboard(data.user.id);
+}
+
+async function handleSignOut(){
+  await supabaseClient.auth.signOut();
+  document.getElementById('app-shell').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+}
+
+function showLoginError(msg){
+  const el = document.getElementById('login-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function loadTenantDashboard(userId){
+  const { data: tenant, error } = await supabaseClient
+    .from('tenants').select('*').eq('user_id', userId).single();
+
+  if(error || !tenant){
+    showLoginError("Aucun profil locataire associé à ce compte.");
+    return;
+  }
+  tenantRecord = tenant;
+
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-shell').style.display = 'block';
+  document.getElementById('tenant-greeting').textContent = 'Bonjour, ' + tenant.full_name.split(' ')[0];
+
+  const { data: leases } = await supabaseClient
+    .from('leases')
+    .select('*, units(*, buildings(address)), payments(*)')
+    .eq('tenant_id', tenant.id)
+    .order('start_date', { ascending: false });
+
+  currentLease = leases?.[0] || null;
+
+  renderOverview(currentLease);
+  renderPayments(currentLease);
+  await loadRequests();
+}
+
+function renderOverview(lease){
+  const sub = document.getElementById('tenant-subtitle');
+  const details = document.getElementById('lease-details');
+
+  if(!lease){
+    sub.textContent = 'Aucun bail actif';
+    details.innerHTML = '<div class="kv"><span>Aucun bail trouvé pour ce compte.</span><span></span></div>';
+    return;
+  }
+
+  const unit = lease.units;
+  sub.textContent = (unit?.buildings?.address || '') + (unit ? ', unité ' + unit.unit_number : '');
+
+  details.innerHTML = `
+    <div class="kv"><span>Adresse</span><span>${esc(unit?.buildings?.address) || '—'}</span></div>
+    <div class="kv"><span>Unité</span><span>${esc(unit?.unit_number) || '—'} (${esc(unit?.unit_type) || '—'})</span></div>
+    <div class="kv"><span>Loyer mensuel</span><span>${Number(lease.monthly_rent).toLocaleString('fr-CA')} $</span></div>
+    <div class="kv"><span>Début du bail</span><span>${esc(lease.start_date) || '—'}</span></div>
+    <div class="kv"><span>Fin du bail</span><span>${esc(lease.end_date) || '—'}</span></div>
+    <div class="kv"><span>Statut</span><span><span class="tag ok">${esc(lease.status)}</span></span></div>
+  `;
+}
+
+function renderPayments(lease){
+  const body = document.getElementById('payments-body');
+  const payments = lease?.payments || [];
+  if(!payments.length){
+    body.innerHTML = '<tr class="empty-row"><td colspan="3">Aucun paiement.</td></tr>';
+    return;
+  }
+  const tagClass = { paid: 'ok', late: 'urgent', pending: 'warn' };
+  const tagLabel = { paid: 'Payé', late: 'En retard', pending: 'En attente' };
+  body.innerHTML = payments
+    .sort((a,b)=> new Date(b.due_date) - new Date(a.due_date))
+    .map(p => `<tr>
+      <td>${Number(p.amount).toLocaleString('fr-CA')} $</td>
+      <td>${p.due_date}</td>
+      <td><span class="tag ${tagClass[p.status]}">${tagLabel[p.status]}</span></td>
+    </tr>`).join('');
+}
+
+async function loadRequests(){
+  const { data } = await supabaseClient
+    .from('service_requests')
+    .select('*')
+    .eq('tenant_id', tenantRecord.id)
+    .order('created_at', { ascending: false });
+
+  const body = document.getElementById('requests-body');
+  if(!data || !data.length){
+    body.innerHTML = '<tr class="empty-row"><td colspan="2">Aucune demande envoyée.</td></tr>';
+    return;
+  }
+  const tagClass = { open: 'neutral', in_progress: 'warn', closed: 'ok' };
+  const tagLabel = { open: 'Ouverte', in_progress: 'En cours', closed: 'Fermée' };
+  body.innerHTML = data.map(r => `<tr>
+    <td>${esc(r.description)}</td>
+    <td><span class="tag ${tagClass[r.status]}">${tagLabel[r.status]}</span></td>
+  </tr>`).join('');
+}
+
+async function submitServiceRequest(event){
+  event.preventDefault();
+  const noteEl = document.getElementById('request-note');
+  if(!currentLease?.units?.id){
+    noteEl.textContent = "Impossible d'envoyer : aucun logement associé à ton compte.";
+    noteEl.style.color = 'var(--rust)';
+    noteEl.style.display = 'block';
+    return;
+  }
+  const message = document.getElementById('request-message').value;
+  const { error } = await supabaseClient.from('service_requests').insert({
+    unit_id: currentLease.units.id,
+    tenant_id: tenantRecord.id,
+    description: message,
+  });
+  if(error){
+    noteEl.textContent = "Une erreur est survenue, réessaie.";
+    noteEl.style.color = 'var(--rust)';
+  } else {
+    noteEl.textContent = "Demande envoyée !";
+    noteEl.style.color = 'var(--sage)';
+    document.getElementById('request-message').value = '';
+    await loadRequests();
+  }
+  noteEl.style.display = 'block';
+}
+
+function showTab(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelector(`.tab-btn[data-tab="${id}"]`)?.classList.add('active');
+}
+
+init();
+</script>
+</body>
+</html>
