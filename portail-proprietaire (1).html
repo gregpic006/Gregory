@@ -153,6 +153,8 @@
       <button class="tab-btn" data-tab="workorders" onclick="showTab('workorders')">Travaux</button>
       <button class="tab-btn" data-tab="approvals" onclick="showTab('approvals')">Travaux à approuver</button>
       <button class="tab-btn" data-tab="inquiries" onclick="showTab('inquiries')">Demandes</button>
+      <button class="tab-btn" data-tab="documents" onclick="showTab('documents')">Documents</button>
+      <button class="tab-btn" data-tab="messages" onclick="showTab('messages')">Messages</button>
       <div class="signout">
         <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
       </div>
@@ -219,6 +221,33 @@
         <table><thead><tr><th>Type</th><th>Catégorie IA</th><th>Contact</th><th>Résumé</th><th>Statut</th></tr></thead>
           <tbody id="inquiries-body"><tr class="empty-row"><td colspan="5">Chargement...</td></tr></tbody>
         </table>
+      </section>
+
+      <section id="documents" class="section">
+        <div class="toolbar"><h2>Documents</h2></div>
+        <div class="wo-form open" style="margin-bottom:16px;">
+          <div class="f"><label>Titre</label><input type="text" id="doc-title"></div>
+          <div class="f"><label>Type</label>
+            <select id="doc-type">
+              <option value="bail">Bail</option>
+              <option value="mandat">Mandat</option>
+              <option value="reglement">Règlement</option>
+              <option value="rapport">Rapport</option>
+            </select>
+          </div>
+          <div class="f"><label>Lien (URL)</label><input type="text" id="doc-url" placeholder="https://..."></div>
+          <button onclick="addDocument()">Ajouter</button>
+        </div>
+        <table><thead><tr><th>Titre</th><th>Type</th><th>Lien</th></tr></thead>
+          <tbody id="documents-body"><tr class="empty-row"><td colspan="3">Chargement...</td></tr></tbody>
+        </table>
+      </section>
+
+      <section id="messages" class="section">
+        <div class="toolbar"><h2>Messages</h2></div>
+        <div id="messages-body" style="margin-bottom:16px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+        <div class="f"><label>Nouveau message</label><textarea id="message-text" style="width:100%;padding:11px 12px;border:1px solid var(--line);background:var(--paper-2);font-size:13.5px;font-family:'Inter',sans-serif;min-height:80px;"></textarea></div>
+        <button class="btn-small" onclick="sendMessage()">Envoyer</button>
       </section>
     </main>
   </div>
@@ -349,6 +378,8 @@ async function loadBuildings(){
   await loadWorkTab();
   await loadApprovals();
   await loadInquiries();
+  await loadDocuments();
+  await loadMessages();
 }
 
 function renderOverview(buildings){
@@ -571,6 +602,50 @@ async function loadApprovals(){
 async function decideApproval(id, decision){
   await supabaseClient.from('approvals').update({ status: decision, decided_at: new Date().toISOString() }).eq('id', id);
   await loadApprovals();
+}
+
+async function loadDocuments(){
+  const { data } = await supabaseClient.from('documents').select('*').eq('owner_id', ownerRecord.id).order('created_at', { ascending: false });
+  const body = document.getElementById('documents-body');
+  const typeLabel = { bail:'Bail', mandat:'Mandat', reglement:'Règlement', rapport:'Rapport' };
+  body.innerHTML = (data && data.length)
+    ? data.map(d => `<tr><td>${d.title}</td><td>${typeLabel[d.doc_type] || d.doc_type || '—'}</td><td>${d.file_url ? `<a href="${d.file_url}" target="_blank" rel="noopener">Ouvrir</a>` : '—'}</td></tr>`).join('')
+    : '<tr class="empty-row"><td colspan="3">Aucun document.</td></tr>';
+}
+
+async function addDocument(){
+  const title = document.getElementById('doc-title').value;
+  const doc_type = document.getElementById('doc-type').value;
+  const file_url = document.getElementById('doc-url').value;
+  if(!title){ alert('Donne un titre au document.'); return; }
+  await supabaseClient.from('documents').insert({ owner_id: ownerRecord.id, title, doc_type, file_url: file_url || null });
+  document.getElementById('doc-title').value = '';
+  document.getElementById('doc-url').value = '';
+  await loadDocuments();
+}
+
+async function loadMessages(){
+  const { data } = await supabaseClient.from('messages').select('*').eq('owner_id', ownerRecord.id).order('created_at', { ascending: true });
+  const body = document.getElementById('messages-body');
+  if(!data || !data.length){
+    body.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun message.</p>';
+    return;
+  }
+  body.innerHTML = data.map(m => `
+    <div class="approve-row" style="justify-content:flex-start;">
+      <div class="desc">
+        <b>${m.sender === 'owner' ? 'Toi' : 'Équipe Portail'} · ${new Date(m.created_at).toLocaleString('fr-CA')}</b>
+        <span>${m.body}</span>
+      </div>
+    </div>`).join('');
+}
+
+async function sendMessage(){
+  const el = document.getElementById('message-text');
+  if(!el.value.trim()) return;
+  await supabaseClient.from('messages').insert({ owner_id: ownerRecord.id, sender: 'owner', body: el.value.trim() });
+  el.value = '';
+  await loadMessages();
 }
 
 async function loadInquiries(){
