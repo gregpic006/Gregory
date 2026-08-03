@@ -208,6 +208,12 @@ create table documents (
   title text not null,
   file_url text,
   doc_type text,   -- 'bail','mandat','reglement','rapport'
+  ai_processed boolean default false,
+  ai_summary text,
+  ai_parties text,
+  ai_key_amount numeric(10,2),
+  ai_expiry_date date,
+  ai_extracted jsonb,
   created_at timestamptz default now()
 );
 
@@ -684,6 +690,35 @@ end;
 $$;
 
 select cron.schedule('monthly-owner-reports', '0 11 1 * *', $$select trigger_monthly_owner_reports()$$);
+
+-- ============================================================
+-- EXTRACTION IA DES DOCUMENTS
+-- ============================================================
+-- À chaque document téléversé avec un fichier, déclenche la
+-- fonction Edge "handle-document-upload" qui lit le PDF/image et
+-- en extrait un résumé, les parties, un montant clé et une date
+-- d'échéance (baux, mandats, factures, assurances, licences...).
+create or replace function notify_new_document()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.file_url is not null then
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-document-upload',
+      body := jsonb_build_object('document_id', new.id),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+  end if;
+  return new;
+end;
+$$;
+
+create trigger on_document_insert
+  after insert on documents
+  for each row execute function notify_new_document();
 
 -- ============================================================
 -- STOCKAGE — upload de documents (baux, mandats, rapports)

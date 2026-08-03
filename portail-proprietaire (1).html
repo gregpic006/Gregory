@@ -240,8 +240,15 @@
           <button onclick="addDocument()" id="doc-submit-btn">Téléverser</button>
           <p class="login-error" id="doc-error"></p>
         </div>
-        <table><thead><tr><th>Titre</th><th>Type</th><th>Fichier</th><th></th></tr></thead>
-          <tbody id="documents-body"><tr class="empty-row"><td colspan="3">Chargement...</td></tr></tbody>
+        <div class="wo-form open" style="margin-bottom:16px;">
+          <div class="f" style="flex:1;"><label>Poser une question sur tes documents</label>
+            <input type="text" id="doc-question" placeholder="Ex. : Quand expire l'assurance de cet entrepreneur ?">
+          </div>
+          <button onclick="askDocuments()" id="doc-ask-btn">Demander</button>
+          <p id="doc-answer" style="width:100%;font-size:13px;color:var(--muted);margin-top:6px;"></p>
+        </div>
+        <table><thead><tr><th>Titre</th><th>Type</th><th>Analyse IA</th><th>Fichier</th><th></th></tr></thead>
+          <tbody id="documents-body"><tr class="empty-row"><td colspan="5">Chargement...</td></tr></tbody>
         </table>
       </section>
 
@@ -619,7 +626,7 @@ async function loadDocuments(){
   const typeLabel = { bail:'Bail', mandat:'Mandat', reglement:'Règlement', rapport:'Rapport' };
 
   if(!data || !data.length){
-    body.innerHTML = '<tr class="empty-row"><td colspan="4">Aucun document.</td></tr>';
+    body.innerHTML = '<tr class="empty-row"><td colspan="5">Aucun document.</td></tr>';
     return;
   }
 
@@ -629,14 +636,46 @@ async function loadDocuments(){
       const { data: signed } = await supabaseClient.storage.from('documents').createSignedUrl(d.file_url, 3600);
       if(signed?.signedUrl) link = `<a href="${signed.signedUrl}" target="_blank" rel="noopener">Ouvrir</a>`;
     }
+    let analysis = '<span style="color:var(--muted);">En traitement…</span>';
+    if(d.ai_processed){
+      const bits = [d.ai_summary || ''];
+      if(d.ai_expiry_date) bits.push(`Échéance : ${d.ai_expiry_date}`);
+      if(d.ai_key_amount != null) bits.push(`${Number(d.ai_key_amount).toLocaleString('fr-CA')} $`);
+      analysis = bits.filter(Boolean).join(' — ');
+    }
     return `<tr>
       <td>${d.title}</td>
       <td>${typeLabel[d.doc_type] || d.doc_type || '—'}</td>
+      <td style="font-size:12.5px;">${analysis}</td>
       <td>${link}</td>
       <td><button class="btn-small" onclick="deleteDocument('${d.id}', '${d.file_url || ''}')">Supprimer</button></td>
     </tr>`;
   }));
   body.innerHTML = rows.join('');
+}
+
+async function askDocuments(){
+  const question = document.getElementById('doc-question').value.trim();
+  const answerEl = document.getElementById('doc-answer');
+  if(!question) return;
+  answerEl.textContent = 'Recherche en cours…';
+
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/ask-documents`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ question }),
+    });
+    const data = await res.json();
+    answerEl.textContent = data.answer || data.error || 'Aucune réponse.';
+  } catch (e) {
+    answerEl.textContent = 'Erreur de communication avec l\'assistant.';
+  }
 }
 
 async function addDocument(){
