@@ -34,6 +34,23 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Accès refusé — compte non admin" }), { status: 403, headers: corsHeaders });
     }
 
+    const body = await req.json().catch(() => ({}));
+
+    if (body.action === "update_anomaly") {
+      const { anomaly_id, status } = body;
+      await fetch(`${supabaseUrl}/rest/v1/financial_anomalies?id=eq.${anomaly_id}`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ status }),
+      });
+      await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ actor_type: "admin", actor_id: userId, action: "anomaly.update", entity_type: "financial_anomalies", entity_id: anomaly_id, details: { new_status: status } }),
+      });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     const ownersRes = await fetch(
       `${supabaseUrl}/rest/v1/owners?select=id,full_name,phone,management_rate,spending_cap,buildings(id,address,units(id,rent,status))`,
       { headers: adminHeaders },
@@ -51,6 +68,12 @@ Deno.serve(async (req) => {
       { headers: adminHeaders },
     );
     const newInquiries = await inquiriesRes.json();
+
+    const anomaliesRes = await fetch(
+      `${supabaseUrl}/rest/v1/financial_anomalies?status=eq.open&select=*,owners(full_name)&order=severity.asc,created_at.desc`,
+      { headers: adminHeaders },
+    );
+    const anomalies = await anomaliesRes.json();
 
     const clients = owners.map((o: any) => {
       const buildings = o.buildings || [];
@@ -75,9 +98,10 @@ Deno.serve(async (req) => {
       monthly_revenue: Math.round(clients.reduce((s: number, c: any) => s + c.monthly_revenue, 0) * 100) / 100,
       pending_approvals: pendingApprovals.length,
       new_inquiries: newInquiries.length,
+      open_anomalies: anomalies.length,
     };
 
-    return new Response(JSON.stringify({ totals, clients }), {
+    return new Response(JSON.stringify({ totals, clients, anomalies }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

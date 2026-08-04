@@ -808,6 +808,7 @@ async function loadInquiries(){
   const { data } = await supabaseClient
     .from('inquiries')
     .select('*')
+    .eq('type', 'visite')
     .order('created_at', { ascending: false });
 
   const body = document.getElementById('inquiries-body');
