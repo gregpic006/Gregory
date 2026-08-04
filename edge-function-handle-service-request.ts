@@ -33,17 +33,28 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
     });
 
     const aiData = await aiRes.json();
+    if (!aiRes.ok) {
+      console.error("Anthropic API error", aiRes.status, JSON.stringify(aiData));
+      return new Response(JSON.stringify({ ok: false, error: "anthropic_api_error", detail: aiData }), { status: 502 });
+    }
+
     const rawText = aiData.content?.[0]?.text ?? "{}";
     const cleaned = rawText.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(cleaned);
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Failed to parse AI response as JSON", rawText);
+      return new Response(JSON.stringify({ ok: false, error: "ai_response_not_json", raw: rawText }), { status: 502 });
+    }
 
-    await fetch(`${supabaseUrl}/rest/v1/service_requests?id=eq.${record.id}`, {
+    const patchRes = await fetch(`${supabaseUrl}/rest/v1/service_requests?id=eq.${record.id}`, {
       method: "PATCH",
       headers: {
         apikey: serviceRoleKey ?? "",
         Authorization: `Bearer ${serviceRoleKey}`,
         "Content-Type": "application/json",
-        Prefer: "return=minimal",
+        Prefer: "return=representation",
       },
       body: JSON.stringify({
         ai_category: parsed.category,
@@ -52,8 +63,15 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
       }),
     });
 
-    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    const patchData = await patchRes.json().catch(() => null);
+    if (!patchRes.ok || !patchData || patchData.length === 0) {
+      console.error("Failed to update service_requests", record.id, patchRes.status, JSON.stringify(patchData));
+      return new Response(JSON.stringify({ ok: false, error: "db_update_failed", status: patchRes.status, detail: patchData }), { status: 500 });
+    }
+
+    return new Response(JSON.stringify({ ok: true, updated: patchData[0] }), { status: 200 });
   } catch (err) {
+    console.error("handle-service-request unexpected error", err);
     return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 500 });
   }
 });
