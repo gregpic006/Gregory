@@ -71,6 +71,21 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ units: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    if (action === "find_owner_by_email") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/users?email=eq.${encodeURIComponent(body.email)}&role=eq.owner&select=id`, { headers: adminHeaders });
+      const [userRow] = await res.json();
+      if (!userRow) return new Response(JSON.stringify({ owner: null }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const ownerRes = await fetch(`${supabaseUrl}/rest/v1/owners?user_id=eq.${userRow.id}&select=id,full_name`, { headers: adminHeaders });
+      const [owner] = await ownerRes.json();
+      return new Response(JSON.stringify({ owner: owner || null }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "find_tenant_by_email") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/tenants?email=eq.${encodeURIComponent(body.email)}&select=id,full_name`, { headers: adminHeaders });
+      const [tenant] = await res.json();
+      return new Response(JSON.stringify({ tenant: tenant || null }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (action === "create_owner") {
       const { full_name, email, phone, company_name, management_rate, spending_cap } = body;
       if (!full_name || !email) {
@@ -101,7 +116,7 @@ Deno.serve(async (req) => {
         `Bonjour ${full_name},\n\nTon compte propriétaire Portail est prêt.\n\nPortail : ${OWNER_PORTAL_URL}\nCourriel : ${email}\nMot de passe temporaire : ${password}\n\nConnecte-toi puis change ton mot de passe si tu le souhaites (lien "Mot de passe oublié" sur la page de connexion).\n\nL'équipe Portail`);
 
       await logAudit("owner.create", "owners", owner?.id ?? null, { email });
-      return new Response(JSON.stringify({ ok: true, owner_id: owner?.id }), { status: 200, headers: corsHeaders });
+      return new Response(JSON.stringify({ ok: true, owner_id: owner?.id, temp_password: password }), { status: 200, headers: corsHeaders });
     }
 
     if (action === "add_building") {
@@ -176,7 +191,7 @@ Deno.serve(async (req) => {
         `Bonjour ${full_name},\n\nTon compte locataire Portail est prêt.\n\nPortail : ${TENANT_PORTAL_URL}\nCourriel : ${email}\nMot de passe temporaire : ${password}\n\nConnecte-toi pour voir ton bail, tes paiements et faire une demande de service. Tu peux changer ton mot de passe via "Mot de passe oublié" sur la page de connexion.\n\nL'équipe Portail`);
 
       await logAudit("tenant.create", "tenants", tenant?.id ?? null, { email, unit_id });
-      return new Response(JSON.stringify({ ok: true, tenant_id: tenant?.id }), { status: 200, headers: corsHeaders });
+      return new Response(JSON.stringify({ ok: true, tenant_id: tenant?.id, temp_password: password }), { status: 200, headers: corsHeaders });
     }
 
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
