@@ -17,9 +17,10 @@ const TEST_BOT_PASSWORD = process.env.TEST_BOT_PASSWORD;
 const TEST_OWNER_EMAIL = "e2e-owner@portail-diagnostic.internal";
 const TEST_BUILDING_ADDRESS = "999 Rue Diagnostic (test automatisé)";
 const today = new Date().toISOString().slice(0, 10);
-const TEST_UNIT_NUMBER = `E2E-${today}`;
-const TEST_TENANT_EMAIL = `e2e-tenant-${today}@portail-diagnostic.internal`;
-const TEST_MANDAT_EMAIL = `e2e-mandat-${today}@portail-diagnostic.internal`;
+const runStamp = Date.now(); // unique par exécution, pour éviter les collisions si le diagnostic tourne plusieurs fois le même jour
+const TEST_UNIT_NUMBER = `E2E-${runStamp}`;
+const TEST_TENANT_EMAIL = `e2e-tenant-${runStamp}@portail-diagnostic.internal`;
+const TEST_MANDAT_EMAIL = `e2e-mandat-${runStamp}@portail-diagnostic.internal`;
 
 const results = [];
 function record(name, status, detail = "") {
