@@ -179,7 +179,7 @@ async function main() {
   }
 
   // --- Catégorisation IA (asynchrone, on laisse le temps au trigger) ---
-  await sleep(9000);
+  await sleep(20000);
   const srCheck = await restRequest("GET", `service_requests?id=eq.${serviceRequestId}&select=ai_category,ai_urgency,ai_estimated_cost`, adminJwt);
   const sr = srCheck.data?.[0];
   if (sr && sr.ai_category) {
