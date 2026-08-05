@@ -1,7 +1,14 @@
 // Diagnostic de bout en bout pour Portail.
-// Exécuté via GitHub Actions (workflow_dispatch + cron), jamais depuis
-// le navigateur d'un client. Utilise un compte admin dédié aux tests
-// (TEST_BOT_EMAIL / TEST_BOT_PASSWORD, fournis en secrets GitHub).
+// Exécuté via GitHub Actions (workflow_dispatch uniquement — voir
+// diagnostic.yml), jamais depuis le navigateur d'un client. Utilise un
+// compte admin dédié aux tests (TEST_BOT_EMAIL / TEST_BOT_PASSWORD,
+// fournis en secrets GitHub).
+//
+// Toutes les données créées par ce script sont fictives et identifiables
+// par des courriels @portail-diagnostic.internal — le nettoyage
+// (cleanup_e2e_diagnostic_data, dans onboarding-api.ts) tourne TOUJOURS
+// à la fin, succès ou échec, pour ne jamais laisser de trace dans la
+// vraie base de données.
 //
 // Chaque étape s'ajoute à `results` avec {name, status, detail}.
 // status: 'PASS' | 'FAIL' | 'SKIP'. Le script quitte avec le code 1
@@ -29,6 +36,8 @@ function record(name, status, detail = "") {
   console.log(`${icon} ${name}${detail ? " — " + detail : ""}`);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let adminJwt = null;
 
 async function signIn(email, password) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
@@ -73,16 +82,15 @@ async function restRequest(method, path, jwt, body) {
 async function main() {
   if (!TEST_BOT_EMAIL || !TEST_BOT_PASSWORD) {
     record("Configuration", "FAIL", "TEST_BOT_EMAIL / TEST_BOT_PASSWORD manquants (secrets GitHub Actions)");
-    return finish();
+    return;
   }
 
-  let adminJwt;
   try {
     adminJwt = await signIn(TEST_BOT_EMAIL, TEST_BOT_PASSWORD);
     record("Authentification admin (test-bot)", "PASS");
   } catch (e) {
     record("Authentification admin (test-bot)", "FAIL", String(e.message || e));
-    return finish();
+    return;
   }
 
   const dash = await callFn("admin-api", adminJwt, {});
@@ -90,7 +98,7 @@ async function main() {
     record("Accès admin-api (is_admin vérifié)", "PASS", `${dash.data.totals.clients_count} client(s), ${dash.data.totals.open_anomalies} anomalie(s) ouverte(s)`);
   } else {
     record("Accès admin-api (is_admin vérifié)", "FAIL", `status ${dash.status} — ${JSON.stringify(dash.data)}`);
-    return finish();
+    return;
   }
 
   // --- Onboarding : propriétaire (réutilisé s'il existe déjà) ---
@@ -109,7 +117,7 @@ async function main() {
       record("Onboarding — propriétaire de test", "PASS", "créé");
     } else {
       record("Onboarding — propriétaire de test", "FAIL", `status ${created.status} — ${JSON.stringify(created.data)}`);
-      return finish();
+      return;
     }
   }
 
@@ -127,7 +135,7 @@ async function main() {
       record("Onboarding — immeuble de test", "PASS", "créé");
     } else {
       record("Onboarding — immeuble de test", "FAIL", `status ${created.status} — ${JSON.stringify(created.data)}`);
-      return finish();
+      return;
     }
   }
 
@@ -139,7 +147,7 @@ async function main() {
     record("Onboarding — unité du jour", "PASS");
   } else {
     record("Onboarding — unité du jour", "FAIL", `status ${created_unit.status} — ${JSON.stringify(created_unit.data)}`);
-    return finish();
+    return;
   }
 
   // --- Onboarding : locataire + bail + accès portail ---
@@ -154,7 +162,7 @@ async function main() {
     record("Onboarding — locataire + bail + accès portail", "PASS");
   } else {
     record("Onboarding — locataire + bail + accès portail", "FAIL", `status ${createdTenant.status} — ${JSON.stringify(createdTenant.data)}`);
-    return finish();
+    return;
   }
 
   // --- Connexion locataire avec le mot de passe temporaire ---
@@ -164,7 +172,7 @@ async function main() {
     record("Connexion locataire (mot de passe temporaire)", "PASS");
   } catch (e) {
     record("Connexion locataire (mot de passe temporaire)", "FAIL", String(e.message || e));
-    return finish();
+    return;
   }
 
   // --- Demande de service par le locataire ---
@@ -176,7 +184,7 @@ async function main() {
     record("Locataire — soumission d'une demande de service", "PASS");
   } else {
     record("Locataire — soumission d'une demande de service", "FAIL", `status ${srInsert.status} — ${JSON.stringify(srInsert.data)}`);
-    return finish();
+    return;
   }
 
   // --- Catégorisation IA (asynchrone, on laisse le temps au trigger) ---
@@ -265,8 +273,20 @@ async function main() {
       record("CRM — création automatique du prospect", "FAIL", "aucun prospect trouvé pour ce courriel après 6s");
     }
   }
+}
 
-  return finish();
+async function cleanup() {
+  if (!adminJwt) {
+    // Impossible de se reconnecter comme admin (identifiants invalides, etc.) —
+    // rien n'a pu être créé au-delà de l'étape de connexion de toute façon.
+    return;
+  }
+  const res = await callFn("onboarding-api", adminJwt, { action: "cleanup_e2e_diagnostic_data" });
+  if (res.ok) {
+    record("Nettoyage — suppression des données de test", "PASS", JSON.stringify(res.data.summary || {}));
+  } else {
+    record("Nettoyage — suppression des données de test", "FAIL", `status ${res.status} — ${JSON.stringify(res.data)}`);
+  }
 }
 
 function finish() {
@@ -281,7 +301,16 @@ function finish() {
   }
 }
 
-main().catch((e) => {
-  console.error("Erreur inattendue du script de diagnostic :", e);
-  process.exitCode = 1;
-});
+(async () => {
+  try {
+    await main();
+  } catch (e) {
+    console.error("Erreur inattendue du script de diagnostic :", e);
+    record("Erreur inattendue", "FAIL", String(e?.message || e));
+  } finally {
+    // Toujours exécuté, succès ou échec — aucune donnée de test ne doit
+    // survivre au script, surtout en environnement de production réel.
+    await cleanup();
+    finish();
+  }
+})();

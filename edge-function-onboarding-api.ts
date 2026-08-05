@@ -86,6 +86,84 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ tenant: tenant || null }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Purge des données créées par le diagnostic E2E (scripts/e2e-diagnostic.mjs) —
+    // repère par les identifiants statiques utilisés uniquement par ce script
+    // (jamais par un vrai client), supprime dans l'ordre des clés étrangères,
+    // et ferme aussi les comptes Auth créés pour les tests. Idempotent : si
+    // rien ne correspond, ne fait rien.
+    if (action === "cleanup_e2e_diagnostic_data") {
+      const TEST_OWNER_EMAIL = "e2e-owner@portail-diagnostic.internal";
+      const TEST_TENANT_PATTERN = "e2e-tenant-*@portail-diagnostic.internal";
+      const TEST_MANDAT_PATTERN = "e2e-mandat-*@portail-diagnostic.internal";
+      const summary: Record<string, number> = {};
+
+      const del = async (table: string, query: string) => {
+        const res = await fetch(`${supabaseUrl}/rest/v1/${table}?${query}`, {
+          method: "DELETE",
+          headers: { ...adminHeaders, Prefer: "return=representation" },
+        });
+        const rows = await res.json().catch(() => []);
+        const count = Array.isArray(rows) ? rows.length : 0;
+        summary[table] = (summary[table] || 0) + count;
+        return Array.isArray(rows) ? rows : [];
+      };
+      const deleteAuthUser = async (id: string) => {
+        await fetch(`${supabaseUrl}/auth/v1/admin/users/${id}`, { method: "DELETE", headers: adminHeaders }).catch(() => null);
+        summary.auth_users = (summary.auth_users || 0) + 1;
+      };
+
+      // Locataires de test et tout ce qui en dépend.
+      const tenantsRes = await fetch(`${supabaseUrl}/rest/v1/tenants?email=like.${encodeURIComponent(TEST_TENANT_PATTERN)}&select=id,user_id`, { headers: adminHeaders });
+      const tenants = await tenantsRes.json().catch(() => []);
+      for (const t of tenants) {
+        const leasesRes = await fetch(`${supabaseUrl}/rest/v1/leases?tenant_id=eq.${t.id}&select=id`, { headers: adminHeaders });
+        const leases = await leasesRes.json().catch(() => []);
+        for (const l of leases) await del("payments", `lease_id=eq.${l.id}`);
+        await del("leases", `tenant_id=eq.${t.id}`);
+        await del("service_requests", `tenant_id=eq.${t.id}`);
+        await del("tenants", `id=eq.${t.id}`);
+        if (t.user_id) await deleteAuthUser(t.user_id);
+      }
+
+      // Propriétaire de test, son immeuble, ses unités et tout ce qui en dépend.
+      const ownerUserRes = await fetch(`${supabaseUrl}/rest/v1/users?email=eq.${encodeURIComponent(TEST_OWNER_EMAIL)}&select=id`, { headers: adminHeaders });
+      const [ownerUser] = await ownerUserRes.json().catch(() => [null]);
+      if (ownerUser) {
+        const ownerRes = await fetch(`${supabaseUrl}/rest/v1/owners?user_id=eq.${ownerUser.id}&select=id`, { headers: adminHeaders });
+        const [owner] = await ownerRes.json().catch(() => [null]);
+        if (owner) {
+          const buildingsRes = await fetch(`${supabaseUrl}/rest/v1/buildings?owner_id=eq.${owner.id}&select=id`, { headers: adminHeaders });
+          const buildings = await buildingsRes.json().catch(() => []);
+          for (const b of buildings) {
+            const unitsRes = await fetch(`${supabaseUrl}/rest/v1/units?building_id=eq.${b.id}&select=id`, { headers: adminHeaders });
+            const units = await unitsRes.json().catch(() => []);
+            for (const u of units) {
+              const woRes = await fetch(`${supabaseUrl}/rest/v1/work_orders?unit_id=eq.${u.id}&select=id`, { headers: adminHeaders });
+              const workOrders = await woRes.json().catch(() => []);
+              for (const wo of workOrders) await del("expenses", `work_order_id=eq.${wo.id}`);
+              await del("work_orders", `unit_id=eq.${u.id}`);
+              await del("service_requests", `unit_id=eq.${u.id}`);
+              await del("units", `id=eq.${u.id}`);
+            }
+            await del("buildings", `id=eq.${b.id}`);
+          }
+          await del("owners", `id=eq.${owner.id}`);
+        }
+        await deleteAuthUser(ownerUser.id);
+      }
+
+      // Prospects/demandes de mandat créés par le formulaire public de test.
+      const prospectsRes = await fetch(`${supabaseUrl}/rest/v1/prospects?email=like.${encodeURIComponent(TEST_MANDAT_PATTERN)}&select=id,inquiry_id`, { headers: adminHeaders });
+      const prospects = await prospectsRes.json().catch(() => []);
+      for (const p of prospects) {
+        await del("prospects", `id=eq.${p.id}`);
+        if (p.inquiry_id) await del("inquiries", `id=eq.${p.inquiry_id}`);
+      }
+      await del("inquiries", `email=like.${encodeURIComponent(TEST_MANDAT_PATTERN)}`);
+
+      return new Response(JSON.stringify({ ok: true, summary }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (action === "create_owner") {
       const { full_name, email, phone, company_name, management_rate, spending_cap } = body;
       if (!full_name || !email) {

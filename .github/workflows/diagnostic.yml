@@ -2,8 +2,11 @@ name: Diagnostic Portail
 
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "0 12 * * *"
+  # Le cron quotidien a été retiré : le script nettoie maintenant ses
+  # propres données à la fin de chaque exécution (voir cleanup() dans
+  # e2e-diagnostic.mjs), mais on préfère déclencher ce test manuellement
+  # plutôt que de laisser un processus automatisé toucher la base de
+  # production sans supervision, surtout à l'approche d'un test client.
 
 jobs:
   e2e:
