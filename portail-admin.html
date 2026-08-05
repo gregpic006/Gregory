@@ -165,6 +165,20 @@
     <tbody id="audit-log-body"><tr class="empty-row"><td colspan="4">Chargement...</td></tr></tbody>
   </table>
 
+  <h1 style="margin-top:40px;font-size:22px;">Travailleurs — vérification</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Un travailleur non conforme (licence RBQ ou assurance manquante/expirée) ne peut pas être assigné à un travail — blocage automatique en temps réel</p>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom</label><input type="text" id="wk-name" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Spécialité</label><input type="text" id="wk-specialty" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone</label><input type="text" id="wk-phone" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel</label><input type="email" id="wk-email" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Licence RBQ (si applicable)</label><input type="text" id="wk-rbq" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);"><input type="checkbox" id="wk-requires-rbq"> Métier réglementé (RBQ requise)</label></div>
+    <button onclick="createWorker()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter un travailleur</button>
+  </div>
+  <p id="wk-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
+  <div id="workers-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
   <h1 style="margin-top:40px;font-size:22px;">Travaux — demandes ouvertes</h1>
   <p class="subtitle" style="margin-bottom:16px;">Sélection du travailleur, négociation de la paie et assignation</p>
   <div id="service-requests-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
@@ -372,6 +386,11 @@ function renderCommandCenter(cc){
   if(cc.onboarding_incomplet?.length){
     sections.push({ label: '📋 Dossiers clients incomplets', items: cc.onboarding_incomplet.map(o => `${esc(o.full_name)} — ${esc(o.gaps.join(', '))} <button onclick="sendOnboardingReminder('${o.owner_id}')" style="border:1px solid var(--ink);background:none;padding:3px 8px;font-size:11px;cursor:pointer;margin-left:6px;">Envoyer un rappel</button>`) });
   }
+  if(cc.travailleurs_a_verifier?.length){
+    sections.push({ label: '🛠 Travailleurs à vérifier', color: '#c0392b', items: cc.travailleurs_a_verifier.map(v => v.action === 'worker_verification.non_compliant'
+      ? `${esc(v.details?.name)} — ${esc((v.details?.reasons || []).join(', '))}`
+      : `${esc(v.details?.name)} — expire bientôt (RBQ ${esc(v.details?.rbq_license_expiry) || '—'}, assurance ${esc(v.details?.insurance_expiry) || '—'})`) });
+  }
 
   if(!sections.length){
     container.innerHTML = '<p style="color:var(--sage);font-size:13.5px;">Rien à signaler aujourd\'hui — tout est sous contrôle.</p>';
@@ -521,13 +540,99 @@ async function callOpsApi(payload){
 }
 
 async function loadOps(){
-  if(!workersDirectory.length){
-    const wd = await callOpsApi({ action: 'list_workers' });
-    workersDirectory = wd?.workers || [];
-  }
+  await loadWorkersAdmin();
   await loadServiceRequestsAdmin();
   await loadWorkOrdersAdmin();
   await loadLatePaymentsAdmin();
+}
+
+async function loadWorkersAdmin(){
+  const data = await callOpsApi({ action: 'list_workers' });
+  workersDirectory = data?.workers || [];
+  const container = document.getElementById('workers-body');
+  if(!container) return;
+  if(!workersDirectory.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun travailleur.</p>';
+    return;
+  }
+  container.innerHTML = workersDirectory.map(w => {
+    const reasons = [];
+    if(w.missing_rbq_license) reasons.push('licence RBQ manquante');
+    if(w.rbq_expired) reasons.push('licence RBQ expirée');
+    if(w.missing_insurance_doc) reasons.push('preuve d\'assurance manquante');
+    if(w.insurance_expired) reasons.push('assurance expirée');
+    const statusBadge = reasons.length
+      ? `<span style="background:#c0392b;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">NON CONFORME — ${esc(reasons.join(', '))}</span>`
+      : `<span style="background:#4c7a4c;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">CONFORME</span>`;
+    const soonBadge = (w.rbq_expiring_soon || w.insurance_expiring_soon)
+      ? ` <span style="background:#e6a817;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">EXPIRE BIENTÔT</span>` : '';
+    return `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${esc(w.name)} — ${esc(w.specialty) || 'spécialité non précisée'}</b>
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">${esc(w.phone) || '—'} · ${esc(w.email) || '—'} · ${w.completed_jobs_count} travail(aux) complété(s), ${w.declined_jobs_count} refusé(s) — ${statusBadge}${soonBadge}</span>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Requiert RBQ</label>
+          <input type="checkbox" id="wk-req-${w.id}" ${w.requires_rbq ? 'checked' : ''}>
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Licence RBQ</label>
+          <input type="text" id="wk-lic-${w.id}" value="${esc(w.rbq_license) || ''}" style="padding:8px;border:1px solid var(--line);width:130px;">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Expiration RBQ</label>
+          <input type="date" id="wk-licexp-${w.id}" value="${w.rbq_license_expiry || ''}" style="padding:8px;border:1px solid var(--line);">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Expiration assurance</label>
+          <input type="date" id="wk-insexp-${w.id}" value="${w.insurance_expiry || ''}" style="padding:8px;border:1px solid var(--line);">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Preuve d'assurance ${w.insurance_document_id ? '(déjà au dossier)' : ''}</label>
+          <input type="file" id="wk-insfile-${w.id}" accept=".pdf,image/*">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Notes</label>
+          <input type="text" id="wk-notes-${w.id}" value="${esc(w.verification_notes) || ''}" style="padding:8px;border:1px solid var(--line);width:160px;">
+        </div>
+        <button onclick="saveWorkerVerification('${w.id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Enregistrer la vérification</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function createWorker(){
+  const name = document.getElementById('wk-name').value;
+  const specialty = document.getElementById('wk-specialty').value;
+  const phone = document.getElementById('wk-phone').value;
+  const email = document.getElementById('wk-email').value;
+  const rbq_license = document.getElementById('wk-rbq').value;
+  const requires_rbq = document.getElementById('wk-requires-rbq').checked;
+  const msg = document.getElementById('wk-msg');
+  if(!name){ msg.textContent = 'Le nom est requis.'; return; }
+  msg.textContent = 'Ajout en cours...';
+  const res = await callOpsApi({ action: 'create_worker', name, specialty, phone, email, rbq_license, requires_rbq });
+  if(!res?.ok){ msg.textContent = 'Erreur.'; return; }
+  msg.textContent = 'Travailleur ajouté !';
+  document.getElementById('wk-name').value = '';
+  document.getElementById('wk-specialty').value = '';
+  document.getElementById('wk-phone').value = '';
+  document.getElementById('wk-email').value = '';
+  document.getElementById('wk-rbq').value = '';
+  document.getElementById('wk-requires-rbq').checked = false;
+  await loadWorkersAdmin();
+}
+
+async function saveWorkerVerification(worker_id){
+  const requires_rbq = document.getElementById('wk-req-' + worker_id).checked;
+  const rbq_license = document.getElementById('wk-lic-' + worker_id).value;
+  const rbq_license_expiry = document.getElementById('wk-licexp-' + worker_id).value || null;
+  const insurance_expiry = document.getElementById('wk-insexp-' + worker_id).value || null;
+  const verification_notes = document.getElementById('wk-notes-' + worker_id).value;
+  const fileInput = document.getElementById('wk-insfile-' + worker_id);
+  const payload = { action: 'update_worker_verification', worker_id, requires_rbq, rbq_license, rbq_license_expiry, insurance_expiry, verification_notes, mark_verified: true };
+  if(fileInput.files?.[0]){
+    const file = fileInput.files[0];
+    payload.insurance_base64 = await readFileAsBase64(file);
+    payload.insurance_filename = file.name;
+    payload.insurance_content_type = file.type;
+  }
+  const res = await callOpsApi(payload);
+  if(res?.ok){ await loadWorkersAdmin(); }
 }
 
 async function loadLatePaymentsAdmin(){

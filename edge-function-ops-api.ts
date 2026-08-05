@@ -59,8 +59,70 @@ Deno.serve(async (req) => {
     }
 
     if (action === "list_workers") {
-      const res = await fetch(`${supabaseUrl}/rest/v1/workers?select=*&order=name.asc`, { headers: adminHeaders });
+      const res = await fetch(`${supabaseUrl}/rest/v1/worker_verification_status?select=*&order=name.asc`, { headers: adminHeaders });
       return new Response(JSON.stringify({ workers: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "create_worker") {
+      const { name, specialty, phone, email, rbq_license, requires_rbq } = body;
+      if (!name) {
+        return new Response(JSON.stringify({ error: "Nom requis" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/workers`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ name, specialty: specialty || null, phone: phone || null, email: email || null, rbq_license: rbq_license || null, requires_rbq: !!requires_rbq }),
+      });
+      await logAudit("worker.create", "workers", null, { name, specialty });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "update_worker_verification") {
+      const { worker_id, rbq_license, rbq_license_expiry, requires_rbq, insurance_expiry, verification_notes, insurance_base64, insurance_filename, insurance_content_type, mark_verified } = body;
+      if (!worker_id) {
+        return new Response(JSON.stringify({ error: "worker_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+
+      let insuranceDocumentId: string | null = null;
+      if (insurance_base64) {
+        const path = `workers/${worker_id}/${Date.now()}-${insurance_filename || "assurance"}`;
+        const bytes = Uint8Array.from(atob(insurance_base64), (c) => c.charCodeAt(0));
+        const uploadRes = await fetch(`${supabaseUrl}/storage/v1/object/documents/${path}`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${serviceRoleKey}`,
+            apikey: serviceRoleKey ?? "",
+            "Content-Type": insurance_content_type || "application/octet-stream",
+          },
+          body: bytes,
+        });
+        if (uploadRes.ok) {
+          const docRes = await fetch(`${supabaseUrl}/rest/v1/documents`, {
+            method: "POST",
+            headers: { ...adminHeaders, Prefer: "return=representation" },
+            body: JSON.stringify({ title: `Preuve d'assurance — travailleur ${worker_id}`, doc_type: "assurance_travailleur", file_url: path }),
+          });
+          const [doc] = await docRes.json();
+          insuranceDocumentId = doc?.id ?? null;
+        }
+      }
+
+      const patch: Record<string, unknown> = {};
+      if (rbq_license !== undefined) patch.rbq_license = rbq_license || null;
+      if (rbq_license_expiry !== undefined) patch.rbq_license_expiry = rbq_license_expiry || null;
+      if (requires_rbq !== undefined) patch.requires_rbq = !!requires_rbq;
+      if (insurance_expiry !== undefined) patch.insurance_expiry = insurance_expiry || null;
+      if (verification_notes !== undefined) patch.verification_notes = verification_notes || null;
+      if (insuranceDocumentId) patch.insurance_document_id = insuranceDocumentId;
+      if (mark_verified) patch.verified_by_admin_at = new Date().toISOString();
+
+      await fetch(`${supabaseUrl}/rest/v1/workers?id=eq.${worker_id}`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify(patch),
+      });
+      await logAudit("worker.verification_updated", "workers", worker_id, patch);
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
     if (action === "create_work_order") {
@@ -68,6 +130,18 @@ Deno.serve(async (req) => {
       if (!unit_id || !worker_id || !description || !worker_pay) {
         return new Response(JSON.stringify({ error: "Champs manquants" }), { status: 400, headers: corsHeaders });
       }
+
+      const verifRes = await fetch(`${supabaseUrl}/rest/v1/worker_verification_status?id=eq.${worker_id}&select=missing_rbq_license,rbq_expired,missing_insurance_doc,insurance_expired`, { headers: adminHeaders });
+      const [verif] = await verifRes.json();
+      const blockingReasons: string[] = [];
+      if (verif?.missing_rbq_license) blockingReasons.push("licence RBQ manquante");
+      if (verif?.rbq_expired) blockingReasons.push("licence RBQ expirée");
+      if (verif?.missing_insurance_doc) blockingReasons.push("preuve d'assurance manquante");
+      if (verif?.insurance_expired) blockingReasons.push("assurance expirée");
+      if (blockingReasons.length) {
+        return new Response(JSON.stringify({ error: `Impossible d'assigner ce travailleur — ${blockingReasons.join(", ")}. Complète sa vérification d'abord.` }), { status: 400, headers: corsHeaders });
+      }
+
       const coordinationFee = Math.round(Number(worker_pay) * 0.10 * 100) / 100;
       const estimatedCost = Math.round((Number(worker_pay) + coordinationFee) * 100) / 100;
 
@@ -99,6 +173,18 @@ Deno.serve(async (req) => {
 
     if (action === "reassign_work_order") {
       const { work_order_id, worker_id } = body;
+
+      const verifRes = await fetch(`${supabaseUrl}/rest/v1/worker_verification_status?id=eq.${worker_id}&select=missing_rbq_license,rbq_expired,missing_insurance_doc,insurance_expired`, { headers: adminHeaders });
+      const [verif] = await verifRes.json();
+      const blockingReasons: string[] = [];
+      if (verif?.missing_rbq_license) blockingReasons.push("licence RBQ manquante");
+      if (verif?.rbq_expired) blockingReasons.push("licence RBQ expirée");
+      if (verif?.missing_insurance_doc) blockingReasons.push("preuve d'assurance manquante");
+      if (verif?.insurance_expired) blockingReasons.push("assurance expirée");
+      if (blockingReasons.length) {
+        return new Response(JSON.stringify({ error: `Impossible d'assigner ce travailleur — ${blockingReasons.join(", ")}. Complète sa vérification d'abord.` }), { status: 400, headers: corsHeaders });
+      }
+
       await fetch(`${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}`, {
         method: "PATCH",
         headers: adminHeaders,

@@ -164,6 +164,12 @@ Deno.serve(async (req) => {
     );
     const lowConfidenceAiRuns = await lowConfidenceAiRunsRes.json().catch(() => []);
 
+    const workerVerificationIssuesRes = await fetch(
+      `${supabaseUrl}/rest/v1/audit_log?action=in.(worker_verification.non_compliant,worker_verification.expiring_soon)&created_at=gte.${new Date(Date.now() - 24 * 3600000).toISOString()}&select=id,action,entity_id,details,created_at&order=created_at.desc`,
+      { headers: adminHeaders },
+    );
+    const workerVerificationIssues = await workerVerificationIssuesRes.json().catch(() => []);
+
     const onboardingChecklistRes = await fetch(
       `${supabaseUrl}/rest/v1/owner_onboarding_checklist?onboarding_completed_at=is.null&select=*`,
       { headers: adminHeaders },
@@ -203,6 +209,7 @@ Deno.serve(async (req) => {
       dossiers_reparation_stagnants: stuckRepairCases,
       ia_faible_confiance: lowConfidenceAiRuns,
       onboarding_incomplet: onboardingIncomplet,
+      travailleurs_a_verifier: workerVerificationIssues,
     };
 
     const clients = owners.map((o: any) => {

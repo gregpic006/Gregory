@@ -1639,6 +1639,82 @@ $$;
 select cron.schedule('daily-flag-incomplete-onboarding', '0 15 * * *', $$select flag_incomplete_onboarding()$$);
 
 -- ============================================================
+-- VÉRIFICATION DES TRAVAILLEURS
+-- ============================================================
+-- Un travailleur ne doit jamais être assignable si ses documents
+-- obligatoires sont manquants ou expirés. Le blocage à l'assignation
+-- (voir ops-api.ts) est fait en temps réel contre cette vue — pas de
+-- colonne "can_be_assigned" à garder synchronisée, donc pas de délai
+-- possible entre une mise à jour de document et son effet. La licence
+-- RBQ (Régie du bâtiment du Québec) n'est exigée que pour les métiers
+-- réglementés (electricien, plombier, etc.) — l'admin décide au cas
+-- par cas via requires_rbq, ce système ne devine jamais qui en a besoin.
+alter table workers add column if not exists requires_rbq boolean default false;
+alter table workers add column if not exists rbq_license_expiry date;
+alter table workers add column if not exists insurance_expiry date;
+alter table workers add column if not exists insurance_document_id uuid references documents(id);
+alter table workers add column if not exists verification_notes text;
+alter table workers add column if not exists verified_by_admin_at timestamptz;
+
+create or replace view worker_verification_status as
+select
+  w.*,
+  (w.requires_rbq and (w.rbq_license is null or w.rbq_license = '')) as missing_rbq_license,
+  (w.rbq_license_expiry is not null and w.rbq_license_expiry < current_date) as rbq_expired,
+  (w.insurance_document_id is null) as missing_insurance_doc,
+  (w.insurance_expiry is not null and w.insurance_expiry < current_date) as insurance_expired,
+  (w.rbq_license_expiry is not null and w.rbq_license_expiry >= current_date and w.rbq_license_expiry <= current_date + interval '15 days') as rbq_expiring_soon,
+  (w.insurance_expiry is not null and w.insurance_expiry >= current_date and w.insurance_expiry <= current_date + interval '15 days') as insurance_expiring_soon,
+  coalesce((select count(*) from work_orders wo where wo.worker_id = w.id and wo.status = 'completed'), 0) as completed_jobs_count,
+  coalesce((select count(*) from work_orders wo where wo.worker_id = w.id and wo.worker_response = 'declined'), 0) as declined_jobs_count
+from workers w;
+
+create or replace function flag_worker_credential_issues()
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  r record;
+  v_reasons text[];
+begin
+  for r in select * from worker_verification_status
+  loop
+    v_reasons := array[]::text[];
+    if r.missing_rbq_license then v_reasons := array_append(v_reasons, 'licence RBQ manquante'); end if;
+    if r.rbq_expired then v_reasons := array_append(v_reasons, 'licence RBQ expirée'); end if;
+    if r.missing_insurance_doc then v_reasons := array_append(v_reasons, 'preuve d''assurance manquante'); end if;
+    if r.insurance_expired then v_reasons := array_append(v_reasons, 'assurance expirée'); end if;
+
+    if array_length(v_reasons, 1) > 0
+      and not exists (
+        select 1 from audit_log a
+        where a.action = 'worker_verification.non_compliant' and a.entity_id = r.id
+          and a.created_at >= now() - interval '7 days'
+      )
+    then
+      insert into audit_log (actor_type, action, entity_type, entity_id, details)
+      values ('system', 'worker_verification.non_compliant', 'workers', r.id, jsonb_build_object('name', r.name, 'reasons', v_reasons));
+    end if;
+
+    if (r.rbq_expiring_soon or r.insurance_expiring_soon)
+      and not exists (
+        select 1 from audit_log a
+        where a.action = 'worker_verification.expiring_soon' and a.entity_id = r.id
+          and a.created_at >= now() - interval '10 days'
+      )
+    then
+      insert into audit_log (actor_type, action, entity_type, entity_id, details)
+      values ('system', 'worker_verification.expiring_soon', 'workers', r.id, jsonb_build_object(
+        'name', r.name,
+        'rbq_license_expiry', r.rbq_license_expiry,
+        'insurance_expiry', r.insurance_expiry
+      ));
+    end if;
+  end loop;
+end;
+$$;
+
+select cron.schedule('daily-flag-worker-credential-issues', '0 11 * * *', $$select flag_worker_credential_issues()$$);
+
+-- ============================================================
 -- CRM COMMERCIAL — création automatique d'un prospect
 -- ============================================================
 -- Chaque demande de mandat (inquiries.type = 'mandat', soumise
