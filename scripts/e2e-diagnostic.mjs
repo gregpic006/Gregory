@@ -186,7 +186,13 @@ async function main() {
   if (sr && sr.ai_category) {
     record("IA — catégorisation automatique de la demande", "PASS", `${sr.ai_category} / ${sr.ai_urgency} / ${sr.ai_estimated_cost ?? "—"}$`);
   } else {
-    record("IA — catégorisation automatique de la demande", "FAIL", "ai_category toujours vide après 9s — trigger ou fonction handle-service-request en cause");
+    // Appel direct de la fonction (contournant le déclencheur pg_net) pour lire
+    // sa réponse détaillée et voir précisément où ça échoue.
+    const directCall = await callFn("handle-service-request", null, {
+      type: "INSERT", table: "service_requests",
+      record: { id: serviceRequestId, description: srDescription },
+    });
+    record("IA — catégorisation automatique de la demande", "FAIL", `ai_category vide après 20s. Appel direct de la fonction -> status ${directCall.status}, réponse: ${JSON.stringify(directCall.data)}`);
   }
 
   // --- Travail : assignation + complétion (si un travailleur existe) ---
