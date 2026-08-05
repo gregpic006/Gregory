@@ -592,6 +592,14 @@ create trigger on_work_order_insert
   after insert on work_orders
   for each row execute function check_work_order_approval();
 
+-- Drapeaux de sécurité déterministes : posés par l'edge function
+-- handle-service-request, JAMAIS par l'IA elle-même. Si un mot-clé de
+-- danger (gaz, feu, fuite active, etc.) est détecté dans la description,
+-- safety_override force ai_urgency à 'urgence' peu importe la réponse
+-- de Claude, et les admins sont alertés par courriel immédiatement.
+alter table service_requests add column if not exists safety_override boolean default false;
+alter table service_requests add column if not exists safety_flags text[] default '{}';
+
 -- Déclenche la fonction Edge "handle-service-request" à chaque
 -- nouvelle demande de service : l'IA catégorise le problème, propose
 -- une estimation de coût préliminaire et un niveau d'urgence, affichés
