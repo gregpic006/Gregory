@@ -2081,11 +2081,15 @@ create policy "owner delete own documents" on storage.objects for delete
   using (bucket_id = 'documents' and (storage.foldername(name))[1] = auth_owner_id()::text);
 
 -- ============================================================
--- NOTE IMPORTANTE
+-- NOTE (résolue) — architecture des accès admin
 -- ============================================================
--- Ton outil interne (site-admin.html) doit utiliser la clé
--- "service_role" de Supabase, PAS la clé "anon" — la clé service_role
--- contourne le RLS et te donne accès à tous les clients. Elle ne
--- doit JAMAIS être exposée dans un fichier HTML public ; elle doit
--- rester côté serveur (ex: une fonction Supabase Edge Function, ou
--- un petit backend). C'est un point à valider avec Claude Code.
+-- Cette note datait d'avant la mise en place de l'architecture actuelle
+-- et faisait référence à un fichier "site-admin.html" qui n'existe plus.
+-- Le portail admin réel (portail-admin.html) n'utilise QUE la clé
+-- publique ("anon"/publishable) côté navigateur — la clé service_role
+-- n'est jamais exposée dans un fichier HTML. Chaque fonction Edge admin
+-- (admin-api, ops-api, crm-api, privacy-api, onboarding-api, etc.)
+-- décode le JWT de l'utilisateur connecté, vérifie users.is_admin, et
+-- n'utilise service_role qu'à l'intérieur de la fonction (côté serveur)
+-- pour contourner RLS une fois l'admin confirmé. Conservée ici comme
+-- rappel du principe, pas comme tâche en attente.
