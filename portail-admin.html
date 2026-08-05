@@ -425,16 +425,28 @@ function workerOptionsHtml(selectedId){
 async function loadServiceRequestsAdmin(){
   const data = await callOpsApi({ action: 'list_service_requests' });
   const container = document.getElementById('service-requests-body');
-  const requests = (data?.service_requests || []).slice().sort((a,b) => (b.safety_override ? 1 : 0) - (a.safety_override ? 1 : 0));
+  const requests = (data?.service_requests || []).slice().sort((a,b) => (b.safety_override ? 1 : 0) - (a.safety_override ? 1 : 0) || (b.ai_needs_review ? 1 : 0) - (a.ai_needs_review ? 1 : 0));
   if(!requests.length){
     container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune demande de service ouverte.</p>';
     return;
   }
-  container.innerHTML = requests.map(sr => `
+  container.innerHTML = requests.map(sr => {
+    const costRange = (sr.ai_cost_min != null && sr.ai_cost_max != null)
+      ? Number(sr.ai_cost_min).toLocaleString('fr-CA') + ' $ – ' + Number(sr.ai_cost_max).toLocaleString('fr-CA') + ' $'
+      : (sr.ai_estimated_cost != null ? Number(sr.ai_estimated_cost).toLocaleString('fr-CA') + ' $' : '—');
+    return `
     <div style="background:${sr.safety_override ? '#fdeaea' : 'var(--paper-2)'};border:1px solid ${sr.safety_override ? '#c0392b' : 'var(--line)'};padding:14px 16px;margin-bottom:10px;">
       ${sr.safety_override ? `<div style="background:#c0392b;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;display:inline-block;margin-bottom:8px;">⚠ URGENCE SÉCURITÉ — ${esc((sr.safety_flags || []).join(', '))}</div>` : ''}
+      ${(!sr.safety_override && sr.ai_needs_review) ? `<div style="background:#e6a817;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;display:inline-block;margin-bottom:8px;">🔎 À VALIDER PAR UN HUMAIN${sr.ai_confidence != null ? ' — confiance IA ' + Math.round(sr.ai_confidence) + '%' : ''}</div>` : ''}
       <b style="display:block;margin-bottom:4px;">${esc(sr.tenants?.full_name) ?? ''} — ${esc(sr.units?.buildings?.address) ?? ''}, unité ${esc(sr.units?.unit_number) ?? ''}</b>
-      <span style="font-size:12.5px;color:var(--muted);">${esc(sr.description)}${sr.ai_category ? ' — IA : ' + esc(sr.ai_category) + ' (' + esc(sr.ai_urgency || '') + ', estimation ' + (sr.ai_estimated_cost != null ? Number(sr.ai_estimated_cost).toLocaleString('fr-CA') + ' $' : '—') + ')' : ''}</span>
+      <span style="font-size:12.5px;color:var(--muted);display:block;">${esc(sr.description)}</span>
+      ${sr.ai_category ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.6;">
+        <b>IA :</b> ${esc(sr.ai_category)}${sr.ai_subcategory ? ' — ' + esc(sr.ai_subcategory) : ''} · urgence ${esc(sr.ai_urgency || '—')} · ${costRange}${sr.ai_confidence != null ? ' · confiance ' + Math.round(sr.ai_confidence) + '%' : ''}<br>
+        ${sr.ai_recommended_trade ? '<b>Métier recommandé :</b> ' + esc(sr.ai_recommended_trade) + '<br>' : ''}
+        ${sr.ai_missing_info ? '<b>Infos manquantes :</b> ' + esc(sr.ai_missing_info) + (sr.ai_photos_needed ? ' (photos utiles)' : '') + '<br>' : ''}
+        ${sr.ai_immediate_action ? '<b>Action immédiate suggérée :</b> ' + esc(sr.ai_immediate_action) + '<br>' : ''}
+        ${sr.ai_risk_if_no_action ? '<b>Risque si non traité :</b> ' + esc(sr.ai_risk_if_no_action) : ''}
+      </div>` : ''}
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-top:10px;">
         <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Travailleur</label>
           <select id="sr-worker-${sr.id}" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir —</option>${workerOptionsHtml()}</select>
@@ -447,7 +459,8 @@ async function loadServiceRequestsAdmin(){
         </div>
         <button onclick="assignServiceRequest('${sr.id}', '${sr.unit_id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Assigner</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 async function assignServiceRequest(serviceRequestId, unitId){

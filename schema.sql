@@ -600,6 +600,20 @@ create trigger on_work_order_insert
 alter table service_requests add column if not exists safety_override boolean default false;
 alter table service_requests add column if not exists safety_flags text[] default '{}';
 
+-- Catégorisation enrichie : au-delà de catégorie/coût/urgence, l'IA
+-- explique son incertitude plutôt que de la cacher. ai_needs_review
+-- signale à l'admin qu'un humain doit valider avant d'agir.
+alter table service_requests add column if not exists ai_subcategory text;
+alter table service_requests add column if not exists ai_cost_min numeric(10,2);
+alter table service_requests add column if not exists ai_cost_max numeric(10,2);
+alter table service_requests add column if not exists ai_confidence numeric(5,2);
+alter table service_requests add column if not exists ai_missing_info text;
+alter table service_requests add column if not exists ai_photos_needed boolean;
+alter table service_requests add column if not exists ai_recommended_trade text;
+alter table service_requests add column if not exists ai_immediate_action text;
+alter table service_requests add column if not exists ai_risk_if_no_action text;
+alter table service_requests add column if not exists ai_needs_review boolean default false;
+
 -- Déclenche la fonction Edge "handle-service-request" à chaque
 -- nouvelle demande de service : l'IA catégorise le problème, propose
 -- une estimation de coût préliminaire et un niveau d'urgence, affichés

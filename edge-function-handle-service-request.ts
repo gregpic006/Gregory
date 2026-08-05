@@ -76,7 +76,16 @@ Deno.serve(async (req) => {
 
     // 2. Catégorisation IA — best effort, ne bloque jamais le drapeau de sécurité ci-dessus.
     let aiCategory: string | null = null;
+    let aiSubcategory: string | null = null;
+    let aiCostMin: number | null = null;
+    let aiCostMax: number | null = null;
     let aiCost: number | null = null;
+    let aiConfidence: number | null = null;
+    let aiMissingInfo: string | null = null;
+    let aiPhotosNeeded: boolean | null = null;
+    let aiRecommendedTrade: string | null = null;
+    let aiImmediateAction: string | null = null;
+    let aiRiskIfNoAction: string | null = null;
     let aiUrgency: string | null = safetyOverride ? "urgence" : null;
     let aiError: string | null = null;
 
@@ -88,8 +97,16 @@ Description du problème: ${record.description}
 Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec exactement ces champs:
 {
   "category": "la catégorie du problème parmi: Plomberie, Électricité, CVC (chauffage/climatisation), Électroménager, Structure/menuiserie, Autre",
-  "estimated_cost": un nombre représentant une estimation préliminaire du coût de réparation en dollars canadiens, basée sur les tarifs typiques au Québec pour ce genre de problème (pas de texte, juste le nombre),
-  "urgency": "le niveau d'urgence parmi: faible, normal, élevé, urgence"
+  "subcategory": "une sous-catégorie plus précise en français (ex: 'fuite sous l'évier', 'prise électrique défectueuse')",
+  "urgency": "le niveau d'urgence parmi: faible, normal, élevé, urgence",
+  "cost_min": un nombre représentant l'estimation basse du coût de réparation en dollars canadiens, basée sur les tarifs typiques au Québec,
+  "cost_max": un nombre représentant l'estimation haute du coût de réparation en dollars canadiens,
+  "confidence": un nombre entre 0 et 100 représentant ta confiance dans cette évaluation (sois honnête — une description vague doit donner une confiance basse),
+  "missing_info": "ce qui manque pour évaluer avec certitude (ex: 'photo du bris', 'âge de l'appareil'), ou null si rien ne manque",
+  "photos_needed": true ou false selon si des photos aideraient à confirmer le diagnostic,
+  "recommended_trade": "le métier à contacter en priorité (plombier, électricien, technicien CVC, ébéniste, etc.)",
+  "immediate_action": "une action simple et sécuritaire que le locataire peut faire tout de suite en attendant l'intervention (ex: 'fermer le robinet d'arrêt sous l'évier'), ou null si aucune action n'est nécessaire ou sécuritaire",
+  "risk_if_no_action": "le risque concret en une phrase si la situation n'est pas traitée rapidement"
 }`;
 
       const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -101,7 +118,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
         },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
-          max_tokens: 512,
+          max_tokens: 700,
           messages: [{ role: "user", content: prompt }],
         }),
       });
@@ -116,7 +133,16 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
       const parsed = JSON.parse(cleaned);
 
       aiCategory = parsed.category ?? null;
-      aiCost = typeof parsed.estimated_cost === "number" ? parsed.estimated_cost : null;
+      aiSubcategory = parsed.subcategory ?? null;
+      aiCostMin = typeof parsed.cost_min === "number" ? parsed.cost_min : null;
+      aiCostMax = typeof parsed.cost_max === "number" ? parsed.cost_max : null;
+      aiCost = aiCostMin !== null && aiCostMax !== null ? Math.round(((aiCostMin + aiCostMax) / 2) * 100) / 100 : null;
+      aiConfidence = typeof parsed.confidence === "number" ? parsed.confidence : null;
+      aiMissingInfo = parsed.missing_info ?? null;
+      aiPhotosNeeded = typeof parsed.photos_needed === "boolean" ? parsed.photos_needed : null;
+      aiRecommendedTrade = parsed.recommended_trade ?? null;
+      aiImmediateAction = parsed.immediate_action ?? null;
+      aiRiskIfNoAction = parsed.risk_if_no_action ?? null;
       // La sécurité déterministe l'emporte toujours sur l'IA : jamais l'inverse.
       aiUrgency = safetyOverride ? "urgence" : (parsed.urgency ?? null);
     } catch (e) {
@@ -124,13 +150,26 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
       console.error("AI categorization failed", aiError);
     }
 
+    // Un humain doit valider si l'IA manque de confiance ou signale des infos manquantes.
+    const needsReview = safetyOverride || (aiConfidence !== null && aiConfidence < 70) || aiMissingInfo !== null;
+
     // 3. Mise à jour DB — toujours tentée, même si l'IA a échoué (au minimum le drapeau de sécurité).
     const patchBody: Record<string, unknown> = {
       safety_override: safetyOverride,
       safety_flags: matchedRules.map((r) => r.code),
+      ai_needs_review: needsReview,
     };
     if (aiCategory !== null) patchBody.ai_category = aiCategory;
+    if (aiSubcategory !== null) patchBody.ai_subcategory = aiSubcategory;
     if (aiCost !== null) patchBody.ai_estimated_cost = aiCost;
+    if (aiCostMin !== null) patchBody.ai_cost_min = aiCostMin;
+    if (aiCostMax !== null) patchBody.ai_cost_max = aiCostMax;
+    if (aiConfidence !== null) patchBody.ai_confidence = aiConfidence;
+    if (aiMissingInfo !== null) patchBody.ai_missing_info = aiMissingInfo;
+    if (aiPhotosNeeded !== null) patchBody.ai_photos_needed = aiPhotosNeeded;
+    if (aiRecommendedTrade !== null) patchBody.ai_recommended_trade = aiRecommendedTrade;
+    if (aiImmediateAction !== null) patchBody.ai_immediate_action = aiImmediateAction;
+    if (aiRiskIfNoAction !== null) patchBody.ai_risk_if_no_action = aiRiskIfNoAction;
     if (aiUrgency !== null) patchBody.ai_urgency = aiUrgency;
 
     const patchRes = await fetch(`${supabaseUrl}/rest/v1/service_requests?id=eq.${record.id}`, {
