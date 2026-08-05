@@ -235,6 +235,38 @@
   <table><thead><tr><th>Prospect</th><th class="num">Portes</th><th class="num">Revenu potentiel/mois</th><th>Intérêt</th><th>Statut</th><th class="num">Complétude</th><th class="num">Prob. signature</th><th>Prochain geste</th><th>Prochain suivi</th><th></th></tr></thead>
     <tbody id="prospects-body"><tr class="empty-row"><td colspan="10">Chargement...</td></tr></tbody>
   </table>
+
+  <h1 style="margin-top:40px;font-size:22px;">Confidentialité (Loi 25)</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Registre des incidents et des demandes d'accès/rectification/suppression — la rétention automatique (anonymisation après 2-3 ans) tourne en arrière-plan chaque mois</p>
+
+  <h2 style="font-size:16px;margin-bottom:10px;">Incidents de confidentialité</h2>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
+    <div style="margin-bottom:10px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description de l'incident</label>
+      <textarea id="pi-description" style="width:100%;padding:8px;border:1px solid var(--line);min-height:60px;"></textarea>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Catégories touchées</label><input type="text" id="pi-categories" placeholder="Ex: courriels, adresses" style="padding:8px;border:1px solid var(--line);width:200px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nb. personnes touchées (est.)</label><input type="number" id="pi-count" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);"><input type="checkbox" id="pi-risk"> Risque de préjudice sérieux</label></div>
+      <button onclick="logPrivacyIncident()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Consigner l'incident</button>
+    </div>
+  </div>
+  <div id="privacy-incidents-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
+  <h2 style="font-size:16px;margin-bottom:10px;">Demandes d'accès / rectification / suppression</h2>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Type</label>
+      <select id="dr-type" style="padding:8px;border:1px solid var(--line);"><option value="access">Accès</option><option value="rectification">Rectification</option><option value="deletion">Suppression</option></select>
+    </div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Personne concernée</label>
+      <select id="dr-subject-type" style="padding:8px;border:1px solid var(--line);"><option value="tenant">Locataire</option><option value="prospect">Prospect</option><option value="owner">Propriétaire</option><option value="worker">Travailleur</option></select>
+    </div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">ID du dossier concerné</label><input type="text" id="dr-subject-id" placeholder="UUID" style="padding:8px;border:1px solid var(--line);width:220px;"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom du demandeur</label><input type="text" id="dr-requester-name" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel du demandeur</label><input type="email" id="dr-requester-email" style="padding:8px;border:1px solid var(--line);"></div>
+    <button onclick="logDataRequest()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Enregistrer la demande</button>
+  </div>
+  <div id="data-requests-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 </div>
 
 <script>
@@ -326,7 +358,112 @@ async function loadAdminDashboard(){
   await loadProspects();
   await loadLeaseRenewals();
   await loadAuditLog();
+  await loadPrivacyIncidents();
+  await loadDataRequests();
   await obInit();
+}
+
+async function callPrivacyApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('privacy-api', { body: payload });
+  if(error){ alert('Erreur : ' + error.message); return null; }
+  return data;
+}
+
+async function loadPrivacyIncidents(){
+  const data = await callPrivacyApi({ action: 'list_incidents' });
+  const container = document.getElementById('privacy-incidents-body');
+  const incidents = data?.incidents || [];
+  if(!incidents.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun incident consigné.</p>';
+    return;
+  }
+  const statusLabel = { open: 'Ouvert', contained: 'Contenu', closed: 'Fermé' };
+  container.innerHTML = incidents.map(i => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${esc(i.description)}</b>
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">Découvert le ${new Date(i.discovered_at).toLocaleDateString('fr-CA')} — ${esc(i.affected_data_categories) || 'catégories non précisées'} — ~${i.affected_people_estimate ?? '?'} personne(s)${i.risk_of_serious_harm ? ' — <b style="color:var(--rust);">RISQUE DE PRÉJUDICE SÉRIEUX</b>' : ''} — Statut : ${statusLabel[i.status] || esc(i.status)}${i.cai_notified ? ' — CAI avisée' : ''}${i.affected_people_notified ? ' — Personnes avisées' : ''}</span>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${!i.cai_notified ? `<button onclick="updatePrivacyIncident('${i.id}', {cai_notified:true})" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Marquer CAI avisée</button>` : ''}
+        ${!i.affected_people_notified ? `<button onclick="updatePrivacyIncident('${i.id}', {affected_people_notified:true})" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Marquer personnes avisées</button>` : ''}
+        ${i.status !== 'closed' ? `<button onclick="updatePrivacyIncident('${i.id}', {status:'closed'})" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Fermer le dossier</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+async function logPrivacyIncident(){
+  const description = document.getElementById('pi-description').value;
+  const affected_data_categories = document.getElementById('pi-categories').value;
+  const affected_people_estimate = document.getElementById('pi-count').value ? Number(document.getElementById('pi-count').value) : null;
+  const risk_of_serious_harm = document.getElementById('pi-risk').checked;
+  if(!description){ alert('La description est requise.'); return; }
+  const res = await callPrivacyApi({ action: 'log_incident', description, affected_data_categories, affected_people_estimate, risk_of_serious_harm });
+  if(res?.ok){
+    document.getElementById('pi-description').value = '';
+    document.getElementById('pi-categories').value = '';
+    document.getElementById('pi-count').value = '';
+    document.getElementById('pi-risk').checked = false;
+    await loadPrivacyIncidents();
+  }
+}
+
+async function updatePrivacyIncident(incident_id, patch){
+  const res = await callPrivacyApi({ action: 'update_incident', incident_id, ...patch });
+  if(res?.ok){ await loadPrivacyIncidents(); }
+}
+
+async function loadDataRequests(){
+  const data = await callPrivacyApi({ action: 'list_data_requests' });
+  const container = document.getElementById('data-requests-body');
+  const requests = data?.requests || [];
+  if(!requests.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune demande enregistrée.</p>';
+    return;
+  }
+  const typeLabel = { access: 'Accès', rectification: 'Rectification', deletion: 'Suppression' };
+  const subjectLabel = { tenant: 'Locataire', prospect: 'Prospect', owner: 'Propriétaire', worker: 'Travailleur' };
+  const statusLabel = { received: 'Reçue', in_progress: 'En cours', fulfilled: 'Traitée', rejected: 'Refusée' };
+  container.innerHTML = requests.map(r => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${esc(typeLabel[r.request_type] || r.request_type)} — ${esc(subjectLabel[r.subject_type] || r.subject_type)} ${esc(r.subject_id)}</b>
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">Demandeur : ${esc(r.requester_name)} (${esc(r.requester_email) || '—'}) — Statut : ${statusLabel[r.status] || esc(r.status)}${r.resolution_note ? ' — ' + esc(r.resolution_note) : ''}</span>
+      ${r.status === 'received' || r.status === 'in_progress' ? `
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${r.request_type !== 'rectification' ? `<button onclick="fulfillDataRequest('${r.id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Traiter automatiquement</button>` : ''}
+        <button onclick="closeDataRequestManually('${r.id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Marquer traitée manuellement</button>
+      </div>` : ''}
+    </div>`).join('');
+}
+
+async function logDataRequest(){
+  const request_type = document.getElementById('dr-type').value;
+  const subject_type = document.getElementById('dr-subject-type').value;
+  const subject_id = document.getElementById('dr-subject-id').value;
+  const requester_name = document.getElementById('dr-requester-name').value;
+  const requester_email = document.getElementById('dr-requester-email').value;
+  if(!subject_id || !requester_name){ alert("L'ID du dossier et le nom du demandeur sont requis."); return; }
+  const res = await callPrivacyApi({ action: 'log_data_request', request_type, subject_type, subject_id, requester_name, requester_email });
+  if(res?.ok){
+    document.getElementById('dr-subject-id').value = '';
+    document.getElementById('dr-requester-name').value = '';
+    document.getElementById('dr-requester-email').value = '';
+    await loadDataRequests();
+  }
+}
+
+async function fulfillDataRequest(request_id){
+  const res = await callPrivacyApi({ action: 'fulfill_data_request', request_id });
+  if(res?.ok){
+    if(res.action_taken === 'exported'){
+      alert('Export généré :\n\n' + JSON.stringify(res.data, null, 2).slice(0, 3000));
+    }
+    await loadDataRequests();
+  }
+}
+
+async function closeDataRequestManually(request_id){
+  const resolution_note = prompt('Note de résolution (ex: correction appliquée manuellement) :') || '';
+  const res = await callPrivacyApi({ action: 'update_data_request', request_id, status: 'fulfilled', resolution_note });
+  if(res?.ok){ await loadDataRequests(); }
 }
 
 function renderCommandCenter(cc){

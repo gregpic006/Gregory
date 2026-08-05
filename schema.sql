@@ -302,6 +302,23 @@ create trigger on_prospect_change
   before insert or update on prospects
   for each row execute function compute_prospect_derived_fields();
 
+-- Ajoutée après coup pour la rétention Loi 25 (voir plus bas) : sans
+-- cette date, impossible de savoir depuis QUAND un prospect est
+-- "perdu" pour appliquer un délai de conservation.
+alter table prospects add column if not exists stage_changed_at timestamptz default now();
+create or replace function set_prospect_stage_changed_at()
+returns trigger language plpgsql as $$
+begin
+  if tg_op = 'INSERT' or new.stage is distinct from old.stage then
+    new.stage_changed_at := now();
+  end if;
+  return new;
+end;
+$$;
+create trigger on_prospect_stage_change
+  before insert or update on prospects
+  for each row execute function set_prospect_stage_changed_at();
+
 -- ============ FINANCIAL ANOMALIES (contrôle interne) ============
 create table financial_anomalies (
   id uuid primary key default gen_random_uuid(),
@@ -1766,6 +1783,108 @@ end;
 $$;
 
 select cron.schedule('hourly-send-visit-reminders', '0 * * * *', $$select send_visit_reminders()$$);
+
+-- ============================================================
+-- PROTECTION DES RENSEIGNEMENTS PERSONNELS ET RÉTENTION (LOI 25)
+-- ============================================================
+-- Trois volets, tous déterministes — aucune IA n'intervient dans la
+-- conformité légale :
+-- 1. Rétention : les renseignements personnels ne sont pas gardés
+--    indéfiniment une fois leur finalité atteinte. Les délais ci-dessous
+--    sont des valeurs de départ raisonnables, PAS un avis juridique —
+--    à faire valider par un conseiller juridique et ajuster au besoin.
+--    Les documents légaux (baux, mandats, factures) ne sont PAS purgés
+--    automatiquement : leur délai de conservation dépend d'obligations
+--    fiscales/légales distinctes qui dépassent la portée de ce système.
+-- 2. Registre des incidents de confidentialité (art. 3.5 de la Loi) :
+--    saisie manuelle par l'admin, jamais une détection automatique —
+--    un incident de confidentialité doit être qualifié par une personne.
+-- 3. Registre des demandes d'accès/rectification/suppression : la
+--    vérification d'identité du demandeur reste un acte humain ; ce
+--    système ne fait qu'outiller le traitement une fois la demande reçue.
+alter table prospects add column if not exists anonymized_at timestamptz;
+alter table inquiries add column if not exists anonymized_at timestamptz;
+alter table tenants add column if not exists anonymized_at timestamptz;
+
+create table privacy_incidents (
+  id uuid primary key default gen_random_uuid(),
+  description text not null,
+  discovered_at timestamptz not null default now(),
+  affected_data_categories text,
+  affected_people_estimate int,
+  risk_of_serious_harm boolean default false,
+  cai_notified boolean default false,
+  cai_notified_at timestamptz,
+  affected_people_notified boolean default false,
+  affected_people_notified_at timestamptz,
+  containment_measures text,
+  status text not null default 'open' check (status in ('open','contained','closed')),
+  logged_by uuid references users(id),
+  created_at timestamptz default now()
+);
+alter table privacy_incidents enable row level security;
+create policy "admin read privacy_incidents" on privacy_incidents for select using (auth_is_admin());
+
+create table personal_data_requests (
+  id uuid primary key default gen_random_uuid(),
+  request_type text not null check (request_type in ('access','rectification','deletion')),
+  subject_type text not null check (subject_type in ('tenant','prospect','owner','worker')),
+  subject_id uuid not null,
+  requester_name text not null,
+  requester_email text,
+  request_details text,
+  status text not null default 'received' check (status in ('received','in_progress','fulfilled','rejected')),
+  handled_by uuid references users(id),
+  handled_at timestamptz,
+  resolution_note text,
+  created_at timestamptz default now()
+);
+alter table personal_data_requests enable row level security;
+create policy "admin read personal_data_requests" on personal_data_requests for select using (auth_is_admin());
+
+create or replace function enforce_data_retention()
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  -- Prospects perdus depuis 2+ ans : la finalité (démarchage) est
+  -- atteinte, on retire les coordonnées personnelles.
+  update prospects
+  set full_name = 'Prospect anonymisé', email = null, phone = null, company_name = null,
+      notes = null, call_history = '[]'::jsonb, anonymized_at = now()
+  where stage = 'lost'
+    and stage_changed_at < now() - interval '2 years'
+    and anonymized_at is null;
+
+  -- Demandes de visite/mandat fermées depuis 2+ ans : leur rôle de
+  -- premier contact est terminé.
+  update inquiries
+  set full_name = 'Anonymisé', email = 'anonymise@portail.local', phone = null, message = null,
+      anonymized_at = now()
+  where status = 'closed'
+    and created_at < now() - interval '2 years'
+    and anonymized_at is null;
+
+  -- Locataires dont TOUS les baux sont terminés depuis 3+ ans, sans
+  -- demande de service ouverte : on retire les coordonnées, mais on
+  -- garde la ligne (les paiements/baux liés restent nécessaires aux
+  -- registres comptables du propriétaire).
+  update tenants t
+  set full_name = 'Locataire anonymisé', email = null, phone = null, anonymized_at = now()
+  where t.anonymized_at is null
+    and exists (select 1 from leases l where l.tenant_id = t.id)
+    and not exists (select 1 from leases l where l.tenant_id = t.id and (l.status = 'active' or l.end_date is null or l.end_date >= now() - interval '3 years'))
+    and not exists (select 1 from service_requests sr where sr.tenant_id = t.id and sr.status <> 'closed');
+
+  -- Journaux techniques : utiles pour le débogage/l'amélioration à
+  -- court terme seulement, pas de finalité au-delà d'un an.
+  delete from ai_run_log where created_at < now() - interval '1 year';
+
+  -- Journal d'audit : conservé plus longtemps (preuve en cas de litige
+  -- ou de vérification), mais pas indéfiniment.
+  delete from audit_log where created_at < now() - interval '5 years';
+end;
+$$;
+
+select cron.schedule('monthly-enforce-data-retention', '0 5 1 * *', $$select enforce_data_retention()$$);
 
 -- ============================================================
 -- CRM COMMERCIAL — création automatique d'un prospect
