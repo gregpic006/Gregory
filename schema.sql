@@ -138,8 +138,15 @@ create table bank_transactions (
   reconciled_at timestamptz,
   created_at timestamptz default now()
 );
--- Pas de policy RLS ouverte : accessible uniquement via le rôle
--- service_role (fonction Edge "reconcile-bank-transactions", gardée par is_admin).
+-- RLS activé sans aucune policy : bloque tout accès via anon/authenticated
+-- (donc via la clé publique, visible dans le code des pages publiques) —
+-- seul le rôle service_role (qui contourne RLS) peut lire cette table,
+-- via la fonction Edge "reconcile-bank-transactions", elle-même gardée
+-- par une vérification is_admin. Un commentaire ici l'affirmait déjà
+-- avant que RLS ne soit réellement activé — corrigé (trouvé lors de
+-- l'audit de sécurité du 2026-08-05, la table était exposée depuis
+-- sa création).
+alter table bank_transactions enable row level security;
 
 -- ============ PAYMENTS ============
 create table payments (
