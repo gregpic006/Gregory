@@ -251,7 +251,7 @@
             <input type="text" id="doc-question" placeholder="Ex. : Quand expire l'assurance de cet entrepreneur ?">
           </div>
           <button onclick="askDocuments()" id="doc-ask-btn">Demander</button>
-          <p id="doc-answer" style="width:100%;font-size:13px;color:var(--muted);margin-top:6px;"></p>
+          <p id="doc-answer" style="width:100%;font-size:13px;color:var(--muted);margin-top:6px;white-space:pre-wrap;"></p>
         </div>
         <table><thead><tr><th>Titre</th><th>Type</th><th>Analyse IA</th><th>Fichier</th><th></th></tr></thead>
           <tbody id="documents-body"><tr class="empty-row"><td colspan="5">Chargement...</td></tr></tbody>
@@ -657,7 +657,11 @@ async function askDocuments(){
       body: JSON.stringify({ question }),
     });
     const data = await res.json();
-    answerEl.textContent = data.answer || data.error || 'Aucune réponse.';
+    let text = data.answer || data.error || 'Aucune réponse.';
+    if(data.sources && data.sources.length){
+      text += `\n\nDocuments consultés : ${data.sources.join(', ')}`;
+    }
+    answerEl.textContent = text;
   } catch (e) {
     answerEl.textContent = 'Erreur de communication avec l\'assistant.';
   }
