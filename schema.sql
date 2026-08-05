@@ -105,6 +105,30 @@ create table leases (
   created_at timestamptz default now()
 );
 
+-- ============ BANK TRANSACTIONS (rapprochement par import CSV) ============
+-- Pas de connexion bancaire en temps réel (nécessiterait Plaid/Flinks) :
+-- l'admin importe un relevé exporté par sa banque. Le rapprochement
+-- (montant, locataire, bail, mois) est entièrement déterministe ;
+-- l'IA sert uniquement à suggérer une piste quand aucune correspondance
+-- automatique n'est trouvée (ex: description bancaire cryptique).
+create table bank_transactions (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid references owners(id) on delete cascade,
+  transaction_date date not null,
+  description text not null,
+  amount numeric(10,2) not null,
+  match_status text default 'unmatched' check (match_status in ('matched','partial','overpaid','duplicate','unmatched','ignored')),
+  matched_payment_id uuid references payments(id),
+  ai_suggested_tenant_id uuid references tenants(id),
+  ai_suggestion_note text,
+  ai_confidence numeric(5,2),
+  reconciled_by uuid references users(id),
+  reconciled_at timestamptz,
+  created_at timestamptz default now()
+);
+-- Pas de policy RLS ouverte : accessible uniquement via le rôle
+-- service_role (fonction Edge "reconcile-bank-transactions", gardée par is_admin).
+
 -- ============ PAYMENTS ============
 create table payments (
   id uuid primary key default gen_random_uuid(),

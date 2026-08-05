@@ -177,6 +177,20 @@
   <p class="subtitle" style="margin-bottom:16px;">Rappels automatiques (max 3, un tous les 5 jours) — mets en pause si une entente est conclue avec le locataire</p>
   <div id="late-payments-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 
+  <h1 style="margin-top:40px;font-size:22px;">Rapprochement bancaire</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Importe un relevé bancaire (CSV : date,description,montant) — le matching locataire/bail/mois est automatique, l'IA ne fait que suggérer une piste sur les dépôts non identifiés</p>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Client</label>
+      <select id="recon-owner" style="padding:8px;border:1px solid var(--line);" onchange="loadBankTransactions()"><option value="">— Choisir —</option></select>
+    </div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fichier CSV</label>
+      <input type="file" id="recon-file" accept=".csv" style="padding:6px;border:1px solid var(--line);">
+    </div>
+    <button onclick="importBankCsv()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Importer</button>
+  </div>
+  <p id="recon-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
+  <div id="bank-transactions-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Choisis un client pour voir ses transactions.</p></div>
+
   <h1 style="margin-top:40px;font-size:22px;">Anomalies financières</h1>
   <p class="subtitle" style="margin-bottom:16px;">Détection automatique — factures en double, dépassements, écarts de loyer, reçus manquants</p>
   <table><thead><tr><th>Type</th><th>Client</th><th>Description</th><th>Sévérité</th><th></th></tr></thead>
@@ -279,6 +293,11 @@ async function loadAdminDashboard(){
       <td class="num">${c.occupied_count}</td>
       <td class="num">${c.monthly_revenue.toLocaleString('fr-CA')} $</td>
     </tr>`).join('') : '<tr class="empty-row"><td colspan="6">Aucun client.</td></tr>';
+
+  const reconOwnerSelect = document.getElementById('recon-owner');
+  const currentReconOwner = reconOwnerSelect.value;
+  reconOwnerSelect.innerHTML = '<option value="">— Choisir —</option>' + clients.map(c => `<option value="${c.id}">${esc(c.full_name)}</option>`).join('');
+  if(currentReconOwner) reconOwnerSelect.value = currentReconOwner;
 
   await loadOps();
   await loadProspects();
@@ -739,6 +758,87 @@ async function promptCorrectCall(prospect_id, call_index){
   if(Object.keys(corrections).length === 0){ return; }
   await callCrmApi({ action: 'correct_call', prospect_id, call_index, corrections, correction_note });
   await loadProspects();
+}
+
+async function callReconApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('reconcile-bank-transactions', { body: payload });
+  if(error){ alert('Erreur rapprochement bancaire : ' + error.message); return null; }
+  return data;
+}
+
+function parseBankCsv(text){
+  return text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
+    const [date, description, amount] = line.split(',').map(s => s.trim());
+    return { date, description, amount };
+  }).filter(r => r.date && r.amount && !isNaN(Number(r.amount)));
+}
+
+async function importBankCsv(){
+  const ownerId = document.getElementById('recon-owner').value;
+  const fileInput = document.getElementById('recon-file');
+  const msg = document.getElementById('recon-msg');
+  if(!ownerId){ msg.textContent = 'Choisis un client d\'abord.'; return; }
+  if(!fileInput.files.length){ msg.textContent = 'Choisis un fichier CSV.'; return; }
+
+  const text = await fileInput.files[0].text();
+  const rows = parseBankCsv(text);
+  if(!rows.length){ msg.textContent = 'Aucune ligne valide trouvée (format attendu : date,description,montant).'; return; }
+
+  msg.textContent = `Import de ${rows.length} ligne(s) en cours...`;
+  const res = await callReconApi({ action: 'import_csv', owner_id: ownerId, rows });
+  if(res?.ok){
+    msg.textContent = `${res.results.length} transaction(s) importée(s) et traitée(s).`;
+    fileInput.value = '';
+    await loadBankTransactions();
+  }
+}
+
+const bankMatchLabel = {
+  matched: 'Rapproché', partial: 'Paiement partiel', overpaid: 'Excédent',
+  duplicate: 'Doublon possible', unmatched: 'Non identifié', ignored: 'Ignoré',
+};
+const bankMatchColor = {
+  matched: 'var(--sage)', partial: '#e6a817', overpaid: '#e6a817',
+  duplicate: 'var(--rust)', unmatched: 'var(--muted)', ignored: 'var(--muted)',
+};
+
+async function loadBankTransactions(){
+  const ownerId = document.getElementById('recon-owner').value;
+  const container = document.getElementById('bank-transactions-body');
+  if(!ownerId){ container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Choisis un client pour voir ses transactions.</p>'; return; }
+
+  const res = await callReconApi({ action: 'list', owner_id: ownerId });
+  const transactions = res?.transactions || [];
+  if(!transactions.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune transaction importée pour ce client.</p>';
+    return;
+  }
+
+  container.innerHTML = transactions.map(t => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:12px 16px;margin-bottom:8px;font-size:12.5px;">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:center;">
+        <span><b>${esc(t.transaction_date)}</b> — ${esc(t.description)} — ${Number(t.amount).toLocaleString('fr-CA')} $</span>
+        <span style="color:${bankMatchColor[t.match_status] || 'var(--muted)'};font-weight:600;">${bankMatchLabel[t.match_status] || esc(t.match_status)}</span>
+      </div>
+      ${t.ai_suggestion_note ? `<div style="color:var(--muted);margin-top:4px;">${esc(t.ai_suggestion_note)}${t.ai_suggested_tenant ? ' — piste IA : ' + esc(t.ai_suggested_tenant.full_name) + (t.ai_confidence != null ? ' (confiance ' + Math.round(t.ai_confidence) + '%)' : '') : ''}</div>` : ''}
+      ${t.match_status === 'unmatched' ? `
+      <div style="margin-top:6px;">
+        <button onclick="promptConfirmMatch('${t.id}')" style="border:1px solid var(--ink);background:none;padding:5px 10px;font-size:11.5px;cursor:pointer;">Associer à un paiement</button>
+        <button onclick="ignoreBankTransaction('${t.id}')" style="border:1px solid var(--line);background:none;padding:5px 10px;font-size:11.5px;cursor:pointer;">Ignorer</button>
+      </div>` : ''}
+    </div>`).join('');
+}
+
+async function promptConfirmMatch(transaction_id){
+  const payment_id = prompt('Colle l\'identifiant (UUID) du paiement auquel associer ce dépôt (visible dans Supabase Table Editor, table "payments") :');
+  if(!payment_id) return;
+  const res = await callReconApi({ action: 'confirm_match', transaction_id, payment_id: payment_id.trim() });
+  if(res?.ok){ await loadBankTransactions(); }
+}
+
+async function ignoreBankTransaction(transaction_id){
+  const res = await callReconApi({ action: 'ignore_transaction', transaction_id });
+  if(res?.ok){ await loadBankTransactions(); }
 }
 
 async function promptAcquisitionCost(prospect_id, current){
