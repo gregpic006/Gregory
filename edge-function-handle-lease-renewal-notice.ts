@@ -105,6 +105,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
   "body": "corps du courriel en français (4-6 phrases), professionnel et clair, qui communique exactement la décision ci-dessus sans ajouter de détail non fourni. Signé 'L'équipe Portail'."
 }`;
 
+      const aiStartedAt = Date.now();
       const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": anthropicKey ?? "", "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -113,10 +114,37 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
       const aiData = await aiRes.json();
       if (!aiRes.ok) {
         console.error("Anthropic API error", aiRes.status, JSON.stringify(aiData));
+        await fetch(`${supabaseUrl}/rest/v1/ai_run_log`, {
+          method: "POST", headers: adminHeaders,
+          body: JSON.stringify({
+            function_name: "handle-lease-renewal-notice", trigger_source: "admin_portal", entity_type: "leases", entity_id: lease_id,
+            prompt_version: "lease-renewal-notice-v1", model_version: "claude-haiku-4-5-20251001", input_summary: factsLabel,
+            duration_ms: Date.now() - aiStartedAt, error: `anthropic_api_error ${aiRes.status}`,
+          }),
+        }).catch(() => null);
         return new Response(JSON.stringify({ error: "Erreur du service IA" }), { status: 502, headers: corsHeaders });
       }
       const rawText = aiData.content?.[0]?.text ?? "{}";
       const parsed = JSON.parse(rawText.replace(/```json|```/g, "").trim());
+
+      await fetch(`${supabaseUrl}/rest/v1/ai_run_log`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({
+          function_name: "handle-lease-renewal-notice",
+          trigger_source: "admin_portal",
+          entity_type: "leases",
+          entity_id: lease_id,
+          prompt_version: "lease-renewal-notice-v1",
+          model_version: "claude-haiku-4-5-20251001",
+          input_summary: factsLabel,
+          output_summary: parsed.subject ?? null,
+          duration_ms: Date.now() - aiStartedAt,
+          input_tokens: aiData?.usage?.input_tokens ?? null,
+          output_tokens: aiData?.usage?.output_tokens ?? null,
+          automatic_action_taken: `avis_${notice_type}_envoye`,
+        }),
+      }).catch((e) => console.error("Failed to write ai_run_log", e));
 
       await fetch("https://api.resend.com/emails", {
         method: "POST",

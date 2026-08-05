@@ -120,6 +120,12 @@ Deno.serve(async (req) => {
     );
     const stuckRepairCases = await stuckRepairCasesRes.json().catch(() => []);
 
+    const lowConfidenceAiRunsRes = await fetch(
+      `${supabaseUrl}/rest/v1/ai_run_log?needs_escalation=eq.true&created_at=gte.${new Date(Date.now() - 24 * 3600000).toISOString()}&select=id,function_name,entity_type,entity_id,input_summary,confidence,error,created_at&order=created_at.desc&limit=20`,
+      { headers: adminHeaders },
+    );
+    const lowConfidenceAiRuns = await lowConfidenceAiRunsRes.json().catch(() => []);
+
     const lastMessageByOwner = new Map<string, any>();
     if (Array.isArray(allMessages)) {
       for (const m of allMessages) {
@@ -148,6 +154,7 @@ Deno.serve(async (req) => {
       prospects_a_relancer: prospectsToFollowUp,
       anomalies_financieres: anomalies,
       dossiers_reparation_stagnants: stuckRepairCases,
+      ia_faible_confiance: lowConfidenceAiRuns,
     };
 
     const clients = owners.map((o: any) => {

@@ -366,6 +366,9 @@ function renderCommandCenter(cc){
   if(cc.dossiers_reparation_stagnants?.length){
     sections.push({ label: '🔧 Dossiers de réparation stagnants', color: '#c0392b', items: cc.dossiers_reparation_stagnants.map(a => `${stuckLabel[a.action] || esc(a.action)} — ${esc(a.details?.description) || ''}`) });
   }
+  if(cc.ia_faible_confiance?.length){
+    sections.push({ label: '🤖 IA à faible confiance ou en erreur (24h)', color: '#e6a817', items: cc.ia_faible_confiance.map(r => `${esc(r.function_name)} — ${r.error ? 'erreur : ' + esc(r.error) : (esc(r.input_summary) || '') + (r.confidence != null ? ' (confiance ' + Math.round(r.confidence) + '%)' : '')}`) });
+  }
 
   if(!sections.length){
     container.innerHTML = '<p style="color:var(--sage);font-size:13.5px;">Rien à signaler aujourd\'hui — tout est sous contrôle.</p>';

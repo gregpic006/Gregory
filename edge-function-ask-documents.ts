@@ -4,6 +4,8 @@
 // (titre du document + page) pour chaque réponse — jamais une
 // affirmation non sourcée.
 const MAX_DOCS_SENT = 5;
+const MODEL_VERSION = "claude-haiku-4-5-20251001";
+const PROMPT_VERSION = "ask-documents-v2-cited-sources";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -113,6 +115,7 @@ Deno.serve(async (req) => {
 
     contentParts.push({ type: "text", text: `Question du propriétaire : "${question}"\n\nRéponds en français, brièvement, en citant le document et la page pour chaque affirmation factuelle.` });
 
+    const aiStartedAt = Date.now();
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -121,7 +124,7 @@ Deno.serve(async (req) => {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
+        model: MODEL_VERSION,
         max_tokens: 700,
         messages: [{ role: "user", content: contentParts }],
       }),
@@ -129,9 +132,36 @@ Deno.serve(async (req) => {
     const aiData = await aiRes.json();
     if (!aiRes.ok) {
       console.error("Anthropic API error", aiRes.status, JSON.stringify(aiData));
+      await fetch(`${supabaseUrl}/rest/v1/ai_run_log`, {
+        method: "POST", headers: adminHeaders,
+        body: JSON.stringify({
+          function_name: "ask-documents", trigger_source: "owner_portal", entity_type: "owners", entity_id: owner.id,
+          prompt_version: PROMPT_VERSION, model_version: MODEL_VERSION, input_summary: question,
+          duration_ms: Date.now() - aiStartedAt, error: `anthropic_api_error ${aiRes.status}`,
+        }),
+      }).catch(() => null);
       return new Response(JSON.stringify({ error: "Erreur du service IA, réessaie dans un instant." }), { status: 502, headers: corsHeaders });
     }
     const answer = aiData.content?.[0]?.text ?? "Désolé, je n'ai pas pu générer de réponse.";
+
+    await fetch(`${supabaseUrl}/rest/v1/ai_run_log`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        function_name: "ask-documents",
+        trigger_source: "owner_portal",
+        entity_type: "owners",
+        entity_id: owner.id,
+        prompt_version: PROMPT_VERSION,
+        model_version: MODEL_VERSION,
+        input_summary: question,
+        output_summary: answer.slice(0, 300),
+        duration_ms: Date.now() - aiStartedAt,
+        input_tokens: aiData?.usage?.input_tokens ?? null,
+        output_tokens: aiData?.usage?.output_tokens ?? null,
+        automatic_action_taken: `reponse_avec_${selected.length}_document(s)_source`,
+      }),
+    }).catch((e) => console.error("Failed to write ai_run_log", e));
 
     return new Response(JSON.stringify({ answer, sources: selected.map((d: any) => d.title) }), { status: 200, headers: corsHeaders });
   } catch (err) {

@@ -17,6 +17,9 @@ function checkSafetyOverride(description: string) {
   return SAFETY_RULES.filter((r) => r.pattern.test(text));
 }
 
+const MODEL_VERSION = "claude-haiku-4-5-20251001";
+const PROMPT_VERSION = "service-request-v2-enriched";
+
 Deno.serve(async (req) => {
   try {
     const payload = await req.json();
@@ -88,6 +91,8 @@ Deno.serve(async (req) => {
     let aiRiskIfNoAction: string | null = null;
     let aiUrgency: string | null = safetyOverride ? "urgence" : null;
     let aiError: string | null = null;
+    let aiUsage: { input_tokens?: number; output_tokens?: number } | null = null;
+    const aiStartedAt = Date.now();
 
     try {
       const prompt = `Tu es l'assistant technique d'une entreprise de gestion immobilière résidentielle au Québec. Un locataire vient de soumettre une demande de service pour son logement.
@@ -117,13 +122,14 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
+          model: MODEL_VERSION,
           max_tokens: 700,
           messages: [{ role: "user", content: prompt }],
         }),
       });
 
       const aiData = await aiRes.json();
+      aiUsage = aiData?.usage ?? null;
       if (!aiRes.ok) {
         throw new Error(`anthropic_api_error ${aiRes.status}: ${JSON.stringify(aiData)}`);
       }
@@ -183,6 +189,31 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
       console.error("Failed to update service_requests", record.id, patchRes.status, JSON.stringify(patchData));
       return new Response(JSON.stringify({ ok: false, error: "db_update_failed", status: patchRes.status, detail: patchData }), { status: 500 });
     }
+
+    // Traçabilité de cet appel IA — indépendante du drapeau ai_needs_review
+    // propre à cette table, pour une vue technique uniforme entre toutes
+    // les automatisations (voir centre de commandement).
+    await fetch(`${supabaseUrl}/rest/v1/ai_run_log`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        function_name: "handle-service-request",
+        trigger_source: "db_trigger:service_requests_insert",
+        entity_type: "service_requests",
+        entity_id: record.id,
+        prompt_version: PROMPT_VERSION,
+        model_version: MODEL_VERSION,
+        input_summary: (record.description ?? "").slice(0, 300),
+        output_summary: aiCategory ? `${aiCategory}${aiSubcategory ? " / " + aiSubcategory : ""} / ${aiUrgency ?? "?"} / ${aiCost ?? "?"}$` : null,
+        confidence: aiConfidence,
+        needs_escalation: needsReview,
+        duration_ms: Date.now() - aiStartedAt,
+        input_tokens: aiUsage?.input_tokens ?? null,
+        output_tokens: aiUsage?.output_tokens ?? null,
+        automatic_action_taken: safetyOverride ? "urgence_forcee_alerte_admin" : "categorisation_appliquee",
+        error: aiError,
+      }),
+    }).catch((e) => console.error("Failed to write ai_run_log", e));
 
     if (aiError) {
       return new Response(JSON.stringify({ ok: true, warning: "ai_categorization_failed", detail: aiError, safety_override: safetyOverride, updated: patchData[0] }), { status: 200 });

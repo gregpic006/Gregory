@@ -333,6 +333,38 @@ create table audit_log (
 -- déclencheurs security definer) ; lecture réservée à l'admin
 -- (policy définie plus bas, après la fonction auth_is_admin()).
 
+-- ============ AI RUN LOG (traçabilité de chaque appel IA) ============
+-- Distinct de audit_log (qui trace les actions/décisions) : ceci trace
+-- l'exécution technique de chaque appel à Claude — de quoi diagnostiquer
+-- un problème (quel prompt, quel modèle, combien de temps, combien de
+-- tokens) et repérer les cas à faible confiance sans dépendre uniquement
+-- des colonnes ai_needs_review/ai_needs_human_validation déjà propres à
+-- certaines tables. input_tokens/output_tokens viennent directement de
+-- la réponse de l'API Anthropic (jamais estimés).
+create table ai_run_log (
+  id uuid primary key default gen_random_uuid(),
+  function_name text not null,
+  trigger_source text,
+  entity_type text,
+  entity_id uuid,
+  prompt_version text,
+  model_version text,
+  input_summary text,
+  output_summary text,
+  confidence numeric(5,2),
+  needs_escalation boolean default false,
+  duration_ms int,
+  input_tokens int,
+  output_tokens int,
+  automatic_action_taken text,
+  human_correction text,
+  error text,
+  attempt_number int default 1,
+  created_at timestamptz default now()
+);
+-- Pas de policy RLS ouverte : accessible uniquement via le rôle
+-- service_role ; lecture admin ajoutée plus bas (après auth_is_admin()).
+
 -- ============ PUBLIC SUBMISSION LOG (limite de débit anti-spam) ============
 create table public_submission_log (
   id uuid primary key default gen_random_uuid(),
@@ -809,6 +841,10 @@ create table payment_reminders (
 );
 alter table payment_reminders enable row level security;
 create policy "admin read payment_reminders" on payment_reminders for select
+  using (auth_is_admin());
+
+alter table ai_run_log enable row level security;
+create policy "admin read ai_run_log" on ai_run_log for select
   using (auth_is_admin());
 
 create or replace function trigger_payment_reminders()

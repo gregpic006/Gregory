@@ -1,4 +1,5 @@
 const MODEL_VERSION = "claude-haiku-4-5-20251001";
+const PROMPT_VERSION = "document-extraction-v2-traceability";
 const CONFIDENCE_THRESHOLD = 85;
 
 Deno.serve(async (req) => {
@@ -73,6 +74,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, skipped: "unsupported file type" }), { status: 200 });
     }
 
+    const aiStartedAt = Date.now();
     const prompt = `Tu es l'assistant documentaire de "Portail", une entreprise de gestion immobilière résidentielle au Québec. Voici un document téléversé (type déclaré : "${doc.doc_type || "non spécifié"}", titre : "${doc.title}"). Analyse-le et extrais les informations clés.
 
 Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
@@ -108,6 +110,14 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
     const aiData = await aiRes.json();
     if (!aiRes.ok) {
       console.error("Anthropic API error", aiRes.status, JSON.stringify(aiData));
+      await fetch(`${supabaseUrl}/rest/v1/ai_run_log`, {
+        method: "POST", headers: adminHeaders,
+        body: JSON.stringify({
+          function_name: "handle-document-upload", trigger_source: "edge_function_call", entity_type: "documents", entity_id: document_id,
+          prompt_version: PROMPT_VERSION, model_version: MODEL_VERSION, input_summary: doc.title,
+          duration_ms: Date.now() - aiStartedAt, error: `anthropic_api_error ${aiRes.status}`,
+        }),
+      }).catch(() => null);
       return new Response(JSON.stringify({ ok: false, error: "anthropic_api_error", detail: aiData }), { status: 502 });
     }
     const rawText = aiData.content?.[0]?.text ?? "{}";
@@ -117,6 +127,27 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
     const lowConfidence = typeof parsed.confidence === "number" && parsed.confidence < CONFIDENCE_THRESHOLD;
     const docTypeMismatch = !!(doc.doc_type && parsed.doc_type_detected && doc.doc_type !== parsed.doc_type_detected);
     const needsHumanValidation = !!(lowConfidence || parsed.readable === false || parsed.missing_info || docTypeMismatch || duplicateOfId);
+
+    await fetch(`${supabaseUrl}/rest/v1/ai_run_log`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        function_name: "handle-document-upload",
+        trigger_source: "edge_function_call",
+        entity_type: "documents",
+        entity_id: document_id,
+        prompt_version: PROMPT_VERSION,
+        model_version: MODEL_VERSION,
+        input_summary: doc.title,
+        output_summary: parsed.summary ?? null,
+        confidence: parsed.confidence ?? null,
+        needs_escalation: needsHumanValidation,
+        duration_ms: Date.now() - aiStartedAt,
+        input_tokens: aiData?.usage?.input_tokens ?? null,
+        output_tokens: aiData?.usage?.output_tokens ?? null,
+        automatic_action_taken: "extraction_appliquee",
+      }),
+    }).catch((e) => console.error("Failed to write ai_run_log", e));
 
     await fetch(`${supabaseUrl}/rest/v1/documents?id=eq.${document_id}`, {
       method: "PATCH",

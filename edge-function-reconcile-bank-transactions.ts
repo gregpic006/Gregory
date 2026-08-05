@@ -142,6 +142,7 @@ Deno.serve(async (req) => {
         let aiSuggestedTenantId: string | null = null;
         let aiConfidence: number | null = null;
         if (matchStatus === "unmatched" && tenantNames.length && anthropicKey) {
+          const aiStartedAt = Date.now();
           try {
             const prompt = `Tu es l'assistant de rapprochement bancaire de "Portail". Voici un dépôt bancaire dont l'origine n'est pas claire à partir des données connues (montant, date).
 
@@ -170,6 +171,19 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
             }
             aiConfidence = typeof parsed.confidence === "number" ? parsed.confidence : null;
             note = parsed.note ?? note;
+
+            await fetch(`${supabaseUrl}/rest/v1/ai_run_log`, {
+              method: "POST", headers: adminHeaders,
+              body: JSON.stringify({
+                function_name: "reconcile-bank-transactions", trigger_source: "admin_csv_import", entity_type: "bank_transactions",
+                prompt_version: "bank-reconciliation-v1", model_version: "claude-haiku-4-5-20251001",
+                input_summary: `${description} — ${amount} $`, output_summary: parsed.suggested_tenant_name ?? "aucune piste",
+                confidence: aiConfidence, needs_escalation: aiConfidence == null || aiConfidence < 70,
+                duration_ms: Date.now() - aiStartedAt,
+                input_tokens: aiData?.usage?.input_tokens ?? null, output_tokens: aiData?.usage?.output_tokens ?? null,
+                automatic_action_taken: "suggestion_seulement_aucune_application_automatique",
+              }),
+            }).catch(() => null);
           } catch (e) {
             console.error("AI bank description suggestion failed", e);
           }
