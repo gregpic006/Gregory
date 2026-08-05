@@ -202,6 +202,25 @@ async function main() {
     record("Travaux — assignation à un travailleur", "SKIP", "aucun travailleur dans le répertoire (table workers) — ajoute-en un pour tester ce chemin");
     record("Travaux — complétion + dépense", "SKIP", "dépend du test précédent");
   } else {
+    // Depuis la tâche #39, l'assignation est bloquée si le travailleur
+    // n'est pas en conformité (RBQ/assurance) — on met le travailleur de
+    // test en conformité avant de tenter l'assignation, sinon ce test
+    // échouerait systématiquement sans que ce soit un vrai bug.
+    if (worker.missing_rbq_license || worker.rbq_expired || worker.missing_insurance_doc || worker.insurance_expired) {
+      const verifyFix = await callFn("ops-api", adminJwt, {
+        action: "update_worker_verification", worker_id: worker.id,
+        requires_rbq: false,
+        insurance_expiry: new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+        insurance_base64: Buffer.from("preuve d'assurance factice — travailleur de diagnostic E2E").toString("base64"),
+        insurance_filename: "assurance-diagnostic.txt",
+        insurance_content_type: "text/plain",
+        mark_verified: true,
+      });
+      record("Travailleurs — mise en conformité du travailleur de test", verifyFix.ok ? "PASS" : "FAIL", verifyFix.ok ? "" : JSON.stringify(verifyFix.data));
+    } else {
+      record("Travailleurs — mise en conformité du travailleur de test", "PASS", "déjà conforme");
+    }
+
     const woCreate = await callFn("ops-api", adminJwt, {
       action: "create_work_order", service_request_id: serviceRequestId, unit_id: unitId,
       worker_id: worker.id, description: srDescription, worker_pay: 50,
