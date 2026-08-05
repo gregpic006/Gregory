@@ -809,8 +809,11 @@ async function loadRentals(){
       <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;align-items:center;">
         <span>Loyer actuel : <b>${u.rent != null ? Number(u.rent).toLocaleString('fr-CA') + ' $' : '—'}</b></span>
         <span>Loyer suggéré par l'IA : <b>${u.suggested_rent != null ? Number(u.suggested_rent).toLocaleString('fr-CA') + ' $' : '—'}</b></span>
+        ${u.listing_quality_score != null ? `<span>Qualité de l'annonce : <b>${u.listing_quality_score}/100</b></span>` : ''}
         ${vacancyFlag}
+        ${u.listing_low_interest ? `<span class="tag urgent">Peu de demandes reçues — envisage de revoir l'annonce ou le prix</span>` : ''}
       </div>
+      ${u.listing_quality_notes ? `<span style="font-size:11.5px;color:var(--muted);font-style:italic;">${esc(u.listing_quality_notes)}</span>` : ''}
       ${unitCandidates.length ? `
       <table style="width:100%;margin-top:6px;">
         <thead><tr><th>Candidat</th><th>Résumé IA</th><th>Statut</th><th></th></tr></thead>

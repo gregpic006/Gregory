@@ -1125,6 +1125,17 @@ create trigger on_document_insert
 -- suggère un loyer basé sur les unités comparables du portefeuille.
 -- status_changed_at sert à calculer depuis combien de temps le
 -- logement est vacant (détection d'anomalie côté portail).
+-- Qualité et suivi de l'annonce : distincte de toute logique
+-- d'augmentation de loyer sur bail existant (voir garde-fou dans
+-- generate-listing — jamais de suggestion basée sur le marché pour un
+-- renouvellement, seulement pour une vraie vacance).
+alter table units add column if not exists amenities text;
+alter table units add column if not exists listing_published_at timestamptz;
+alter table units add column if not exists listing_low_interest boolean default false;
+alter table units add column if not exists listing_quality_score int;
+alter table units add column if not exists listing_quality_notes text;
+alter table units add column if not exists listing_description_short text;
+
 create or replace function notify_listing_needed()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
@@ -1138,6 +1149,8 @@ begin
     if TG_OP = 'UPDATE' and old.status is distinct from new.status then
       new.status_changed_at := now();
     end if;
+    new.listing_published_at := now();
+    new.listing_low_interest := false;
     perform net.http_post(
       url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/generate-listing',
       body := jsonb_build_object('unit_id', new.id),
@@ -1155,6 +1168,25 @@ $$;
 create trigger on_unit_listing_change
   before insert or update on units
   for each row execute function notify_listing_needed();
+
+-- Alerte si peu de demandes de visite après quelques jours — visible
+-- par l'admin plutôt que de laisser une annonce stagner sans action.
+create or replace function flag_stale_listings()
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  update units u set listing_low_interest = true
+  where u.status in ('available', 'soon_available')
+    and u.listing_published_at is not null
+    and u.listing_published_at <= now() - interval '5 days'
+    and coalesce(u.listing_low_interest, false) = false
+    and (
+      select count(*) from inquiries i
+      where i.unit_id = u.id and i.type = 'visite' and i.created_at >= u.listing_published_at
+    ) < 2;
+end;
+$$;
+
+select cron.schedule('daily-flag-stale-listings', '0 14 * * *', $$select flag_stale_listings()$$);
 
 -- ============================================================
 -- CRM COMMERCIAL — création automatique d'un prospect
