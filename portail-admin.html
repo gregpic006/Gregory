@@ -624,8 +624,44 @@ async function loadProspects(){
       <td class="num">${p.signing_probability != null ? p.signing_probability + '%' : '—'}</td>
       <td style="font-size:12px;">${esc(p.next_action) || '—'}</td>
       <td>${p.next_followup_date || '—'}</td>
-      <td><button onclick="promptAddCall('${p.id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">+ Appel</button></td>
-    </tr>`).join('');
+      <td>
+        <button onclick="promptAddCall('${p.id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">+ Appel</button>
+        ${(p.call_history && p.call_history.length) ? `<button onclick="toggleCallHistory('${p.id}')" style="border:1px solid var(--line);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;margin-top:4px;">Historique (${p.call_history.length})</button>` : ''}
+      </td>
+    </tr>
+    ${(p.call_history && p.call_history.length) ? `
+    <tr id="call-history-${p.id}" style="display:none;">
+      <td colspan="10" style="background:var(--paper-2);font-size:12px;">
+        ${p.call_history.map((c, i) => `
+          <div style="border-bottom:1px solid var(--line);padding:8px 0;">
+            <b>${new Date(c.date).toLocaleString('fr-CA')}</b> ${c.corrected ? '<span style="color:var(--brass-dark);">(corrigé)</span>' : ''} — confiance IA ${c.confidence != null ? c.confidence + '%' : '—'}<br>
+            <b>Résumé :</b> ${esc(c.summary)}<br>
+            ${c.key_quotes && c.key_quotes.length ? `<b>Citations :</b> ${c.key_quotes.map(q => '"' + esc(q) + '"').join(' — ')}<br>` : ''}
+            ${c.objections ? `<b>Objections :</b> ${esc(c.objections)}<br>` : ''}
+            ${c.commitment ? `<b>Engagement pris :</b> ${esc(c.commitment)}<br>` : ''}
+            ${c.next_step ? `<b>Prochaine étape :</b> ${esc(c.next_step)}<br>` : ''}
+            ${c.correction_note ? `<span style="color:var(--muted);font-style:italic;">Note de correction : ${esc(c.correction_note)}</span><br>` : ''}
+            <button onclick="promptCorrectCall('${p.id}', ${i})" style="border:1px solid var(--line);background:none;padding:4px 8px;font-size:11px;cursor:pointer;margin-top:4px;">Corriger cette analyse</button>
+          </div>`).join('')}
+      </td>
+    </tr>` : ''}`).join('');
+}
+
+function toggleCallHistory(prospectId){
+  const row = document.getElementById('call-history-' + prospectId);
+  if(row) row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+
+async function promptCorrectCall(prospect_id, call_index){
+  const summary = prompt('Résumé corrigé (laisse vide pour ne pas changer) :');
+  const interest_level = prompt('Niveau d\'intérêt corrigé (chaud / tiede / froid — laisse vide pour ne pas changer) :');
+  const correction_note = prompt('Pourquoi cette correction ? (optionnel, aide à améliorer l\'IA)') || null;
+  const corrections = {};
+  if(summary) corrections.summary = summary;
+  if(interest_level && ['chaud','tiede','froid'].includes(interest_level.trim())) corrections.interest_level = interest_level.trim();
+  if(Object.keys(corrections).length === 0){ return; }
+  await callCrmApi({ action: 'correct_call', prospect_id, call_index, corrections, correction_note });
+  await loadProspects();
 }
 
 async function promptAcquisitionCost(prospect_id, current){
