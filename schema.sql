@@ -102,6 +102,18 @@ create table leases (
   end_date date,
   monthly_rent numeric(10,2) not null,
   status text default 'active' check (status in ('active','renewed','ended')),
+  -- Renouvellement : dates/délais viennent des règles du Code civil du
+  -- Québec (calculées ci-dessous, jamais devinées par l'IA). Réponse et
+  -- signature sont enregistrées manuellement par l'admin — pas de
+  -- portail de réponse automatisé pour un document à portée légale.
+  renewal_notice_sent_at timestamptz,
+  renewal_notice_type text check (renewal_notice_type in ('renouvellement_meme_conditions','augmentation','non_renouvellement')),
+  renewal_notice_amount numeric(10,2),
+  renewal_response text default 'pending' check (renewal_response in ('pending','accepted','refused','no_response')),
+  renewal_response_note text,
+  renewal_signed boolean default false,
+  renewal_deadline_missed boolean default false,
+  relocation_prep_needed boolean default false,
   created_at timestamptz default now()
 );
 
@@ -1403,6 +1415,87 @@ end;
 $$;
 
 select cron.schedule('daily-flag-stale-listings', '0 14 * * *', $$select flag_stale_listings()$$);
+
+-- ============================================================
+-- RENOUVELLEMENTS DE BAIL ET ÉCHÉANCES
+-- ============================================================
+-- Au Québec, le délai d'avis dépend de la durée du bail (Code civil) :
+--   - bail de 12 mois ou plus : avis entre 6 et 3 mois avant la fin;
+--   - bail de moins de 12 mois (ou à durée indéterminée) : avis entre
+--     2 et 1 mois avant la fin.
+-- Cette vue calcule la fenêtre légale pour chaque bail actif — c'est
+-- une donnée déterministe, jamais une estimation de l'IA.
+create or replace view lease_renewal_tracking as
+select
+  l.id as lease_id,
+  l.unit_id,
+  l.tenant_id,
+  l.start_date,
+  l.end_date,
+  l.monthly_rent,
+  l.renewal_notice_sent_at,
+  l.renewal_notice_type,
+  l.renewal_response,
+  l.renewal_signed,
+  l.renewal_deadline_missed,
+  l.relocation_prep_needed,
+  case when (l.end_date - l.start_date) >= 365 then 'long' else 'court' end as term_type,
+  (case when (l.end_date - l.start_date) >= 365 then l.end_date - interval '6 months' else l.end_date - interval '2 months' end)::date as notice_window_start,
+  (case when (l.end_date - l.start_date) >= 365 then l.end_date - interval '3 months' else l.end_date - interval '1 month' end)::date as notice_window_end,
+  (l.end_date - current_date) as days_until_end
+from leases l
+where l.status = 'active' and l.end_date is not null;
+
+create or replace function check_lease_renewal_windows()
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  r record;
+begin
+  -- 1. La fenêtre légale d'avis vient de s'ouvrir : signalé une fois.
+  for r in
+    select * from lease_renewal_tracking
+    where renewal_notice_sent_at is null
+    and current_date = notice_window_start
+  loop
+    insert into audit_log (actor_type, action, entity_type, entity_id, details)
+    values ('system', 'lease_renewal.window_open', 'leases', r.lease_id,
+      jsonb_build_object('notice_window_end', r.notice_window_end, 'term_type', r.term_type));
+  end loop;
+
+  -- 2. Délai légal dépassé sans avis envoyé — alerte critique (risque
+  --    de reconduction automatique du bail aux mêmes conditions).
+  for r in
+    select * from lease_renewal_tracking
+    where renewal_notice_sent_at is null
+    and coalesce(renewal_deadline_missed, false) = false
+    and current_date > notice_window_end
+  loop
+    update leases set renewal_deadline_missed = true where id = r.lease_id;
+    insert into audit_log (actor_type, action, entity_type, entity_id, details)
+    values ('system', 'lease_renewal.deadline_missed', 'leases', r.lease_id,
+      jsonb_build_object('notice_window_end', r.notice_window_end, 'end_date', r.end_date));
+  end loop;
+
+  -- 3. Départ confirmé (refus ou non-renouvellement) et fin de bail dans
+  --    moins de 30 jours : prépare la relocation en réutilisant
+  --    l'automatisation d'annonce déjà existante (voir generate-listing).
+  for r in
+    select l.id as lease_id, l.unit_id
+    from leases l
+    where l.status = 'active' and l.end_date is not null
+    and l.end_date - current_date <= 30
+    and (l.renewal_response = 'refused' or l.renewal_notice_type = 'non_renouvellement')
+    and coalesce(l.relocation_prep_needed, false) = false
+  loop
+    update leases set relocation_prep_needed = true where id = r.lease_id;
+    update units set status = 'soon_available' where id = r.unit_id and status = 'occupied';
+    insert into audit_log (actor_type, action, entity_type, entity_id, details)
+    values ('system', 'lease_renewal.relocation_prep_started', 'leases', r.lease_id, jsonb_build_object('unit_id', r.unit_id));
+  end loop;
+end;
+$$;
+
+select cron.schedule('daily-check-lease-renewals', '0 13 * * *', $$select check_lease_renewal_windows()$$);
 
 -- ============================================================
 -- CRM COMMERCIAL — création automatique d'un prospect

@@ -197,6 +197,10 @@
     <tbody id="anomalies-body"><tr class="empty-row"><td colspan="5">Chargement...</td></tr></tbody>
   </table>
 
+  <h1 style="margin-top:40px;font-size:22px;">Renouvellements de bail</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Fenêtres d'avis calculées selon le Code civil du Québec — le calcul d'augmentation reste externe (méthode du TAL)</p>
+  <div id="lease-renewals-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
   <h1 style="margin-top:40px;font-size:22px;">CRM — Prospects propriétaires</h1>
   <p class="subtitle" style="margin-bottom:16px;">Pipeline d'acquisition, trié par valeur potentielle</p>
 
@@ -301,6 +305,7 @@ async function loadAdminDashboard(){
 
   await loadOps();
   await loadProspects();
+  await loadLeaseRenewals();
   await loadAuditLog();
   await obInit();
 }
@@ -839,6 +844,74 @@ async function promptConfirmMatch(transaction_id){
 async function ignoreBankTransaction(transaction_id){
   const res = await callReconApi({ action: 'ignore_transaction', transaction_id });
   if(res?.ok){ await loadBankTransactions(); }
+}
+
+async function callLeaseRenewalApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('handle-lease-renewal-notice', { body: payload });
+  if(error){ alert('Erreur renouvellement de bail : ' + error.message); return null; }
+  return data;
+}
+
+const noticeTypeLabel = { renouvellement_meme_conditions: 'Renouvellement (mêmes conditions)', augmentation: 'Augmentation de loyer', non_renouvellement: 'Non-renouvellement' };
+const renewalResponseLabel = { pending: 'En attente', accepted: 'Acceptée', refused: 'Refusée', no_response: 'Aucune réponse' };
+const requiredDocsByType = {
+  renouvellement_meme_conditions: 'Aucun document formel requis (avis informatif suffisant).',
+  augmentation: 'Avis conforme au Code civil ; formulaire du TAL si une demande de fixation est nécessaire en cas de refus.',
+  non_renouvellement: 'Avis de non-renouvellement écrit, dans le délai légal applicable.',
+};
+
+async function loadLeaseRenewals(){
+  const res = await callLeaseRenewalApi({ action: 'list' });
+  const container = document.getElementById('lease-renewals-body');
+  const leases = res?.leases || [];
+  if(!leases.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun bail actif avec date de fin à surveiller pour l\'instant.</p>';
+    return;
+  }
+  container.innerHTML = leases.map(l => {
+    const tenant = l.leases?.tenants;
+    const unit = l.leases?.units;
+    const addr = `${esc(unit?.buildings?.address) || ''}, unité ${esc(unit?.unit_number) || ''}`;
+    const windowOpen = !l.renewal_notice_sent_at && l.days_until_end != null;
+    return `
+    <div style="background:${l.renewal_deadline_missed ? '#fdeaea' : 'var(--paper-2)'};border:1px solid ${l.renewal_deadline_missed ? '#c0392b' : 'var(--line)'};padding:14px 16px;margin-bottom:10px;font-size:12.5px;">
+      ${l.renewal_deadline_missed ? '<div style="background:#c0392b;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;display:inline-block;margin-bottom:8px;">⚠ DÉLAI LÉGAL D\'AVIS DÉPASSÉ — risque de reconduction automatique du bail</div>' : ''}
+      <b>${esc(tenant?.full_name) || ''}</b> — ${addr}<br>
+      Fin du bail : ${esc(l.end_date)} (${l.days_until_end} jour(s)) — bail ${l.term_type === 'long' ? '12 mois ou plus' : 'moins de 12 mois'} — fenêtre légale d'avis : ${esc(l.notice_window_start)} au ${esc(l.notice_window_end)}<br>
+      Loyer actuel : ${Number(l.monthly_rent).toLocaleString('fr-CA')} $
+      ${l.renewal_notice_sent_at ? `<br>Avis envoyé le ${new Date(l.renewal_notice_sent_at).toLocaleDateString('fr-CA')} — ${noticeTypeLabel[l.renewal_notice_type] || ''} — réponse : ${renewalResponseLabel[l.renewal_response] || l.renewal_response} ${l.renewal_signed ? '— signé' : ''}` : ''}
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;">
+        <select id="notice-type-${l.lease_id}" style="padding:6px;border:1px solid var(--line);">
+          <option value="renouvellement_meme_conditions">Renouvellement (mêmes conditions)</option>
+          <option value="augmentation">Augmentation de loyer</option>
+          <option value="non_renouvellement">Non-renouvellement</option>
+        </select>
+        <input type="number" id="notice-amount-${l.lease_id}" placeholder="Nouveau loyer (si augmentation)" style="padding:6px;border:1px solid var(--line);width:180px;">
+        <button onclick="sendLeaseRenewalNotice('${l.lease_id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Envoyer l'avis</button>
+        <button onclick="promptRecordRenewalResponse('${l.lease_id}')" style="border:1px solid var(--line);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Enregistrer la réponse du locataire</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function sendLeaseRenewalNotice(lease_id){
+  const notice_type = document.getElementById('notice-type-' + lease_id).value;
+  const amountInput = document.getElementById('notice-amount-' + lease_id).value;
+  if(notice_type === 'augmentation' && !amountInput){
+    alert('Indique le nouveau loyer (calculé selon la méthode du TAL) pour une augmentation.');
+    return;
+  }
+  const res = await callLeaseRenewalApi({ action: 'send_notice', lease_id, notice_type, new_rent_amount: amountInput ? Number(amountInput) : null });
+  if(res?.ok){ await loadLeaseRenewals(); }
+}
+
+async function promptRecordRenewalResponse(lease_id){
+  const responseVal = prompt('Réponse du locataire (accepted / refused / no_response) :');
+  if(!responseVal || !['accepted','refused','no_response'].includes(responseVal.trim())) return;
+  const signedVal = confirm('Le document de renouvellement a-t-il été signé ?');
+  const note = prompt('Note additionnelle (optionnel) :') || null;
+  const res = await callLeaseRenewalApi({ action: 'record_response', lease_id, renewal_response: responseVal.trim(), renewal_signed: signedVal, renewal_response_note: note });
+  if(res?.ok){ await loadLeaseRenewals(); }
 }
 
 async function promptAcquisitionCost(prospect_id, current){
