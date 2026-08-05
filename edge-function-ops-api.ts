@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
       const [newWorkOrder] = await woInsertRes.json();
       if (service_request_id) {
         await fetch(`${supabaseUrl}/rest/v1/service_requests?id=eq.${service_request_id}`, {
-          method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "in_progress" }),
+          method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "in_progress", pending_reassessment: false, reassessment_due: null }),
         });
       }
       await logAudit("work_order.create", "work_orders", newWorkOrder?.id ?? null, { worker_id, worker_pay: Number(worker_pay), coordination_fee: coordinationFee, estimated_cost: estimatedCost });

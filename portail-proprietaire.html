@@ -566,7 +566,11 @@ async function loadApprovals(){
 }
 
 async function decideApproval(id, decision){
-  await supabaseClient.from('approvals').update({ status: decision, decided_at: new Date().toISOString() }).eq('id', id);
+  let rejection_note = null;
+  if(decision === 'rejected'){
+    rejection_note = prompt("Optionnel — précise la raison du refus ou une solution temporaire à proposer au locataire (laisse vide si aucune) :") || null;
+  }
+  await supabaseClient.from('approvals').update({ status: decision, decided_at: new Date().toISOString(), rejection_note }).eq('id', id);
   await loadApprovals();
 }
 

@@ -924,10 +924,21 @@ select cron.schedule('worker-response-timeouts', '*/15 * * * *', $$select proces
 -- approvals), déclenche automatiquement la suite :
 --   approuvée -> avise le travailleur (mandat) + avise le locataire
 --   refusée   -> annule le work_order + avise le locataire
+-- Un refus ne doit jamais fermer le dossier silencieusement : la
+-- demande est réouverte pour réévaluation (nouvelle soumission,
+-- solution alternative) avec une échéance de suivi, plus courte si
+-- le problème était urgent/sécuritaire.
+alter table service_requests add column if not exists pending_reassessment boolean default false;
+alter table service_requests add column if not exists reassessment_due date;
+alter table approvals add column if not exists rejection_note text;
+
 create or replace function handle_approval_decision()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
   v_token uuid;
+  v_service_request_id uuid;
+  v_urgent boolean;
+  v_days int;
 begin
   if old.status = 'pending' and new.status = 'approved' then
     v_token := gen_random_uuid();
@@ -966,6 +977,26 @@ begin
   elsif old.status = 'pending' and new.status = 'rejected' then
     update work_orders set status = 'cancelled' where id = new.work_order_id;
 
+    -- Le refus ne ferme pas le dossier : la demande redevient "open"
+    -- (réapparaît dans la file admin pour une autre soumission/solution)
+    -- avec une échéance de réévaluation plus courte si c'était urgent.
+    select wo.service_request_id,
+           coalesce(sr.safety_override, false) or coalesce(sr.ai_urgency in ('urgence', 'élevé'), false)
+      into v_service_request_id, v_urgent
+    from work_orders wo
+    left join service_requests sr on sr.id = wo.service_request_id
+    where wo.id = new.work_order_id;
+
+    v_days := case when v_urgent then 1 else 3 end;
+
+    if v_service_request_id is not null then
+      update service_requests set
+        status = 'open',
+        pending_reassessment = true,
+        reassessment_due = current_date + v_days
+      where id = v_service_request_id;
+    end if;
+
     perform net.http_post(
       url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-approval-decision',
       body := jsonb_build_object('approval_id', new.id, 'decision', 'rejected'),
@@ -977,7 +1008,7 @@ begin
     );
     insert into audit_log (actor_type, actor_id, action, entity_type, entity_id, details)
     values ('owner', auth.uid(), 'approval.rejected', 'approvals', new.id,
-      jsonb_build_object('work_order_id', new.work_order_id, 'requested_amount', new.requested_amount));
+      jsonb_build_object('work_order_id', new.work_order_id, 'requested_amount', new.requested_amount, 'reassessment_due', current_date + v_days));
   end if;
   return new;
 end;

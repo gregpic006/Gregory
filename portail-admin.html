@@ -476,6 +476,7 @@ async function loadServiceRequestsAdmin(){
     return `
     <div style="background:${sr.safety_override ? '#fdeaea' : 'var(--paper-2)'};border:1px solid ${sr.safety_override ? '#c0392b' : 'var(--line)'};padding:14px 16px;margin-bottom:10px;">
       ${sr.safety_override ? `<div style="background:#c0392b;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;display:inline-block;margin-bottom:8px;">⚠ URGENCE SÉCURITÉ — ${esc((sr.safety_flags || []).join(', '))}</div>` : ''}
+      ${sr.pending_reassessment ? `<div style="background:#8a5fb0;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;display:inline-block;margin-bottom:8px;">↻ REFUSÉ PAR LE PROPRIÉTAIRE — nouvelle soumission requise d'ici le ${esc(sr.reassessment_due || '—')}</div>` : ''}
       ${(!sr.safety_override && sr.ai_needs_review) ? `<div style="background:#e6a817;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;display:inline-block;margin-bottom:8px;">🔎 À VALIDER PAR UN HUMAIN${sr.ai_confidence != null ? ' — confiance IA ' + Math.round(sr.ai_confidence) + '%' : ''}</div>` : ''}
       <b style="display:block;margin-bottom:4px;">${esc(sr.tenants?.full_name) ?? ''} — ${esc(sr.units?.buildings?.address) ?? ''}, unité ${esc(sr.units?.unit_number) ?? ''}</b>
       <span style="font-size:12.5px;color:var(--muted);display:block;">${esc(sr.description)}</span>
