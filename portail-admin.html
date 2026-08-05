@@ -496,6 +496,18 @@ async function loadServiceRequestsAdmin(){
         <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Paie du travailleur ($)</label>
           <input type="number" id="sr-pay-${sr.id}" min="0" step="0.01" style="padding:8px;border:1px solid var(--line);width:110px;">
         </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Rendez-vous proposé</label>
+          <input type="datetime-local" id="sr-appt-${sr.id}" style="padding:8px;border:1px solid var(--line);">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Échéance</label>
+          <input type="date" id="sr-due-${sr.id}" style="padding:8px;border:1px solid var(--line);">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Accès au logement</label>
+          <input type="text" id="sr-entry-${sr.id}" placeholder="Ex: locataire présent" style="padding:8px;border:1px solid var(--line);width:160px;">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Conditions de facturation</label>
+          <input type="text" id="sr-billing-${sr.id}" placeholder="Ex: net 15 jours" style="padding:8px;border:1px solid var(--line);width:150px;">
+        </div>
         <button onclick="assignServiceRequest('${sr.id}', '${sr.unit_id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Assigner</button>
       </div>
     </div>`;
@@ -506,11 +518,21 @@ async function assignServiceRequest(serviceRequestId, unitId){
   const worker_id = document.getElementById('sr-worker-' + serviceRequestId).value;
   const description = document.getElementById('sr-desc-' + serviceRequestId).value;
   const worker_pay = document.getElementById('sr-pay-' + serviceRequestId).value;
+  const appointment_at = document.getElementById('sr-appt-' + serviceRequestId).value;
+  const due_by = document.getElementById('sr-due-' + serviceRequestId).value;
+  const entry_permission = document.getElementById('sr-entry-' + serviceRequestId).value;
+  const billing_terms = document.getElementById('sr-billing-' + serviceRequestId).value;
   if(!worker_id || !description || !worker_pay){
     alert('Choisis un travailleur, une description et la paie du travailleur.');
     return;
   }
-  const res = await callOpsApi({ action: 'create_work_order', service_request_id: serviceRequestId, unit_id: unitId, worker_id, description, worker_pay: Number(worker_pay) });
+  const res = await callOpsApi({
+    action: 'create_work_order', service_request_id: serviceRequestId, unit_id: unitId, worker_id, description, worker_pay: Number(worker_pay),
+    appointment_at: appointment_at ? new Date(appointment_at).toISOString() : null,
+    due_by: due_by || null,
+    entry_permission: entry_permission || null,
+    billing_terms: billing_terms || null,
+  });
   if(res?.ok){ await loadOps(); }
 }
 

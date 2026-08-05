@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === "create_work_order") {
-      const { service_request_id, unit_id, worker_id, description, worker_pay } = body;
+      const { service_request_id, unit_id, worker_id, description, worker_pay, appointment_at, entry_permission, billing_terms, due_by } = body;
       if (!unit_id || !worker_id || !description || !worker_pay) {
         return new Response(JSON.stringify({ error: "Champs manquants" }), { status: 400, headers: corsHeaders });
       }
@@ -80,6 +80,10 @@ Deno.serve(async (req) => {
           coordination_fee: coordinationFee,
           estimated_cost: estimatedCost,
           status: "assigned",
+          appointment_at: appointment_at || null,
+          entry_permission: entry_permission || null,
+          billing_terms: billing_terms || null,
+          due_by: due_by || null,
         }),
       });
       const [newWorkOrder] = await woInsertRes.json();

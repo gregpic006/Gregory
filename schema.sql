@@ -768,6 +768,25 @@ select cron.schedule('daily-payment-reminders', '0 13 * * *', $$select trigger_p
 -- ci-dessus), on NE notifie PAS le travailleur tout de suite — il
 -- sera avisé seulement après la décision du propriétaire (voir
 -- handle_approval_decision plus bas).
+-- Assignation transactionnelle : le travailleur doit répondre
+-- (accepter / refuser / proposer une autre heure / demander des infos)
+-- via un lien à usage unique (worker_response_token). Voir plus bas
+-- process_worker_response_timeouts() pour le rappel (30 min), la
+-- cascade au prochain travailleur (2h) et l'alerte admin si tous
+-- refusent.
+alter table work_orders add column if not exists worker_notified_at timestamptz;
+alter table work_orders add column if not exists worker_response text default 'pending' check (worker_response in ('pending','accepted','declined','proposed_other_time','info_requested'));
+alter table work_orders add column if not exists worker_response_at timestamptz;
+alter table work_orders add column if not exists worker_response_token uuid default gen_random_uuid();
+alter table work_orders add column if not exists worker_response_note text;
+alter table work_orders add column if not exists declined_worker_ids uuid[] default '{}';
+alter table work_orders add column if not exists response_reminder_sent boolean default false;
+alter table work_orders add column if not exists response_escalated boolean default false;
+alter table work_orders add column if not exists appointment_at timestamptz;
+alter table work_orders add column if not exists entry_permission text;
+alter table work_orders add column if not exists billing_terms text;
+alter table work_orders add column if not exists due_by date;
+
 create or replace function notify_worker_new_job()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
@@ -789,16 +808,26 @@ begin
     end if;
 
     if not v_needs_approval then
+      -- Nouvelle notification = nouveau cycle de réponse (token,
+      -- compteurs et statut remis à zéro), que ce soit la 1ère
+      -- affectation ou une cascade vers le prochain travailleur.
+      new.worker_notified := true;
+      new.worker_notified_at := now();
+      new.worker_response := 'pending';
+      new.worker_response_token := gen_random_uuid();
+      new.worker_response_note := null;
+      new.response_reminder_sent := false;
+      new.response_escalated := false;
+
       perform net.http_post(
         url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-worker-job-assigned',
-        body := jsonb_build_object('work_order_id', new.id),
+        body := jsonb_build_object('work_order_id', new.id, 'response_token', new.worker_response_token, 'notification_type', 'assigned'),
         headers := jsonb_build_object(
           'Content-Type', 'application/json',
           'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
           'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
         )
       );
-      new.worker_notified := true;
     end if;
   end if;
   return new;
@@ -809,6 +838,85 @@ create trigger on_work_order_worker_assigned
   before insert or update on work_orders
   for each row execute function notify_worker_new_job();
 
+-- Rappel (30 min sans réponse), cascade au prochain travailleur
+-- disponible de la même spécialité (2h sans réponse), et alerte admin
+-- si plus aucun travailleur disponible n'a accepté.
+create or replace function process_worker_response_timeouts()
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  wo record;
+  v_next_worker_id uuid;
+  v_admin_count int;
+begin
+  -- 1. Rappel après 30 minutes sans réponse.
+  for wo in
+    select id from work_orders
+    where worker_response = 'pending'
+    and worker_notified = true
+    and coalesce(response_reminder_sent, false) = false
+    and worker_notified_at <= now() - interval '30 minutes'
+  loop
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-worker-job-assigned',
+      body := jsonb_build_object('work_order_id', wo.id, 'notification_type', 'reminder'),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+    update work_orders set response_reminder_sent = true where id = wo.id;
+  end loop;
+
+  -- 2. Après 2 heures sans réponse : cascade au prochain travailleur
+  --    disponible de la même spécialité (jamais déjà sollicité pour ce travail).
+  for wo in
+    select w.id, w.worker_id, w.declined_worker_ids, wk.specialty
+    from work_orders w
+    join workers wk on wk.id = w.worker_id
+    where w.worker_response = 'pending'
+    and w.worker_notified = true
+    and coalesce(w.response_escalated, false) = false
+    and w.worker_notified_at <= now() - interval '2 hours'
+  loop
+    select id into v_next_worker_id
+    from workers
+    where specialty is not distinct from wo.specialty
+    and id <> wo.worker_id
+    and not (id = any(coalesce(wo.declined_worker_ids, '{}')))
+    order by random()
+    limit 1;
+
+    if v_next_worker_id is not null then
+      update work_orders set
+        declined_worker_ids = array_append(coalesce(declined_worker_ids, '{}'), worker_id),
+        worker_id = v_next_worker_id,
+        worker_notified = false
+      where id = wo.id;
+      -- notify_worker_new_job() se charge de la notification et de la
+      -- remise à zéro des compteurs pour le nouveau travailleur.
+    else
+      update work_orders set response_escalated = true where id = wo.id;
+
+      select count(*) into v_admin_count from users where is_admin = true and email is not null;
+      if v_admin_count > 0 then
+        perform net.http_post(
+          url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-worker-job-assigned',
+          body := jsonb_build_object('work_order_id', wo.id, 'notification_type', 'all_declined'),
+          headers := jsonb_build_object(
+            'Content-Type', 'application/json',
+            'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+            'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+          )
+        );
+      end if;
+    end if;
+  end loop;
+end;
+$$;
+
+select cron.schedule('worker-response-timeouts', '*/15 * * * *', $$select process_worker_response_timeouts()$$);
+
 -- ============================================================
 -- DÉCISION D'APPROBATION — ferme automatiquement la boucle
 -- ============================================================
@@ -818,18 +926,30 @@ create trigger on_work_order_worker_assigned
 --   refusée   -> annule le work_order + avise le locataire
 create or replace function handle_approval_decision()
 returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_token uuid;
 begin
   if old.status = 'pending' and new.status = 'approved' then
+    v_token := gen_random_uuid();
+    update work_orders set
+      worker_notified = true,
+      worker_notified_at = now(),
+      worker_response = 'pending',
+      worker_response_token = v_token,
+      worker_response_note = null,
+      response_reminder_sent = false,
+      response_escalated = false
+    where id = new.work_order_id;
+
     perform net.http_post(
       url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-worker-job-assigned',
-      body := jsonb_build_object('work_order_id', new.work_order_id),
+      body := jsonb_build_object('work_order_id', new.work_order_id, 'response_token', v_token, 'notification_type', 'assigned'),
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
         'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
         'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
       )
     );
-    update work_orders set worker_notified = true where id = new.work_order_id;
 
     perform net.http_post(
       url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-approval-decision',
