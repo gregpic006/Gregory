@@ -425,6 +425,24 @@ create policy "own service_requests" on service_requests for select
 create policy "own work_orders" on work_orders for select
   using (unit_id in (select owned_unit_ids()));
 
+-- L'admin gère déjà tout via les fonctions Edge (service_role,
+-- contourne RLS), mais aucune policy ne lui permettait de lire ces
+-- tables avec sa propre session — utile pour le support/diagnostic
+-- direct, cohérent avec le même principe déjà appliqué à
+-- inquiries/workers/audit_log.
+create policy "admin read service_requests" on service_requests for select
+  using (auth_is_admin());
+create policy "admin read work_orders" on work_orders for select
+  using (auth_is_admin());
+create policy "admin read expenses" on expenses for select
+  using (auth_is_admin());
+create policy "admin read approvals" on approvals for select
+  using (auth_is_admin());
+create policy "admin read payments" on payments for select
+  using (auth_is_admin());
+create policy "admin read leases" on leases for select
+  using (auth_is_admin());
+
 create policy "own expenses" on expenses for select
   using (building_id in (select owned_building_ids()));
 
