@@ -1534,6 +1534,111 @@ $$;
 select cron.schedule('daily-check-lease-renewals', '0 13 * * *', $$select check_lease_renewal_windows()$$);
 
 -- ============================================================
+-- ONBOARDING — DÉTECTION D'INFORMATIONS MANQUANTES
+-- ============================================================
+-- Un dossier client (owner) incomplet (loyer non indiqué, unité
+-- occupée sans bail, locataire sans coordonnées, bail sans copie
+-- téléversée...) cause des ratés plus tard (rapports faux, rappels de
+-- loyer impossibles, etc.). Tout est détecté par comptage SQL
+-- déterministe — l'IA ne sert qu'à rédiger le courriel de rappel à
+-- partir de la liste de lacunes déjà établie.
+alter table owners add column if not exists onboarding_completed_at timestamptz;
+alter table owners add column if not exists onboarding_reminder_sent_at timestamptz;
+alter table owners add column if not exists onboarding_reminder_count int default 0;
+
+create or replace view owner_onboarding_checklist as
+select
+  o.id as owner_id,
+  o.full_name,
+  o.created_at as owner_created_at,
+  o.onboarding_completed_at,
+  o.onboarding_reminder_sent_at,
+  o.onboarding_reminder_count,
+  (o.phone is null or o.phone = '') as missing_phone,
+  (not exists (select 1 from buildings b where b.owner_id = o.id)) as missing_buildings,
+  (
+    exists (select 1 from buildings b where b.owner_id = o.id)
+    and not exists (select 1 from units u join buildings b on b.id = u.building_id where b.owner_id = o.id)
+  ) as missing_units,
+  coalesce((
+    select count(*) from units u join buildings b on b.id = u.building_id
+    where b.owner_id = o.id and u.rent is null
+  ), 0) as units_missing_rent_count,
+  coalesce((
+    select count(*) from units u join buildings b on b.id = u.building_id
+    where b.owner_id = o.id and u.status = 'occupied'
+      and not exists (select 1 from leases l where l.unit_id = u.id and l.status = 'active')
+  ), 0) as occupied_units_missing_lease_count,
+  coalesce((
+    select count(*) from leases l
+    join units u on u.id = l.unit_id
+    join buildings b on b.id = u.building_id
+    join tenants t on t.id = l.tenant_id
+    where b.owner_id = o.id and l.status = 'active'
+      and (t.email is null or t.email = '')
+      and (t.phone is null or t.phone = '')
+  ), 0) as active_leases_missing_tenant_contact_count,
+  coalesce((
+    select count(*) from leases l
+    join units u on u.id = l.unit_id
+    join buildings b on b.id = u.building_id
+    where b.owner_id = o.id and l.status = 'active'
+      and not exists (select 1 from documents d where d.lease_id = l.id and d.doc_type = 'bail')
+  ), 0) as active_leases_missing_bail_doc_count
+from owners o;
+
+create or replace function flag_incomplete_onboarding()
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  r record;
+begin
+  -- Dossier sans aucune lacune détectable : marquer complet une fois.
+  update owners o
+  set onboarding_completed_at = now()
+  from owner_onboarding_checklist c
+  where c.owner_id = o.id
+    and o.onboarding_completed_at is null
+    and not c.missing_phone
+    and not c.missing_buildings
+    and not c.missing_units
+    and c.units_missing_rent_count = 0
+    and c.occupied_units_missing_lease_count = 0
+    and c.active_leases_missing_tenant_contact_count = 0
+    and c.active_leases_missing_bail_doc_count = 0;
+
+  -- Dossier incomplet : rappel au plus tôt 3 jours après la création,
+  -- puis au plus une fois tous les 5 jours pour ne pas harceler le client.
+  for r in
+    select c.owner_id
+    from owner_onboarding_checklist c
+    join owners o on o.id = c.owner_id
+    where o.onboarding_completed_at is null
+      and o.created_at <= now() - interval '3 days'
+      and (o.onboarding_reminder_sent_at is null or o.onboarding_reminder_sent_at <= now() - interval '5 days')
+      and (
+        c.missing_phone or c.missing_buildings or c.missing_units
+        or c.units_missing_rent_count > 0
+        or c.occupied_units_missing_lease_count > 0
+        or c.active_leases_missing_tenant_contact_count > 0
+        or c.active_leases_missing_bail_doc_count > 0
+      )
+  loop
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/send-onboarding-reminder',
+      body := jsonb_build_object('owner_id', r.owner_id),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+  end loop;
+end;
+$$;
+
+select cron.schedule('daily-flag-incomplete-onboarding', '0 15 * * *', $$select flag_incomplete_onboarding()$$);
+
+-- ============================================================
 -- CRM COMMERCIAL — création automatique d'un prospect
 -- ============================================================
 -- Chaque demande de mandat (inquiries.type = 'mandat', soumise

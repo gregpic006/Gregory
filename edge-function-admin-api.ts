@@ -3,6 +3,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+function describeOnboardingGaps(c: any): string[] {
+  const gaps: string[] = [];
+  if (c.missing_phone) gaps.push("téléphone manquant");
+  if (c.missing_buildings) gaps.push("aucun immeuble");
+  if (c.missing_units) gaps.push("immeuble sans unité");
+  if (c.units_missing_rent_count > 0) gaps.push(`${c.units_missing_rent_count} unité(s) sans loyer`);
+  if (c.occupied_units_missing_lease_count > 0) gaps.push(`${c.occupied_units_missing_lease_count} unité(s) occupée(s) sans bail actif`);
+  if (c.active_leases_missing_tenant_contact_count > 0) gaps.push(`${c.active_leases_missing_tenant_contact_count} locataire(s) sans coordonnées`);
+  if (c.active_leases_missing_bail_doc_count > 0) gaps.push(`${c.active_leases_missing_bail_doc_count} bail(aux) sans copie téléversée`);
+  return gaps;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -35,6 +47,32 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
+
+    if (body.action === "send_onboarding_reminder_now") {
+      const { owner_id } = body;
+      if (!owner_id) {
+        return new Response(JSON.stringify({ error: "owner_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      const res = await fetch(`${supabaseUrl}/functions/v1/send-onboarding-reminder`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR",
+          apikey: "sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR",
+        },
+        body: JSON.stringify({ owner_id }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return new Response(JSON.stringify({ error: result?.error || "Échec de l'envoi du rappel" }), { status: 502, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ actor_type: "admin", actor_id: userId, action: "onboarding.reminder_sent_manual", entity_type: "owners", entity_id: owner_id, details: result }),
+      });
+      return new Response(JSON.stringify({ ok: true, ...result }), { status: 200, headers: corsHeaders });
+    }
 
     if (body.action === "update_anomaly") {
       const { anomaly_id, status } = body;
@@ -126,6 +164,15 @@ Deno.serve(async (req) => {
     );
     const lowConfidenceAiRuns = await lowConfidenceAiRunsRes.json().catch(() => []);
 
+    const onboardingChecklistRes = await fetch(
+      `${supabaseUrl}/rest/v1/owner_onboarding_checklist?onboarding_completed_at=is.null&select=*`,
+      { headers: adminHeaders },
+    );
+    const onboardingChecklist = await onboardingChecklistRes.json().catch(() => []);
+    const onboardingIncomplet = (Array.isArray(onboardingChecklist) ? onboardingChecklist : [])
+      .map((c: any) => ({ owner_id: c.owner_id, full_name: c.full_name, gaps: describeOnboardingGaps(c) }))
+      .filter((o: any) => o.gaps.length > 0);
+
     const lastMessageByOwner = new Map<string, any>();
     if (Array.isArray(allMessages)) {
       for (const m of allMessages) {
@@ -155,6 +202,7 @@ Deno.serve(async (req) => {
       anomalies_financieres: anomalies,
       dossiers_reparation_stagnants: stuckRepairCases,
       ia_faible_confiance: lowConfidenceAiRuns,
+      onboarding_incomplet: onboardingIncomplet,
     };
 
     const clients = owners.map((o: any) => {

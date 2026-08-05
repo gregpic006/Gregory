@@ -369,6 +369,9 @@ function renderCommandCenter(cc){
   if(cc.ia_faible_confiance?.length){
     sections.push({ label: '🤖 IA à faible confiance ou en erreur (24h)', color: '#e6a817', items: cc.ia_faible_confiance.map(r => `${esc(r.function_name)} — ${r.error ? 'erreur : ' + esc(r.error) : (esc(r.input_summary) || '') + (r.confidence != null ? ' (confiance ' + Math.round(r.confidence) + '%)' : '')}`) });
   }
+  if(cc.onboarding_incomplet?.length){
+    sections.push({ label: '📋 Dossiers clients incomplets', items: cc.onboarding_incomplet.map(o => `${esc(o.full_name)} — ${esc(o.gaps.join(', '))} <button onclick="sendOnboardingReminder('${o.owner_id}')" style="border:1px solid var(--ink);background:none;padding:3px 8px;font-size:11px;cursor:pointer;margin-left:6px;">Envoyer un rappel</button>`) });
+  }
 
   if(!sections.length){
     container.innerHTML = '<p style="color:var(--sage);font-size:13.5px;">Rien à signaler aujourd\'hui — tout est sous contrôle.</p>';
@@ -947,6 +950,13 @@ async function updateProspectStage(prospect_id, stage){
   }
   await callCrmApi({ action: 'update_stage', prospect_id, stage, loss_reason });
   await loadProspects();
+}
+
+async function sendOnboardingReminder(owner_id){
+  const { data, error } = await supabaseClient.functions.invoke('admin-api', { body: { action: 'send_onboarding_reminder_now', owner_id } });
+  if(error || data?.error){ alert('Erreur : ' + (error?.message || data?.error)); return; }
+  alert('Rappel envoyé.');
+  await loadAdminDashboard();
 }
 
 async function updateAnomaly(anomaly_id, status){
