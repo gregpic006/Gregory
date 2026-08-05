@@ -1,3 +1,6 @@
+const MODEL_VERSION = "claude-haiku-4-5-20251001";
+const CONFIDENCE_THRESHOLD = 85;
+
 Deno.serve(async (req) => {
   try {
     const { document_id } = await req.json();
@@ -25,6 +28,22 @@ Deno.serve(async (req) => {
     }
     const contentType = fileRes.headers.get("content-type") || "";
     const bytes = new Uint8Array(await fileRes.arrayBuffer());
+
+    // Empreinte du fichier — sert à détecter les doublons (même contenu
+    // téléversé plus d'une fois pour le même propriétaire).
+    const hashBuffer = await crypto.subtle.digest("SHA-256", bytes);
+    const fileHash = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+
+    let duplicateOfId: string | null = null;
+    if (doc.owner_id) {
+      const dupRes = await fetch(
+        `${supabaseUrl}/rest/v1/documents?owner_id=eq.${doc.owner_id}&file_hash=eq.${fileHash}&id=neq.${document_id}&select=id&limit=1`,
+        { headers: adminHeaders },
+      );
+      const dupCandidates = await dupRes.json().catch(() => []);
+      duplicateOfId = Array.isArray(dupCandidates) && dupCandidates.length ? dupCandidates[0].id : null;
+    }
+
     let binary = "";
     const chunkSize = 0x8000;
     for (let i = 0; i < bytes.length; i += chunkSize) {
@@ -43,7 +62,13 @@ Deno.serve(async (req) => {
       await fetch(`${supabaseUrl}/rest/v1/documents?id=eq.${document_id}`, {
         method: "PATCH",
         headers: adminHeaders,
-        body: JSON.stringify({ ai_processed: true, ai_summary: "Format de fichier non pris en charge pour l'extraction automatique." }),
+        body: JSON.stringify({
+          ai_processed: true,
+          ai_summary: "Format de fichier non pris en charge pour l'extraction automatique.",
+          ai_needs_human_validation: true,
+          file_hash: fileHash,
+          is_duplicate_of: duplicateOfId,
+        }),
       });
       return new Response(JSON.stringify({ ok: true, skipped: "unsupported file type" }), { status: 200 });
     }
@@ -57,7 +82,13 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
   "key_amount": un nombre (montant principal en dollars mentionné, sans symbole) ou null,
   "expiry_date": "YYYY-MM-DD si une date d'échéance/expiration/renouvellement est identifiable, sinon null",
   "important_dates": "les autres dates importantes mentionnées, en texte libre, ou null",
-  "missing_info": "ce qui semble manquant ou incomplet dans le document, ou null si rien à signaler"
+  "missing_info": "ce qui semble manquant ou incomplet dans le document, ou null si rien à signaler",
+  "confidence": un nombre entre 0 et 100 représentant ta confiance globale dans cette extraction — sois honnête, baisse la confiance si le document est flou, partiel, mal numérisé ou ambigu,
+  "source_page": le numéro de page (entier, à partir de 1) où se trouve l'information la plus importante (ex: la date d'échéance), ou null si non applicable,
+  "source_excerpt": "un court passage exact tiré du document (une phrase ou moins) qui appuie l'information extraite, ou null si non applicable",
+  "readable": true ou false selon si le document est lisible et net,
+  "signature_present": true, false, ou null si non applicable pour ce type de document — selon si une signature (manuscrite ou électronique) est visible,
+  "doc_type_detected": "le type de document que tu observes réellement (bail, mandat, reglement, facture, rapport, autre) — peut différer du type déclaré ci-dessus"
 }`;
 
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -68,16 +99,24 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 700,
+        model: MODEL_VERSION,
+        max_tokens: 800,
         messages: [{ role: "user", content: [contentBlock, { type: "text", text: prompt }] }],
       }),
     });
 
     const aiData = await aiRes.json();
+    if (!aiRes.ok) {
+      console.error("Anthropic API error", aiRes.status, JSON.stringify(aiData));
+      return new Response(JSON.stringify({ ok: false, error: "anthropic_api_error", detail: aiData }), { status: 502 });
+    }
     const rawText = aiData.content?.[0]?.text ?? "{}";
     const cleaned = rawText.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleaned);
+
+    const lowConfidence = typeof parsed.confidence === "number" && parsed.confidence < CONFIDENCE_THRESHOLD;
+    const docTypeMismatch = !!(doc.doc_type && parsed.doc_type_detected && doc.doc_type !== parsed.doc_type_detected);
+    const needsHumanValidation = !!(lowConfidence || parsed.readable === false || parsed.missing_info || docTypeMismatch || duplicateOfId);
 
     await fetch(`${supabaseUrl}/rest/v1/documents?id=eq.${document_id}`, {
       method: "PATCH",
@@ -89,11 +128,23 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         ai_key_amount: parsed.key_amount ?? null,
         ai_expiry_date: parsed.expiry_date ?? null,
         ai_extracted: parsed,
+        ai_confidence: parsed.confidence ?? null,
+        ai_source_page: parsed.source_page ?? null,
+        ai_source_excerpt: parsed.source_excerpt ?? null,
+        ai_model_version: MODEL_VERSION,
+        ai_extracted_at: new Date().toISOString(),
+        ai_readable: parsed.readable ?? null,
+        ai_signature_present: parsed.signature_present ?? null,
+        ai_doc_type_detected: parsed.doc_type_detected ?? null,
+        ai_needs_human_validation: needsHumanValidation,
+        file_hash: fileHash,
+        is_duplicate_of: duplicateOfId,
       }),
     });
 
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   } catch (err) {
+    console.error("handle-document-upload unexpected error", err);
     return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 500 });
   }
 });

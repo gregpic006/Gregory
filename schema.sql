@@ -304,6 +304,25 @@ create table documents (
 -- (une dépense peut pointer vers son reçu/sa facture téléversée).
 alter table expenses add column receipt_document_id uuid references documents(id);
 
+-- Traçabilité de l'extraction IA : chaque champ extrait doit pouvoir
+-- être vérifié (confiance, page/passage source, version du modèle,
+-- date d'extraction) plutôt que présenté comme une certitude. Détection
+-- de doublons par hash de fichier. ai_needs_human_validation signale
+-- qu'un humain doit valider avant de se fier à l'extraction (confiance
+-- sous 85%, document illisible, type détecté ≠ type déclaré, doublon,
+-- ou info manquante signalée par l'IA elle-même).
+alter table documents add column if not exists ai_confidence numeric(5,2);
+alter table documents add column if not exists ai_source_page int;
+alter table documents add column if not exists ai_source_excerpt text;
+alter table documents add column if not exists ai_model_version text;
+alter table documents add column if not exists ai_extracted_at timestamptz;
+alter table documents add column if not exists ai_readable boolean;
+alter table documents add column if not exists ai_signature_present boolean;
+alter table documents add column if not exists ai_doc_type_detected text;
+alter table documents add column if not exists ai_needs_human_validation boolean default false;
+alter table documents add column if not exists file_hash text;
+alter table documents add column if not exists is_duplicate_of uuid references documents(id);
+
 -- ============ MESSAGES ============
 create table messages (
   id uuid primary key default gen_random_uuid(),

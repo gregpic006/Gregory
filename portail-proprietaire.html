@@ -615,9 +615,18 @@ async function loadDocuments(){
     let analysis = '<span style="color:var(--muted);">En traitement…</span>';
     if(d.ai_processed){
       const bits = [esc(d.ai_summary) || ''];
-      if(d.ai_expiry_date) bits.push(`Échéance : ${esc(d.ai_expiry_date)}`);
+      if(d.ai_expiry_date) bits.push(`Échéance : ${esc(d.ai_expiry_date)}${d.ai_source_page ? ' (p.' + d.ai_source_page + ')' : ''}`);
       if(d.ai_key_amount != null) bits.push(`${Number(d.ai_key_amount).toLocaleString('fr-CA')} $`);
+      if(d.ai_confidence != null) bits.push(`confiance IA ${Math.round(d.ai_confidence)}%`);
       analysis = bits.filter(Boolean).join(' — ');
+      if(d.is_duplicate_of){
+        analysis = `<span style="color:var(--rust);font-weight:600;">⚠ Doublon probable d'un document déjà téléversé.</span> ` + analysis;
+      } else if(d.ai_needs_human_validation){
+        analysis = `<span style="color:var(--brass-dark);font-weight:600;">🔎 À valider</span> — ` + analysis;
+      }
+      if(d.ai_source_excerpt){
+        analysis += `<br><span style="color:var(--muted);font-style:italic;">"${esc(d.ai_source_excerpt)}"</span>`;
+      }
     }
     return `<tr>
       <td>${esc(d.title)}</td>
