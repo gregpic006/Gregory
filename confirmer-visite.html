@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portail — Confirmation de visite</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
+    --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;line-height:1.55;}
+  .wrap{max-width:560px;margin:0 auto;padding:48px 28px;}
+  .brand{font-family:'Fraunces',serif;font-weight:600;font-size:20px;margin-bottom:32px;}
+  h1{font-family:'Fraunces',serif;font-weight:600;font-size:24px;margin-bottom:8px;}
+  .subtitle{color:var(--muted);font-size:14px;margin-bottom:24px;}
+  .card{background:var(--paper-2);border:1px solid var(--line);padding:20px;margin-bottom:24px;font-size:14px;line-height:1.7;}
+  .actions{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px;}
+  button{font-family:'Inter',sans-serif;font-size:13.5px;padding:12px 18px;border:1px solid var(--ink);background:transparent;color:var(--ink);cursor:pointer;}
+  button.primary{background:var(--ink);color:var(--paper);}
+  button:hover{background:var(--brass-dark);color:#fff;border-color:var(--brass-dark);}
+  button:disabled{opacity:0.5;cursor:default;}
+  textarea,input{width:100%;padding:11px 12px;border:1px solid var(--line);background:var(--paper-2);font-size:13.5px;font-family:'Inter',sans-serif;margin-bottom:10px;}
+  textarea{min-height:90px;resize:vertical;}
+  .panel{display:none;}
+  .panel.active{display:block;}
+  .result{display:none;background:var(--paper-2);border-left:2px solid var(--sage);padding:20px;font-size:14px;}
+  .result.active{display:block;}
+  .result.error{border-left-color:var(--rust);}
+  .muted{color:var(--muted);font-size:12.5px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">Portail</div>
+  <div id="loading"><p class="muted">Chargement...</p></div>
+
+  <div id="main" style="display:none;">
+    <h1>Confirmes-tu ta visite ?</h1>
+    <p class="subtitle">Réponds-nous pour qu'on sache à quoi s'attendre.</p>
+
+    <div class="card">
+      <b id="v-address"></b><br>
+      <span id="v-when"></span>
+    </div>
+
+    <div id="panel-choices" class="panel active">
+      <div class="actions">
+        <button class="primary" onclick="respond('confirm')">Oui, je serai là</button>
+        <button onclick="showPanel('other-time')">Ce moment ne fonctionne pas</button>
+        <button onclick="showPanel('decline')">Je ne suis plus intéressé(e)</button>
+      </div>
+    </div>
+
+    <div id="panel-other-time" class="panel">
+      <p class="muted" style="margin-bottom:8px;">Quel moment te conviendrait mieux ?</p>
+      <textarea id="other_time-message" placeholder="Ex: Plutôt samedi matin, ou en soirée en semaine."></textarea>
+      <div class="actions">
+        <button class="primary" onclick="respond('propose_other_time')">Envoyer</button>
+        <button onclick="showPanel('choices')">Annuler</button>
+      </div>
+    </div>
+
+    <div id="panel-decline" class="panel">
+      <p class="muted" style="margin-bottom:8px;">Une raison à nous partager (optionnel) :</p>
+      <textarea id="decline-message" placeholder="Optionnel"></textarea>
+      <div class="actions">
+        <button class="primary" onclick="respond('decline')">Confirmer</button>
+        <button onclick="showPanel('choices')">Annuler</button>
+      </div>
+    </div>
+
+    <div id="result" class="result"></div>
+  </div>
+
+  <div id="not-found" style="display:none;">
+    <h1>Lien invalide</h1>
+    <p class="subtitle" id="not-found-text">Ce lien n'est plus valide — une réponse a peut-être déjà été enregistrée, ou le lien a expiré. Contacte l'équipe Portail si tu as des questions.</p>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
+
+const params = new URLSearchParams(window.location.search);
+const visitId = params.get('visit');
+const token = params.get('token');
+
+function esc(s){
+  if(s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function callVisitApi(payload){
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/handle-visit-response`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+    body: JSON.stringify({ visit_id: visitId, token, ...payload }),
+  });
+  return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+}
+
+function showPanel(name){
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+async function respond(action){
+  const messageEl = document.getElementById(action + '-message');
+  const note = messageEl ? messageEl.value.trim() : undefined;
+  document.querySelectorAll('button').forEach(b => b.disabled = true);
+
+  const { ok, data } = await callVisitApi({ action, note });
+  const result = document.getElementById('result');
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+
+  if(!ok){
+    result.className = 'result error active';
+    result.textContent = data?.error || "Une erreur est survenue. Merci de contacter l'équipe Portail.";
+    return;
+  }
+
+  const messages = {
+    confirm: "Merci d'avoir confirmé ! On se voit bientôt.",
+    decline: "Merci de nous l'avoir dit — bonne continuation !",
+    propose_other_time: "Merci, on va te proposer un autre moment sous peu.",
+  };
+  result.className = 'result active';
+  result.textContent = messages[action] || "Réponse enregistrée.";
+}
+
+async function init(){
+  if(!visitId || !token){
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('not-found').style.display = 'block';
+    return;
+  }
+  const { ok, data } = await callVisitApi({ action: 'get' });
+  document.getElementById('loading').style.display = 'none';
+
+  if(!ok || data.status !== 'proposed'){
+    document.getElementById('not-found').style.display = 'block';
+    if(ok){
+      document.getElementById('not-found-text').textContent = "Une réponse a déjà été enregistrée pour cette visite. Contacte l'équipe Portail si tu as des questions.";
+    }
+    return;
+  }
+
+  document.getElementById('v-address').textContent = `${data.address || ''} — Unité ${data.unit_number || ''}`;
+  document.getElementById('v-when').textContent = new Date(data.proposed_at).toLocaleString('fr-CA', { dateStyle: 'full', timeStyle: 'short' });
+  document.getElementById('main').style.display = 'block';
+}
+
+init();
+</script>
+</body>
+</html>

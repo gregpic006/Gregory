@@ -179,6 +179,11 @@
   <p id="wk-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
   <div id="workers-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 
+  <h1 style="margin-top:40px;font-size:22px;">Visites</h1>
+  <p class="subtitle" style="margin-bottom:16px;">L'IA ne propose ni ne confirme jamais une heure — c'est toi qui choisis, le candidat confirme via un lien</p>
+  <div id="visit-inquiries-body" style="margin-bottom:16px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+  <div id="visits-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
   <h1 style="margin-top:40px;font-size:22px;">Travaux — demandes ouvertes</h1>
   <p class="subtitle" style="margin-bottom:16px;">Sélection du travailleur, négociation de la paie et assignation</p>
   <div id="service-requests-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
@@ -391,6 +396,12 @@ function renderCommandCenter(cc){
       ? `${esc(v.details?.name)} — ${esc((v.details?.reasons || []).join(', '))}`
       : `${esc(v.details?.name)} — expire bientôt (RBQ ${esc(v.details?.rbq_license_expiry) || '—'}, assurance ${esc(v.details?.insurance_expiry) || '—'})`) });
   }
+  const visitItems = [
+    ...(cc.visites?.a_planifier || []).map(i => `À planifier — ${esc(i.full_name)} — ${addr(i.units)}`),
+    ...(cc.visites?.sans_reponse || []).map(v => `Sans réponse depuis 2+ jours — ${esc(v.prospect_name)} — ${addr(v.units)}${v.response_note ? ' — ' + esc(v.response_note) : ''}`),
+    ...(cc.visites?.resultat_manquant || []).map(v => `Résultat manquant — ${esc(v.prospect_name)} — ${addr(v.units)} — visite du ${new Date(v.proposed_at).toLocaleDateString('fr-CA')}`),
+  ];
+  if(visitItems.length) sections.push({ label: '🏠 Visites à traiter', items: visitItems });
 
   if(!sections.length){
     container.innerHTML = '<p style="color:var(--sage);font-size:13.5px;">Rien à signaler aujourd\'hui — tout est sous contrôle.</p>';
@@ -541,9 +552,73 @@ async function callOpsApi(payload){
 
 async function loadOps(){
   await loadWorkersAdmin();
+  await loadVisitInquiries();
+  await loadVisitsAdmin();
   await loadServiceRequestsAdmin();
   await loadWorkOrdersAdmin();
   await loadLatePaymentsAdmin();
+}
+
+async function loadVisitInquiries(){
+  const data = await callOpsApi({ action: 'list_visit_inquiries' });
+  const container = document.getElementById('visit-inquiries-body');
+  const inquiries = data?.inquiries || [];
+  if(!inquiries.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune demande de visite en attente.</p>';
+    return;
+  }
+  container.innerHTML = inquiries.map(i => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${esc(i.full_name)} — ${esc(i.units?.buildings?.address) || ''}, unité ${esc(i.units?.unit_number) || ''}</b>
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">${esc(i.email)} · ${esc(i.phone) || '—'}${i.message ? ' — ' + esc(i.message) : ''}</span>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Date et heure proposées</label>
+          <input type="datetime-local" id="vi-when-${i.id}" style="padding:8px;border:1px solid var(--line);">
+        </div>
+        <button onclick="proposeVisit('${i.id}', '${i.unit_id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Proposer cette visite</button>
+      </div>
+    </div>`).join('');
+}
+
+async function proposeVisit(inquiry_id, unit_id){
+  const whenInput = document.getElementById('vi-when-' + inquiry_id);
+  if(!whenInput.value){ alert('Choisis une date et heure.'); return; }
+  const inquiries = (await callOpsApi({ action: 'list_visit_inquiries' }))?.inquiries || [];
+  const inquiry = inquiries.find(i => i.id === inquiry_id);
+  if(!inquiry){ alert('Demande introuvable — rafraîchis la page.'); return; }
+  const res = await callOpsApi({
+    action: 'propose_visit', inquiry_id, unit_id,
+    prospect_name: inquiry.full_name, prospect_email: inquiry.email, prospect_phone: inquiry.phone,
+    proposed_at: new Date(whenInput.value).toISOString(),
+  });
+  if(res?.ok){ await loadVisitInquiries(); await loadVisitsAdmin(); }
+}
+
+async function loadVisitsAdmin(){
+  const data = await callOpsApi({ action: 'list_visits' });
+  const container = document.getElementById('visits-body');
+  const visits = data?.visits || [];
+  if(!visits.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune visite planifiée.</p>';
+    return;
+  }
+  const statusLabel = { proposed: 'En attente de réponse', confirmed: 'Confirmée', declined: 'Refusée', completed: 'Complétée', no_show: 'Absence' };
+  const statusColor = { proposed: '#e6a817', confirmed: '#4c7a4c', declined: '#8a8a8a', completed: '#4c7a4c', no_show: '#c0392b' };
+  container.innerHTML = visits.map(v => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${esc(v.prospect_name)} — ${esc(v.units?.buildings?.address) || ''}, unité ${esc(v.units?.unit_number) || ''}</b>
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">${new Date(v.proposed_at).toLocaleString('fr-CA')} — <span style="background:${statusColor[v.status]};color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">${esc(statusLabel[v.status] || v.status)}</span>${v.response_note ? ' — ' + esc(v.response_note) : ''}</span>
+      ${v.status === 'confirmed' ? `
+      <div style="display:flex;gap:10px;">
+        <button onclick="markVisitOutcome('${v.id}','completed')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Visite complétée</button>
+        <button onclick="markVisitOutcome('${v.id}','no_show')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Absence du candidat</button>
+      </div>` : ''}
+    </div>`).join('');
+}
+
+async function markVisitOutcome(visit_id, outcome){
+  const res = await callOpsApi({ action: 'mark_visit_outcome', visit_id, outcome });
+  if(res?.ok){ await loadVisitsAdmin(); }
 }
 
 async function loadWorkersAdmin(){

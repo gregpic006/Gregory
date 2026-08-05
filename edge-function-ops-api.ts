@@ -286,6 +286,75 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
+    if (action === "list_visit_inquiries") {
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/inquiries?type=eq.visite&status=eq.new&select=id,full_name,email,phone,message,unit_id,units(unit_number,buildings(address))&order=created_at.asc`,
+        { headers: adminHeaders },
+      );
+      return new Response(JSON.stringify({ inquiries: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "list_visits") {
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/visits?status=neq.cancelled&select=*,units(unit_number,buildings(address))&order=proposed_at.asc`,
+        { headers: adminHeaders },
+      );
+      return new Response(JSON.stringify({ visits: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "propose_visit") {
+      const { inquiry_id, unit_id, prospect_name, prospect_email, prospect_phone, proposed_at } = body;
+      if (!unit_id || !prospect_name || !prospect_email || !proposed_at) {
+        return new Response(JSON.stringify({ error: "Champs manquants" }), { status: 400, headers: corsHeaders });
+      }
+
+      const unitRes = await fetch(`${supabaseUrl}/rest/v1/units?id=eq.${unit_id}&select=unit_number,buildings(address)`, { headers: adminHeaders });
+      const [unit] = await unitRes.json();
+
+      const insertRes = await fetch(`${supabaseUrl}/rest/v1/visits`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({
+          inquiry_id: inquiry_id || null, unit_id, prospect_name, prospect_email,
+          prospect_phone: prospect_phone || null, proposed_at,
+        }),
+      });
+      const [visit] = await insertRes.json();
+
+      const confirmUrl = `https://gregpic006.github.io/Gregory/confirmer-visite.html?visit=${visit?.id}&token=${visit?.confirmation_token}`;
+      const whenLabel = new Date(proposed_at).toLocaleString("fr-CA", { dateStyle: "full", timeStyle: "short" });
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: "Portail <onboarding@resend.dev>",
+          to: [prospect_email],
+          subject: `Proposition de visite — ${unit?.buildings?.address || ""}`,
+          text: `Bonjour ${prospect_name},\n\nNous te proposons une visite du logement suivant :\n${unit?.buildings?.address || ""}, unité ${unit?.unit_number || ""}\nDate et heure proposées : ${whenLabel}\n\nMerci de confirmer, refuser ou proposer un autre moment via ce lien : ${confirmUrl}\n\nL'équipe Portail`,
+        }),
+      });
+
+      if (inquiry_id) {
+        await fetch(`${supabaseUrl}/rest/v1/inquiries?id=eq.${inquiry_id}`, {
+          method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "contacted" }),
+        });
+      }
+      await logAudit("visit.proposed", "visits", visit?.id ?? null, { unit_id, prospect_email, proposed_at });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "mark_visit_outcome") {
+      const { visit_id, outcome, outcome_note } = body;
+      if (!visit_id || !["completed", "no_show", "cancelled"].includes(outcome)) {
+        return new Response(JSON.stringify({ error: "Paramètres invalides" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/visits?id=eq.${visit_id}`, {
+        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: outcome, outcome_note: outcome_note || null }),
+      });
+      await logAudit("visit.outcome_recorded", "visits", visit_id, { outcome });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     if (action === "list_late_payments") {
       const res = await fetch(
         `${supabaseUrl}/rest/v1/payments?status=eq.late&select=*,leases(monthly_rent,tenants(full_name,email),units(unit_number,buildings(address)))&order=due_date.asc`,

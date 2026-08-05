@@ -152,6 +152,13 @@ Deno.serve(async (req) => {
       fetch(`${supabaseUrl}/rest/v1/prospects?next_followup_date=lte.${todayStr}&stage=not.in.(signed,lost)&select=id,full_name,next_followup_date,stage`, { headers: adminHeaders }).then((r) => r.json()),
     ]);
 
+    const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString();
+    const [visitsToSchedule, visitsAwaitingResponse, visitsNeedingOutcome] = await Promise.all([
+      fetch(`${supabaseUrl}/rest/v1/inquiries?type=eq.visite&status=eq.new&select=id,full_name,units(unit_number,buildings(address))`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/visits?status=eq.proposed&created_at=lte.${twoDaysAgo}&select=id,prospect_name,proposed_at,response_note,units(unit_number,buildings(address))`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/visits?status=eq.confirmed&proposed_at=lt.${new Date().toISOString()}&select=id,prospect_name,proposed_at,units(unit_number,buildings(address))`, { headers: adminHeaders }).then((r) => r.json()),
+    ]);
+
     const stuckRepairCasesRes = await fetch(
       `${supabaseUrl}/rest/v1/audit_log?or=(action.like.repair_case.stuck_*,action.eq.repair_case.tenant_reopened)&created_at=gte.${new Date(Date.now() - 24 * 3600000).toISOString()}&select=id,action,entity_type,entity_id,details,created_at&order=created_at.desc`,
       { headers: adminHeaders },
@@ -210,6 +217,11 @@ Deno.serve(async (req) => {
       ia_faible_confiance: lowConfidenceAiRuns,
       onboarding_incomplet: onboardingIncomplet,
       travailleurs_a_verifier: workerVerificationIssues,
+      visites: {
+        a_planifier: visitsToSchedule,
+        sans_reponse: visitsAwaitingResponse,
+        resultat_manquant: visitsNeedingOutcome,
+      },
     };
 
     const clients = owners.map((o: any) => {

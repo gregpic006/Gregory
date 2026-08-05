@@ -1715,6 +1715,59 @@ $$;
 select cron.schedule('daily-flag-worker-credential-issues', '0 11 * * *', $$select flag_worker_credential_issues()$$);
 
 -- ============================================================
+-- PLANIFICATION DES VISITES
+-- ============================================================
+-- L'IA ne propose et ne confirme jamais une heure de visite (voir la
+-- règle stricte dans handle-inquiry.ts) — c'est l'admin qui choisit un
+-- moment, le système envoie un lien token-gated au candidat pour qu'il
+-- confirme, refuse ou propose un autre moment (même schéma que
+-- reponse-travailleur.html / confirmer-reparation.html). Aucune IA
+-- dans ce module : c'est de la logistique pure.
+create table visits (
+  id uuid primary key default gen_random_uuid(),
+  inquiry_id uuid references inquiries(id),
+  unit_id uuid references units(id) not null,
+  prospect_name text not null,
+  prospect_email text not null,
+  prospect_phone text,
+  proposed_at timestamptz not null,
+  status text not null default 'proposed' check (status in ('proposed','confirmed','declined','completed','no_show','cancelled')),
+  confirmation_token uuid not null default gen_random_uuid(),
+  response_note text,
+  reminder_sent_at timestamptz,
+  outcome_note text,
+  created_at timestamptz default now()
+);
+alter table visits enable row level security;
+create policy "admin read visits" on visits for select using (auth_is_admin());
+
+create or replace function send_visit_reminders()
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  r record;
+begin
+  for r in
+    select id from visits
+    where status = 'confirmed'
+      and reminder_sent_at is null
+      and proposed_at between now() + interval '23 hours' and now() + interval '25 hours'
+  loop
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-visit-response',
+      body := jsonb_build_object('action', 'send_reminder', 'visit_id', r.id),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+  end loop;
+end;
+$$;
+
+select cron.schedule('hourly-send-visit-reminders', '0 * * * *', $$select send_visit_reminders()$$);
+
+-- ============================================================
 -- CRM COMMERCIAL — création automatique d'un prospect
 -- ============================================================
 -- Chaque demande de mandat (inquiries.type = 'mandat', soumise
