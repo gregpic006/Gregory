@@ -72,6 +72,10 @@
     <button class="signout" onclick="handleSignOut()">Se déconnecter</button>
   </div>
 
+  <h1 style="font-size:22px;">Centre de commandement du jour</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Tout ce qui demande ton attention aujourd'hui, en un seul endroit</p>
+  <div id="command-center-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
   <div class="metrics">
     <div class="metric"><div class="label">Clients actifs</div><div class="val" id="m-clients">—</div></div>
     <div class="metric"><div class="label">Immeubles gérés</div><div class="val" id="m-buildings">—</div></div>
@@ -241,7 +245,8 @@ async function loadAdminDashboard(){
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-shell').style.display = 'block';
 
-  const { totals, clients, anomalies } = data;
+  const { totals, clients, anomalies, command_center } = data;
+  renderCommandCenter(command_center);
   document.getElementById('m-clients').textContent = totals.clients_count;
   document.getElementById('m-buildings').textContent = totals.buildings_count;
   document.getElementById('m-units').textContent = totals.units_count;
@@ -279,6 +284,67 @@ async function loadAdminDashboard(){
   await loadProspects();
   await loadAuditLog();
   await obInit();
+}
+
+function renderCommandCenter(cc){
+  const container = document.getElementById('command-center-body');
+  if(!cc){ container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Indisponible.</p>'; return; }
+
+  const addr = (u) => u ? `${esc(u.buildings?.address) || ''}, unité ${esc(u.unit_number) || ''}` : '';
+  const sections = [];
+
+  if(cc.urgences?.length){
+    sections.push({ label: '⚠ Urgences', color: '#c0392b', items: cc.urgences.map(s => `${esc(s.description)} — ${addr(s.units)} (${esc((s.safety_flags||[]).join(', ')) || esc(s.ai_urgency)})`) });
+  }
+  const decisions = [
+    ...(cc.decisions_requises?.approbations_en_attente || []).map(a => `Approbation en attente — ${Number(a.requested_amount||0).toLocaleString('fr-CA')} $`),
+    ...(cc.decisions_requises?.demandes_a_valider || []).map(s => `Catégorisation IA à valider — ${esc(s.description)} (confiance ${s.ai_confidence != null ? Math.round(s.ai_confidence)+'%' : '—'})`),
+    ...(cc.decisions_requises?.documents_a_valider || []).map(d => `Document à valider — "${esc(d.title)}" (${esc(d.owners?.full_name) || 'client inconnu'})`),
+    ...(cc.decisions_requises?.decisions_travailleurs || []).map(w => `${esc(w.workers?.name) || 'Travailleur'} — ${w.worker_response === 'proposed_other_time' ? 'propose une autre heure' : 'demande des infos'}${w.worker_response_note ? ' : ' + esc(w.worker_response_note) : ''}`),
+  ];
+  if(decisions.length) sections.push({ label: '🔎 Décisions humaines requises', color: '#e6a817', items: decisions });
+
+  const blocked = [
+    ...(cc.dossiers_bloques?.refuses_a_reevaluer || []).map(s => `Refusé par le propriétaire — ${esc(s.description)} (${addr(s.units)}) — réévaluation d'ici le ${esc(s.reassessment_due)}`),
+    ...(cc.dossiers_bloques?.tous_travailleurs_ont_refuse || []).map(w => `Aucun travailleur disponible — ${esc(w.description)} (${addr(w.units)})`),
+  ];
+  if(blocked.length) sections.push({ label: '⛔ Dossiers bloqués', color: '#8a5fb0', items: blocked });
+
+  if(cc.travailleurs_sans_reponse?.length){
+    sections.push({ label: 'Travailleurs sans réponse', items: cc.travailleurs_sans_reponse.map(w => `${esc(w.workers?.name) || 'Travailleur'} — ${esc(w.description)} (notifié le ${new Date(w.worker_notified_at).toLocaleDateString('fr-CA')})`) });
+  }
+  if(cc.loyers_en_retard?.length){
+    sections.push({ label: 'Loyers en retard', items: cc.loyers_en_retard.map(p => `${esc(p.leases?.tenants?.full_name) || ''} — ${Number(p.amount).toLocaleString('fr-CA')} $ dû le ${esc(p.due_date)} (${addr(p.leases?.units)})`) });
+  }
+  if(cc.baux_a_renouveler?.length){
+    sections.push({ label: 'Baux à renouveler (60 jours)', items: cc.baux_a_renouveler.map(l => `${esc(l.tenants?.full_name) || ''} — ${addr(l.units)} — échéance ${esc(l.end_date)}`) });
+  }
+  if(cc.messages_sans_reponse?.length){
+    sections.push({ label: 'Messages sans réponse', items: cc.messages_sans_reponse.map(m => `${esc(m.owners?.full_name) || 'Propriétaire'} : "${esc(m.body)}"`) });
+  }
+  if(cc.documents_expirant_bientot?.length){
+    sections.push({ label: 'Documents expirant bientôt (30 jours)', items: cc.documents_expirant_bientot.map(d => `"${esc(d.title)}" — ${esc(d.owners?.full_name) || ''} — échéance ${esc(d.ai_expiry_date)}`) });
+  }
+  if(cc.prospects_a_relancer?.length){
+    sections.push({ label: 'Prospects à relancer', items: cc.prospects_a_relancer.map(p => `${esc(p.full_name)} — suivi prévu le ${esc(p.next_followup_date)} (${stageLabel[p.stage] || esc(p.stage)})`) });
+  }
+  if(cc.anomalies_financieres?.length){
+    sections.push({ label: 'Anomalies financières', items: cc.anomalies_financieres.map(a => `${esc(a.description)} — ${esc(a.owners?.full_name) || ''}`) });
+  }
+
+  if(!sections.length){
+    container.innerHTML = '<p style="color:var(--sage);font-size:13.5px;">Rien à signaler aujourd\'hui — tout est sous contrôle.</p>';
+    return;
+  }
+
+  container.innerHTML = sections.map(s => `
+    <div style="background:var(--paper-2);border-left:3px solid ${s.color || 'var(--brass)'};padding:12px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:6px;">${s.label} (${s.items.length})</b>
+      <ul style="margin:0 0 0 18px;padding:0;font-size:12.5px;color:var(--muted);">
+        ${s.items.slice(0, 8).map(i => `<li>${i}</li>`).join('')}
+        ${s.items.length > 8 ? `<li>… et ${s.items.length - 8} de plus</li>` : ''}
+      </ul>
+    </div>`).join('');
 }
 
 async function callOnboardingApi(payload){

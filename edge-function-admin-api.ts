@@ -75,6 +75,74 @@ Deno.serve(async (req) => {
     );
     const anomalies = await anomaliesRes.json();
 
+    // ============================================================
+    // CENTRE DE COMMANDEMENT QUOTIDIEN
+    // ============================================================
+    // Une seule vue agrégée pour tout ce qui demande l'attention de
+    // l'admin aujourd'hui, plutôt que dix onglets séparés. Tout est lu
+    // directement (aucun calcul inventé) — chaque catégorie pointe vers
+    // les vraies lignes déjà gérées ailleurs dans le portail.
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const in30days = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    const in60days = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
+
+    const [
+      urgentServiceRequests,
+      needsReviewServiceRequests,
+      docsNeedingValidation,
+      workerDecisionsNeeded,
+      blockedReassessment,
+      allDeclinedWorkOrders,
+      pendingWorkerResponses,
+      latePayments,
+      leaseRenewals,
+      allMessages,
+      expiringDocs,
+      prospectsToFollowUp,
+    ] = await Promise.all([
+      fetch(`${supabaseUrl}/rest/v1/service_requests?status=neq.closed&or=(safety_override.eq.true,ai_urgency.eq.urgence)&select=id,description,ai_urgency,safety_flags,units(unit_number,buildings(address))`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/service_requests?status=neq.closed&ai_needs_review=eq.true&safety_override=eq.false&select=id,description,ai_confidence,units(unit_number,buildings(address))`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/documents?ai_needs_human_validation=eq.true&select=id,title,owners(full_name)`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/work_orders?worker_response=in.(proposed_other_time,info_requested)&select=id,description,worker_response,worker_response_note,workers(name)`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/service_requests?pending_reassessment=eq.true&select=id,description,reassessment_due,units(unit_number,buildings(address))`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/work_orders?response_escalated=eq.true&worker_response=eq.declined&select=id,description,units(unit_number,buildings(address))`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/work_orders?worker_response=eq.pending&worker_notified=eq.true&select=id,description,worker_notified_at,workers(name)`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/payments?status=eq.late&select=id,amount,due_date,leases(tenants(full_name),units(unit_number,buildings(address)))`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/leases?status=eq.active&end_date=lte.${in60days}&select=id,end_date,tenants(full_name),units(unit_number,buildings(address))`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/messages?select=id,owner_id,sender,body,created_at,owners(full_name)&order=created_at.desc`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/documents?ai_expiry_date=lte.${in30days}&ai_expiry_date=gte.${todayStr}&select=id,title,ai_expiry_date,owners(full_name)`, { headers: adminHeaders }).then((r) => r.json()),
+      fetch(`${supabaseUrl}/rest/v1/prospects?next_followup_date=lte.${todayStr}&stage=not.in.(signed,lost)&select=id,full_name,next_followup_date,stage`, { headers: adminHeaders }).then((r) => r.json()),
+    ]);
+
+    const lastMessageByOwner = new Map<string, any>();
+    if (Array.isArray(allMessages)) {
+      for (const m of allMessages) {
+        if (!lastMessageByOwner.has(m.owner_id)) lastMessageByOwner.set(m.owner_id, m);
+      }
+    }
+    const unansweredMessages = [...lastMessageByOwner.values()].filter((m) => m.sender === "owner");
+
+    const commandCenter = {
+      urgences: urgentServiceRequests,
+      decisions_requises: {
+        approbations_en_attente: pendingApprovals,
+        demandes_a_valider: needsReviewServiceRequests,
+        documents_a_valider: docsNeedingValidation,
+        decisions_travailleurs: workerDecisionsNeeded,
+      },
+      dossiers_bloques: {
+        refuses_a_reevaluer: blockedReassessment,
+        tous_travailleurs_ont_refuse: allDeclinedWorkOrders,
+      },
+      travailleurs_sans_reponse: pendingWorkerResponses,
+      loyers_en_retard: latePayments,
+      baux_a_renouveler: leaseRenewals,
+      messages_sans_reponse: unansweredMessages,
+      documents_expirant_bientot: expiringDocs,
+      prospects_a_relancer: prospectsToFollowUp,
+      anomalies_financieres: anomalies,
+    };
+
     const clients = owners.map((o: any) => {
       const buildings = o.buildings || [];
       const units = buildings.flatMap((b: any) => b.units || []);
@@ -101,7 +169,7 @@ Deno.serve(async (req) => {
       open_anomalies: anomalies.length,
     };
 
-    return new Response(JSON.stringify({ totals, clients, anomalies }), {
+    return new Response(JSON.stringify({ totals, clients, anomalies, command_center: commandCenter }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
