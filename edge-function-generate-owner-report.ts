@@ -65,14 +65,19 @@ Deno.serve(async (req) => {
     const lateCount = payments.filter((p: any) => p.status === "late").length;
 
     const expensesRes = await fetch(
-      `${supabaseUrl}/rest/v1/expenses?building_id=in.${buildingFilter}&expense_date=gte.${period_start}&expense_date=lte.${period_end}&select=amount`,
+      `${supabaseUrl}/rest/v1/expenses?building_id=in.${buildingFilter}&expense_date=gte.${period_start}&expense_date=lte.${period_end}&select=id,description,amount,expense_date,receipt_document_id,work_order_id`,
       { headers: adminHeaders },
     );
     const expenses = await expensesRes.json();
     const expensesTotal = expenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0);
 
+    // Factures sans reçu — actionnable directement par le propriétaire ou l'admin.
+    const missingReceipts = expenses
+      .filter((e: any) => !e.receipt_document_id)
+      .map((e: any) => ({ expense_id: e.id, description: e.description, amount: Number(e.amount), expense_date: e.expense_date }));
+
     const woRes = await fetch(
-      `${supabaseUrl}/rest/v1/work_orders?unit_id=in.${unitFilter}&select=status,created_at`,
+      `${supabaseUrl}/rest/v1/work_orders?unit_id=in.${unitFilter}&select=id,description,status,created_at,estimated_cost`,
       { headers: adminHeaders },
     );
     const workOrders = await woRes.json();
@@ -81,10 +86,54 @@ Deno.serve(async (req) => {
     ).length;
     const workOrdersInProgress = workOrders.filter((w: any) => w.status === "assigned" || w.status === "in_progress").length;
 
+    // Travaux ayant dépassé leur estimation initiale — comparaison faite
+    // en code, jamais estimée par l'IA.
+    const workOrdersById = new Map(workOrders.map((w: any) => [w.id, w]));
+    const overEstimateWorkOrders = expenses
+      .filter((e: any) => e.work_order_id && workOrdersById.has(e.work_order_id))
+      .map((e: any) => {
+        const wo = workOrdersById.get(e.work_order_id);
+        const estimated = wo?.estimated_cost != null ? Number(wo.estimated_cost) : null;
+        const actual = Number(e.amount);
+        return estimated != null && actual > estimated
+          ? { work_order_id: e.work_order_id, description: wo.description, estimated_cost: estimated, actual_cost: actual, overage: Math.round((actual - estimated) * 100) / 100 }
+          : null;
+      })
+      .filter(Boolean);
+
+    const approvalsRes = await fetch(
+      `${supabaseUrl}/rest/v1/approvals?owner_id=eq.${owner_id}&status=eq.pending&select=id`,
+      { headers: adminHeaders },
+    );
+    const pendingApprovals = await approvalsRes.json().catch(() => []);
+
+    const anomaliesRes = await fetch(
+      `${supabaseUrl}/rest/v1/financial_anomalies?owner_id=eq.${owner_id}&status=eq.open&select=id`,
+      { headers: adminHeaders },
+    );
+    const openAnomalies = await anomaliesRes.json().catch(() => []);
+
     const managementFee = Math.round(rentReceived * (Number(owner.management_rate || 0) / 100) * 100) / 100;
     const netDueToOwner = Math.round((rentReceived - expensesTotal - managementFee) * 100) / 100;
 
-    const prompt = `Tu es l'assistant financier de "Portail", une entreprise de gestion immobilière résidentielle au Québec. Rédige un résumé court (2-4 phrases) du rapport mensuel d'un propriétaire, en français, ton clair et factuel, dans le style de cet exemple :
+    // Actions concrètes attendues du propriétaire — liste déterministe,
+    // pas générée par l'IA.
+    const ownerActionsNeeded: string[] = [];
+    if (Array.isArray(pendingApprovals) && pendingApprovals.length) ownerActionsNeeded.push(`${pendingApprovals.length} approbation(s) en attente de votre décision`);
+    if (missingReceipts.length) ownerActionsNeeded.push(`${missingReceipts.length} facture(s) sans reçu à documenter`);
+    if (overEstimateWorkOrders.length) ownerActionsNeeded.push(`${overEstimateWorkOrders.length} travaux ont dépassé l'estimation initiale — à valider`);
+    if (lateCount > 0) ownerActionsNeeded.push(`${lateCount} paiement(s) en retard à suivre`);
+    if (Array.isArray(openAnomalies) && openAnomalies.length) ownerActionsNeeded.push(`${openAnomalies.length} anomalie(s) financière(s) ouverte(s) à examiner`);
+
+    // Comparaison avec le rapport précédent déjà généré (pas de recalcul,
+    // simple lecture du dernier rapport existant).
+    const prevReportRes = await fetch(
+      `${supabaseUrl}/rest/v1/reports?owner_id=eq.${owner_id}&period_end=lt.${period_start}&select=rent_received,occupancy_rate,expenses_total,net_due_to_owner&order=period_end.desc&limit=1`,
+      { headers: adminHeaders },
+    );
+    const [prevReport] = await prevReportRes.json().catch(() => [null]);
+
+    const prompt = `Tu es l'assistant financier de "Portail", une entreprise de gestion immobilière résidentielle au Québec. Rédige un résumé court (3-5 phrases) du rapport mensuel d'un propriétaire, en français, ton clair et factuel, dans le style de cet exemple :
 
 "L'immeuble a encaissé 98 % des loyers ce mois-ci. Une unité présente un retard de cinq jours. Deux réparations ont été complétées pour un coût total de 630 $, incluant les frais de coordination."
 
@@ -99,6 +148,11 @@ Travaux en cours: ${workOrdersInProgress}
 Frais de gestion: ${managementFee} $
 Renouvellements de bail à venir (60 jours): ${renewalsUpcoming}
 Montant net à remettre au propriétaire: ${netDueToOwner} $
+Factures sans reçu: ${missingReceipts.length}
+Travaux ayant dépassé l'estimation: ${overEstimateWorkOrders.length}
+${prevReport ? `Mois précédent — loyers reçus: ${prevReport.rent_received} $, occupation: ${prevReport.occupancy_rate} %, dépenses: ${prevReport.expenses_total} $` : "Aucun rapport précédent pour comparaison."}
+
+RÈGLES : n'invente aucun chiffre au-delà de ceux fournis ci-dessus. Si des actions sont attendues du propriétaire (approbations, reçus manquants, dépassements), mentionne-les brièvement.
 
 Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
 { "summary": "le résumé rédigé" }`;
@@ -112,7 +166,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 400,
+        max_tokens: 500,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -145,11 +199,22 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         net_due_to_owner: netDueToOwner,
         renewals_upcoming: renewalsUpcoming,
         summary,
+        missing_receipts_count: missingReceipts.length,
+        missing_receipts: missingReceipts,
+        over_estimate_count: overEstimateWorkOrders.length,
+        over_estimate_work_orders: overEstimateWorkOrders,
+        owner_actions_needed: ownerActionsNeeded,
+        bank_reconciliation_status: "non_connecte",
+        prev_rent_received: prevReport?.rent_received ?? null,
+        prev_occupancy_rate: prevReport?.occupancy_rate ?? null,
+        prev_expenses_total: prevReport?.expenses_total ?? null,
+        prev_net_due_to_owner: prevReport?.net_due_to_owner ?? null,
       }),
     });
 
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   } catch (err) {
+    console.error("generate-owner-report unexpected error", err);
     return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 500 });
   }
 });

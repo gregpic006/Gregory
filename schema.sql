@@ -266,6 +266,22 @@ create table reports (
   created_at timestamptz default now()
 );
 
+-- Rapport enrichi : factures sans reçu, travaux ayant dépassé leur
+-- estimation, actions concrètes attendues du propriétaire, comparaison
+-- avec le mois précédent, et statut du rapprochement bancaire (absent
+-- tant qu'aucun compte bancaire n'est lié — voir automatisation
+-- "rapprochement des paiements" séparée, aucune donnée inventée ici).
+alter table reports add column if not exists missing_receipts_count int default 0;
+alter table reports add column if not exists missing_receipts jsonb;
+alter table reports add column if not exists over_estimate_count int default 0;
+alter table reports add column if not exists over_estimate_work_orders jsonb;
+alter table reports add column if not exists owner_actions_needed jsonb;
+alter table reports add column if not exists bank_reconciliation_status text default 'non_connecte';
+alter table reports add column if not exists prev_rent_received numeric(10,2);
+alter table reports add column if not exists prev_occupancy_rate numeric(5,2);
+alter table reports add column if not exists prev_expenses_total numeric(10,2);
+alter table reports add column if not exists prev_net_due_to_owner numeric(10,2);
+
 -- ============ DOCUMENTS ============
 create table documents (
   id uuid primary key default gen_random_uuid(),
