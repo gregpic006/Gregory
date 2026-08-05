@@ -206,6 +206,66 @@ create table prospects (
 -- Pas de policy RLS ouverte : accessible uniquement via le rôle
 -- service_role (fonction Edge "crm-api", gardée par is_admin).
 
+-- Enrichissement CRM : complétude, probabilité de signature et
+-- prochain geste sont calculés déterministiquement (table de
+-- correspondance sur l'étape + l'intérêt, jamais estimés par l'IA).
+-- lead_source/acquisition_cost/loss_reason sont saisis explicitement
+-- par la source du prospect ou par l'admin.
+alter table prospects add column if not exists completeness_score int;
+alter table prospects add column if not exists lead_source text;
+alter table prospects add column if not exists acquisition_cost numeric(10,2);
+alter table prospects add column if not exists signing_probability int;
+alter table prospects add column if not exists next_action text;
+alter table prospects add column if not exists vendor_commission_estimate numeric(10,2);
+alter table prospects add column if not exists loss_reason text;
+
+create or replace function compute_prospect_derived_fields()
+returns trigger language plpgsql as $$
+declare
+  v_filled int := 0;
+  v_total int := 6;
+begin
+  if new.full_name is not null and new.full_name <> '' then v_filled := v_filled + 1; end if;
+  if new.email is not null and new.email <> '' then v_filled := v_filled + 1; end if;
+  if new.phone is not null and new.phone <> '' then v_filled := v_filled + 1; end if;
+  if new.company_name is not null and new.company_name <> '' then v_filled := v_filled + 1; end if;
+  if new.num_doors is not null then v_filled := v_filled + 1; end if;
+  if new.avg_rent is not null then v_filled := v_filled + 1; end if;
+  new.completeness_score := round((v_filled::numeric / v_total) * 100);
+
+  new.signing_probability := case new.stage
+    when 'signed' then 100
+    when 'lost' then 0
+    when 'proposal_sent' then case new.interest_level when 'chaud' then 70 when 'tiede' then 45 when 'froid' then 20 else 50 end
+    when 'interested' then case new.interest_level when 'chaud' then 55 when 'tiede' then 30 when 'froid' then 10 else 35 end
+    when 'contacted' then case new.interest_level when 'chaud' then 35 when 'tiede' then 20 when 'froid' then 5 else 20 end
+    else 10
+  end;
+
+  new.next_action := case new.stage
+    when 'new' then 'Premier contact à effectuer'
+    when 'contacted' then 'Qualifier l''intérêt (appel de suivi)'
+    when 'interested' then 'Envoyer une proposition/soumission'
+    when 'proposal_sent' then 'Relancer pour obtenir la décision'
+    when 'signed' then 'Amorcer l''onboarding du nouveau client'
+    when 'lost' then 'Aucune action — dossier fermé'
+    else null
+  end;
+
+  -- Estimation de référence seulement (10 % des frais de gestion du
+  -- 1er mois) — à ajuster selon la vraie structure de commission.
+  if new.potential_monthly_revenue is not null then
+    new.vendor_commission_estimate := round(new.potential_monthly_revenue * 0.10 * 100) / 100;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger on_prospect_change
+  before insert or update on prospects
+  for each row execute function compute_prospect_derived_fields();
+
 -- ============ FINANCIAL ANOMALIES (contrôle interne) ============
 create table financial_anomalies (
   id uuid primary key default gen_random_uuid(),

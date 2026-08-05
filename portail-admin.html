@@ -191,8 +191,8 @@
     <button onclick="createProspect()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter un prospect</button>
   </div>
 
-  <table><thead><tr><th>Prospect</th><th class="num">Portes</th><th class="num">Revenu potentiel/mois</th><th>Intérêt</th><th>Statut</th><th>Prochain suivi</th><th></th></tr></thead>
-    <tbody id="prospects-body"><tr class="empty-row"><td colspan="7">Chargement...</td></tr></tbody>
+  <table><thead><tr><th>Prospect</th><th class="num">Portes</th><th class="num">Revenu potentiel/mois</th><th>Intérêt</th><th>Statut</th><th class="num">Complétude</th><th class="num">Prob. signature</th><th>Prochain geste</th><th>Prochain suivi</th><th></th></tr></thead>
+    <tbody id="prospects-body"><tr class="empty-row"><td colspan="10">Chargement...</td></tr></tbody>
   </table>
 </div>
 
@@ -610,19 +610,29 @@ async function loadProspects(){
   const body = document.getElementById('prospects-body');
   const prospects = data?.prospects || [];
   if(!prospects.length){
-    body.innerHTML = '<tr class="empty-row"><td colspan="7">Aucun prospect.</td></tr>';
+    body.innerHTML = '<tr class="empty-row"><td colspan="10">Aucun prospect.</td></tr>';
     return;
   }
   body.innerHTML = prospects.map(p => `
     <tr>
-      <td>${esc(p.full_name)}<br><span style="color:var(--muted);font-size:11.5px;">${esc(p.email) || ''} ${esc(p.phone) || ''}</span></td>
+      <td>${esc(p.full_name)}<br><span style="color:var(--muted);font-size:11.5px;">${esc(p.email) || ''} ${esc(p.phone) || ''}</span><br><span style="color:var(--muted);font-size:11px;">Source : ${esc(p.lead_source) || 'inconnue'}${p.acquisition_cost != null ? ' — coût : ' + Number(p.acquisition_cost).toLocaleString('fr-CA') + ' $' : ''} <a href="#" onclick="promptAcquisitionCost('${p.id}', ${p.acquisition_cost ?? 'null'}); return false;">modifier</a></span>${p.stage === 'lost' && p.loss_reason ? '<br><span style="color:var(--rust);font-size:11px;">Raison de perte : ' + esc(p.loss_reason) + '</span>' : ''}</td>
       <td class="num">${p.num_doors ?? '—'}</td>
-      <td class="num">${p.potential_monthly_revenue != null ? Number(p.potential_monthly_revenue).toLocaleString('fr-CA') + ' $' : '—'}</td>
+      <td class="num">${p.potential_monthly_revenue != null ? Number(p.potential_monthly_revenue).toLocaleString('fr-CA') + ' $' : '—'}${p.vendor_commission_estimate != null ? '<br><span style="color:var(--muted);font-size:11px;">commission est. ' + Number(p.vendor_commission_estimate).toLocaleString('fr-CA') + ' $</span>' : ''}</td>
       <td>${p.interest_level || '—'}</td>
       <td><select onchange="updateProspectStage('${p.id}', this.value)">${stageOptions.replace(`value="${p.stage}"`, `value="${p.stage}" selected`)}</select></td>
+      <td class="num">${p.completeness_score != null ? p.completeness_score + '%' : '—'}</td>
+      <td class="num">${p.signing_probability != null ? p.signing_probability + '%' : '—'}</td>
+      <td style="font-size:12px;">${esc(p.next_action) || '—'}</td>
       <td>${p.next_followup_date || '—'}</td>
       <td><button onclick="promptAddCall('${p.id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">+ Appel</button></td>
     </tr>`).join('');
+}
+
+async function promptAcquisitionCost(prospect_id, current){
+  const value = prompt('Coût d\'acquisition de ce prospect ($) — laisse vide pour effacer :', current != null ? String(current) : '');
+  if(value === null) return;
+  await callCrmApi({ action: 'update_acquisition_cost', prospect_id, acquisition_cost: value.trim() });
+  await loadProspects();
 }
 
 async function createProspect(){
@@ -642,7 +652,11 @@ async function createProspect(){
 }
 
 async function updateProspectStage(prospect_id, stage){
-  await callCrmApi({ action: 'update_stage', prospect_id, stage });
+  let loss_reason = null;
+  if(stage === 'lost'){
+    loss_reason = prompt('Raison de la perte de ce prospect (optionnel) :') || null;
+  }
+  await callCrmApi({ action: 'update_stage', prospect_id, stage, loss_reason });
   await loadProspects();
 }
 

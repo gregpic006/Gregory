@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === "create") {
-      const { full_name, email, phone, company_name, num_doors, avg_rent } = body;
+      const { full_name, email, phone, company_name, num_doors, avg_rent, lead_source, acquisition_cost } = body;
       const potential = num_doors && avg_rent ? Math.round(num_doors * avg_rent * 0.06 * 100) / 100 : null;
       await fetch(`${supabaseUrl}/rest/v1/prospects`, {
         method: "POST",
@@ -56,22 +56,39 @@ Deno.serve(async (req) => {
           avg_rent: avg_rent || null,
           potential_monthly_revenue: potential,
           stage: "new",
+          lead_source: lead_source || "manuel",
+          acquisition_cost: acquisition_cost || null,
         }),
       });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
     if (action === "update_stage") {
-      const { prospect_id, stage } = body;
+      const { prospect_id, stage, loss_reason } = body;
+      const patchBody: Record<string, unknown> = { stage };
+      if (stage === "lost") patchBody.loss_reason = loss_reason || null;
       await fetch(`${supabaseUrl}/rest/v1/prospects?id=eq.${prospect_id}`, {
         method: "PATCH",
         headers: adminHeaders,
-        body: JSON.stringify({ stage }),
+        body: JSON.stringify(patchBody),
       });
       await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
         method: "POST",
         headers: adminHeaders,
-        body: JSON.stringify({ actor_type: "admin", actor_id: userId, action: "prospect.stage_change", entity_type: "prospects", entity_id: prospect_id, details: { new_stage: stage } }),
+        body: JSON.stringify({ actor_type: "admin", actor_id: userId, action: "prospect.stage_change", entity_type: "prospects", entity_id: prospect_id, details: { new_stage: stage, loss_reason: stage === "lost" ? (loss_reason || null) : undefined } }),
+      });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "update_acquisition_cost") {
+      const { prospect_id, acquisition_cost } = body;
+      if (!prospect_id) {
+        return new Response(JSON.stringify({ error: "prospect_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/prospects?id=eq.${prospect_id}`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ acquisition_cost: acquisition_cost === "" ? null : Number(acquisition_cost) }),
       });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }

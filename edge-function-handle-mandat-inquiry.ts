@@ -78,6 +78,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         potential_monthly_revenue: potentialRevenue,
         stage: "new",
         notes: parsed.summary ?? inquiry.message ?? null,
+        lead_source: "site_web_mandat",
       }),
     });
 
