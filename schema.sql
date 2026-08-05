@@ -1887,6 +1887,60 @@ $$;
 select cron.schedule('monthly-enforce-data-retention', '0 5 1 * *', $$select enforce_data_retention()$$);
 
 -- ============================================================
+-- DÉTECTION D'INSATISFACTION ET ESCALADE
+-- ============================================================
+-- L'IA classe le sentiment d'un texte déjà écrit par un humain (message
+-- d'un propriétaire, note d'un locataire qui rouvre une réparation) —
+-- elle ne décide jamais QUAND escalader. La décision d'escalade est un
+-- seuil fixe et déterministe : un seul signal "très négatif", OU deux
+-- signaux "négatif"/"très négatif" pour la même personne en 14 jours.
+create table dissatisfaction_signals (
+  id uuid primary key default gen_random_uuid(),
+  source text not null,
+  subject_type text not null check (subject_type in ('owner','tenant')),
+  subject_id uuid not null,
+  related_entity_type text,
+  related_entity_id uuid,
+  content_excerpt text,
+  ai_sentiment text check (ai_sentiment in ('positif','neutre','negatif','tres_negatif')),
+  ai_reasoning text,
+  ai_confidence numeric(5,2),
+  escalated boolean default false,
+  escalated_at timestamptz,
+  resolved boolean default false,
+  resolved_at timestamptz,
+  resolution_note text,
+  created_at timestamptz default now()
+);
+alter table dissatisfaction_signals enable row level security;
+create policy "admin read dissatisfaction_signals" on dissatisfaction_signals for select using (auth_is_admin());
+
+create or replace function trigger_analyze_owner_message()
+returns trigger language plpgsql as $$
+begin
+  if new.sender = 'owner' then
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/analyze-satisfaction-signal',
+      body := jsonb_build_object(
+        'source', 'owner_message', 'subject_type', 'owner', 'subject_id', new.owner_id,
+        'related_entity_type', 'messages', 'related_entity_id', new.id, 'content', new.body
+      ),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+  end if;
+  return new;
+end;
+$$;
+
+create trigger on_owner_message_insert
+  after insert on messages
+  for each row execute function trigger_analyze_owner_message();
+
+-- ============================================================
 -- CRM COMMERCIAL — création automatique d'un prospect
 -- ============================================================
 -- Chaque demande de mandat (inquiries.type = 'mandat', soumise

@@ -135,6 +135,19 @@ Deno.serve(async (req) => {
         method: "POST", headers: adminHeaders,
         body: JSON.stringify({ actor_type: "system", action: "repair_case.tenant_reopened", entity_type: "work_orders", entity_id: work_order_id, details: { message: message || null } }),
       });
+
+      const tenantId = wo.service_requests?.tenant_id;
+      if (message && tenantId) {
+        fetch(`${supabaseUrl}/functions/v1/analyze-satisfaction-signal`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: "sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR" },
+          body: JSON.stringify({
+            source: "repair_reopened", subject_type: "tenant", subject_id: tenantId,
+            related_entity_type: "work_orders", related_entity_id: work_order_id, content: message,
+          }),
+        }).catch((e) => console.error("Failed to trigger satisfaction analysis", e));
+      }
+
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 

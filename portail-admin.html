@@ -539,6 +539,10 @@ function renderCommandCenter(cc){
     ...(cc.visites?.resultat_manquant || []).map(v => `Résultat manquant — ${esc(v.prospect_name)} — ${addr(v.units)} — visite du ${new Date(v.proposed_at).toLocaleDateString('fr-CA')}`),
   ];
   if(visitItems.length) sections.push({ label: '🏠 Visites à traiter', items: visitItems });
+  if(cc.signaux_insatisfaction?.length){
+    const subjectLabel = { owner: 'Propriétaire', tenant: 'Locataire' };
+    sections.push({ label: '😟 Signaux d\'insatisfaction', color: '#c0392b', items: cc.signaux_insatisfaction.map(s => `${esc(subjectLabel[s.subject_type] || s.subject_type)} — "${esc(s.content_excerpt)}" — IA : ${esc(s.ai_sentiment)}${s.ai_reasoning ? ' (' + esc(s.ai_reasoning) + ')' : ''} <button onclick="resolveDissatisfactionSignal('${s.id}')" style="border:1px solid var(--ink);background:none;padding:3px 8px;font-size:11px;cursor:pointer;margin-left:6px;">Marquer résolu</button>`) });
+  }
 
   if(!sections.length){
     container.innerHTML = '<p style="color:var(--sage);font-size:13.5px;">Rien à signaler aujourd\'hui — tout est sous contrôle.</p>';
@@ -1267,6 +1271,13 @@ async function updateProspectStage(prospect_id, stage){
   }
   await callCrmApi({ action: 'update_stage', prospect_id, stage, loss_reason });
   await loadProspects();
+}
+
+async function resolveDissatisfactionSignal(signal_id){
+  const resolution_note = prompt('Note de résolution (optionnel) :') || null;
+  const { data, error } = await supabaseClient.functions.invoke('admin-api', { body: { action: 'resolve_dissatisfaction_signal', signal_id, resolution_note } });
+  if(error || data?.error){ alert('Erreur : ' + (error?.message || data?.error)); return; }
+  await loadAdminDashboard();
 }
 
 async function sendOnboardingReminder(owner_id){

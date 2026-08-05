@@ -74,6 +74,24 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, ...result }), { status: 200, headers: corsHeaders });
     }
 
+    if (body.action === "resolve_dissatisfaction_signal") {
+      const { signal_id, resolution_note } = body;
+      if (!signal_id) {
+        return new Response(JSON.stringify({ error: "signal_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/dissatisfaction_signals?id=eq.${signal_id}`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ resolved: true, resolved_at: new Date().toISOString(), resolution_note: resolution_note || null }),
+      });
+      await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ actor_type: "admin", actor_id: userId, action: "dissatisfaction.resolved", entity_type: "dissatisfaction_signals", entity_id: signal_id, details: { resolution_note: resolution_note || null } }),
+      });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     if (body.action === "update_anomaly") {
       const { anomaly_id, status } = body;
       await fetch(`${supabaseUrl}/rest/v1/financial_anomalies?id=eq.${anomaly_id}`, {
@@ -177,6 +195,12 @@ Deno.serve(async (req) => {
     );
     const workerVerificationIssues = await workerVerificationIssuesRes.json().catch(() => []);
 
+    const dissatisfactionSignalsRes = await fetch(
+      `${supabaseUrl}/rest/v1/dissatisfaction_signals?escalated=eq.true&resolved=eq.false&select=*&order=created_at.desc`,
+      { headers: adminHeaders },
+    );
+    const dissatisfactionSignals = await dissatisfactionSignalsRes.json().catch(() => []);
+
     const onboardingChecklistRes = await fetch(
       `${supabaseUrl}/rest/v1/owner_onboarding_checklist?onboarding_completed_at=is.null&select=*`,
       { headers: adminHeaders },
@@ -222,6 +246,7 @@ Deno.serve(async (req) => {
         sans_reponse: visitsAwaitingResponse,
         resultat_manquant: visitsNeedingOutcome,
       },
+      signaux_insatisfaction: dissatisfactionSignals,
     };
 
     const clients = owners.map((o: any) => {
