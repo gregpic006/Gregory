@@ -171,6 +171,28 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
+    if (action === "list_late_payments") {
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/payments?status=eq.late&select=*,leases(monthly_rent,tenants(full_name,email),units(unit_number,buildings(address)))&order=due_date.asc`,
+        { headers: adminHeaders },
+      );
+      return new Response(JSON.stringify({ payments: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "toggle_payment_reminder_pause") {
+      const { payment_id, paused } = body;
+      if (!payment_id) {
+        return new Response(JSON.stringify({ error: "payment_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/payments?id=eq.${payment_id}`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ reminder_paused: !!paused }),
+      });
+      await logAudit(paused ? "payment_reminder.paused" : "payment_reminder.resumed", "payments", payment_id, { paused: !!paused });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });

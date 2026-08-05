@@ -169,6 +169,10 @@
   <p class="subtitle" style="margin-bottom:16px;">Complétion, facture et dépense</p>
   <div id="work-orders-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 
+  <h1 style="margin-top:40px;font-size:22px;">Paiements en retard</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Rappels automatiques (max 3, un tous les 5 jours) — mets en pause si une entente est conclue avec le locataire</p>
+  <div id="late-payments-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
   <h1 style="margin-top:40px;font-size:22px;">Anomalies financières</h1>
   <p class="subtitle" style="margin-bottom:16px;">Détection automatique — factures en double, dépassements, écarts de loyer, reçus manquants</p>
   <table><thead><tr><th>Type</th><th>Client</th><th>Description</th><th>Sévérité</th><th></th></tr></thead>
@@ -416,6 +420,41 @@ async function loadOps(){
   }
   await loadServiceRequestsAdmin();
   await loadWorkOrdersAdmin();
+  await loadLatePaymentsAdmin();
+}
+
+async function loadLatePaymentsAdmin(){
+  const data = await callOpsApi({ action: 'list_late_payments' });
+  const container = document.getElementById('late-payments-body');
+  const payments = data?.payments || [];
+  if(!payments.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun paiement en retard.</p>';
+    return;
+  }
+  container.innerHTML = payments.map(p => {
+    const tenant = p.leases?.tenants;
+    const unit = p.leases?.units;
+    const statusBadge = p.escalated_to_human
+      ? '<span style="background:#c0392b;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">SUIVI HUMAIN REQUIS</span>'
+      : p.reminder_paused
+      ? '<span style="background:#8a8a8a;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">EN PAUSE</span>'
+      : `<span style="color:var(--muted);font-size:11.5px;">${p.late_reminder_count || 0}/3 rappel(s) envoyé(s)</span>`;
+    return `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">
+      <div>
+        <b style="display:block;margin-bottom:4px;">${esc(tenant?.full_name) ?? ''} — ${esc(unit?.buildings?.address) ?? ''}, unité ${esc(unit?.unit_number) ?? ''}</b>
+        <span style="font-size:12.5px;color:var(--muted);">${Number(p.amount).toLocaleString('fr-CA')} $ dû le ${esc(p.due_date)} — ${statusBadge}</span>
+      </div>
+      <button onclick="togglePaymentPause('${p.id}', ${!p.reminder_paused})" style="background:${p.reminder_paused ? 'var(--ink)' : 'transparent'};color:${p.reminder_paused ? 'var(--paper)' : 'var(--ink)'};border:1px solid var(--ink);padding:8px 14px;font-size:12.5px;cursor:pointer;">
+        ${p.reminder_paused ? 'Reprendre les rappels' : 'Mettre en pause (entente conclue)'}
+      </button>
+    </div>`;
+  }).join('');
+}
+
+async function togglePaymentPause(paymentId, paused){
+  const res = await callOpsApi({ action: 'toggle_payment_reminder_pause', payment_id: paymentId, paused });
+  if(res?.ok){ await loadLatePaymentsAdmin(); }
 }
 
 function workerOptionsHtml(selectedId){

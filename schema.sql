@@ -649,6 +649,37 @@ create trigger on_service_request_insert
 -- envoyé qu'une seule fois par paiement (colonnes reminder_*_sent).
 create extension if not exists pg_cron with schema extensions;
 
+-- Garde-fous des rappels de loyer (voir aussi payment_reminders plus
+-- bas pour l'historique complet) :
+--   - reminder_paused    : un admin/propriétaire a conclu une entente
+--                          avec le locataire — plus aucun rappel tant
+--                          que ce n'est pas remis à false.
+--   - late_reminder_count / last_late_reminder_at : fréquence maximale
+--                          d'un rappel de retard tous les 5 jours,
+--                          plafonnée à 3 rappels au locataire.
+--   - escalated_to_human : après 3 rappels sans paiement, on arrête
+--                          d'écrire au locataire et on avise un admin —
+--                          l'IA ne poursuit jamais seule au-delà de ce point.
+alter table payments add column if not exists reminder_paused boolean default false;
+alter table payments add column if not exists late_reminder_count int default 0;
+alter table payments add column if not exists last_late_reminder_at timestamptz;
+alter table payments add column if not exists escalated_to_human boolean default false;
+
+-- ============ PAYMENT REMINDERS (historique complet des rappels envoyés) ============
+create table payment_reminders (
+  id uuid primary key default gen_random_uuid(),
+  payment_id uuid references payments(id) on delete cascade,
+  reminder_type text not null check (reminder_type in ('upcoming','late','escalate')),
+  sequence_number int,
+  recipient text,
+  subject text,
+  body text,
+  sent_at timestamptz default now()
+);
+alter table payment_reminders enable row level security;
+create policy "admin read payment_reminders" on payment_reminders for select
+  using (auth_is_admin());
+
 create or replace function trigger_payment_reminders()
 returns void language plpgsql security definer set search_path = public as $$
 declare
@@ -662,6 +693,7 @@ begin
     where status = 'pending'
     and due_date between current_date and current_date + interval '3 days'
     and reminder_upcoming_sent = false
+    and coalesce(reminder_paused, false) = false
   loop
     perform net.http_post(
       url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-payment-reminder',
@@ -675,9 +707,14 @@ begin
     update payments set reminder_upcoming_sent = true where id = p.id;
   end loop;
 
+  -- Rappels de retard : au plus 1 tous les 5 jours, plafonné à 3.
   for p in
     select id from payments
-    where status = 'late' and reminder_late_sent = false
+    where status = 'late'
+    and coalesce(reminder_paused, false) = false
+    and coalesce(escalated_to_human, false) = false
+    and coalesce(late_reminder_count, 0) < 3
+    and (last_late_reminder_at is null or last_late_reminder_at <= now() - interval '5 days')
   loop
     perform net.http_post(
       url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-payment-reminder',
@@ -688,7 +725,29 @@ begin
         'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
       )
     );
-    update payments set reminder_late_sent = true where id = p.id;
+    update payments set late_reminder_count = coalesce(late_reminder_count, 0) + 1, last_late_reminder_at = now() where id = p.id;
+  end loop;
+
+  -- Escalade humaine : 3 rappels envoyés, toujours en retard 5 jours plus
+  -- tard -> on cesse d'écrire au locataire et on avise un admin.
+  for p in
+    select id from payments
+    where status = 'late'
+    and coalesce(reminder_paused, false) = false
+    and coalesce(escalated_to_human, false) = false
+    and coalesce(late_reminder_count, 0) >= 3
+    and last_late_reminder_at <= now() - interval '5 days'
+  loop
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-payment-reminder',
+      body := jsonb_build_object('payment_id', p.id, 'reminder_type', 'escalate'),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+    update payments set escalated_to_human = true where id = p.id;
   end loop;
 end;
 $$;
