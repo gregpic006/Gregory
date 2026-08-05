@@ -84,7 +84,10 @@ Deno.serve(async (req) => {
       await fetch(`${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}`, {
         method: "PATCH",
         headers: adminHeaders,
-        body: JSON.stringify({ worker_response: "accepted", worker_response_at: new Date().toISOString() }),
+        // Statut "in_progress" dès l'acceptation : le cycle de réparation
+        // (voir flag_stuck_repair_cases) peut ainsi distinguer "assigné,
+        // en attente de réponse" de "confirmé, travail en cours".
+        body: JSON.stringify({ worker_response: "accepted", worker_response_at: new Date().toISOString(), status: "in_progress" }),
       });
       await logAudit("work_order.worker_accepted", { worker: wo.workers?.name });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });

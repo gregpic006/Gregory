@@ -331,6 +331,17 @@ function renderCommandCenter(cc){
   if(cc.anomalies_financieres?.length){
     sections.push({ label: 'Anomalies financières', items: cc.anomalies_financieres.map(a => `${esc(a.description)} — ${esc(a.owners?.full_name) || ''}`) });
   }
+  const stuckLabel = {
+    'repair_case.stuck_no_diagnosis': 'Diagnostic IA bloqué depuis plus de 2 jours',
+    'repair_case.stuck_no_worker_assigned': 'Aucun travailleur assigné',
+    'repair_case.stuck_not_started': 'Accepté par le travailleur mais pas complété depuis 5+ jours',
+    'repair_case.stuck_missing_receipt': 'Reçu manquant depuis plus de 5 jours',
+    'repair_case.stuck_no_tenant_confirmation': 'Aucune confirmation du locataire (rappel envoyé)',
+    'repair_case.tenant_reopened': 'Le locataire signale que le problème persiste',
+  };
+  if(cc.dossiers_reparation_stagnants?.length){
+    sections.push({ label: '🔧 Dossiers de réparation stagnants', color: '#c0392b', items: cc.dossiers_reparation_stagnants.map(a => `${stuckLabel[a.action] || esc(a.action)} — ${esc(a.details?.description) || ''}`) });
+  }
 
   if(!sections.length){
     container.innerHTML = '<p style="color:var(--sage);font-size:13.5px;">Rien à signaler aujourd\'hui — tout est sous contrôle.</p>';

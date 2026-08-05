@@ -114,6 +114,12 @@ Deno.serve(async (req) => {
       fetch(`${supabaseUrl}/rest/v1/prospects?next_followup_date=lte.${todayStr}&stage=not.in.(signed,lost)&select=id,full_name,next_followup_date,stage`, { headers: adminHeaders }).then((r) => r.json()),
     ]);
 
+    const stuckRepairCasesRes = await fetch(
+      `${supabaseUrl}/rest/v1/audit_log?or=(action.like.repair_case.stuck_*,action.eq.repair_case.tenant_reopened)&created_at=gte.${new Date(Date.now() - 24 * 3600000).toISOString()}&select=id,action,entity_type,entity_id,details,created_at&order=created_at.desc`,
+      { headers: adminHeaders },
+    );
+    const stuckRepairCases = await stuckRepairCasesRes.json().catch(() => []);
+
     const lastMessageByOwner = new Map<string, any>();
     if (Array.isArray(allMessages)) {
       for (const m of allMessages) {
@@ -141,6 +147,7 @@ Deno.serve(async (req) => {
       documents_expirant_bientot: expiringDocs,
       prospects_a_relancer: prospectsToFollowUp,
       anomalies_financieres: anomalies,
+      dossiers_reparation_stagnants: stuckRepairCases,
     };
 
     const clients = owners.map((o: any) => {

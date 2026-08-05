@@ -19,6 +19,7 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const resendKey = Deno.env.get("RESEND_API_KEY");
     const adminHeaders = {
       apikey: serviceRoleKey ?? "",
       Authorization: `Bearer ${serviceRoleKey}`,
@@ -111,7 +112,7 @@ Deno.serve(async (req) => {
       const { work_order_id, actual_cost, receipt_base64, receipt_filename, receipt_content_type } = body;
 
       const woRes = await fetch(
-        `${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}&select=description,service_request_id,unit_id,units(building_id,buildings(owner_id))`,
+        `${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}&select=description,service_request_id,unit_id,tenant_confirmation_token,units(unit_number,building_id,buildings(address,owner_id)),service_requests(tenant_id,tenants(full_name,email))`,
         { headers: adminHeaders },
       );
       const [wo] = await woRes.json();
@@ -120,6 +121,7 @@ Deno.serve(async (req) => {
       }
       const buildingId = wo.units?.building_id;
       const ownerId = wo.units?.buildings?.owner_id;
+      const tenant = wo.service_requests?.tenants;
 
       let receiptDocumentId: string | null = null;
       if (receipt_base64 && ownerId) {
@@ -151,14 +153,37 @@ Deno.serve(async (req) => {
         }
       }
 
-      await fetch(`${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}`, {
-        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "completed" }),
+      // Le dossier ne se ferme PAS tout de suite : on attend la
+      // confirmation du locataire (voir handle-tenant-confirmation.ts et
+      // le rappel/fermeture automatique dans flag_stuck_repair_cases()).
+      // service_requests reste "in_progress" jusqu'à cette confirmation.
+      const confirmPatchRes = await fetch(`${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}`, {
+        method: "PATCH",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({ status: "completed", tenant_confirmation_sent_at: new Date().toISOString() }),
       });
-      if (wo.service_request_id) {
-        await fetch(`${supabaseUrl}/rest/v1/service_requests?id=eq.${wo.service_request_id}`, {
-          method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "closed" }),
-        });
+      const [updatedWorkOrder] = await confirmPatchRes.json().catch(() => [null]);
+      const confirmationToken = updatedWorkOrder?.tenant_confirmation_token || wo.tenant_confirmation_token;
+
+      if (tenant?.email && confirmationToken) {
+        const address = wo.units?.buildings?.address;
+        const confirmUrl = `https://gregpic006.github.io/Gregory/confirmer-reparation.html?wo=${work_order_id}&token=${confirmationToken}`;
+        try {
+          await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              from: "Portail <onboarding@resend.dev>",
+              to: [tenant.email],
+              subject: `Ta réparation est complétée — confirme que tout est réglé`,
+              text: `Bonjour ${tenant.full_name},\n\nLa réparation suivante a été complétée à ton logement (${address || ""}, unité ${wo.units?.unit_number || ""}) :\n${wo.description}\n\nPeux-tu confirmer que tout est réglé ? ${confirmUrl}\n\nSi rien ne se passe d'ici quelques jours, on considérera le dossier réglé automatiquement — mais si le problème persiste, dis-le-nous via ce lien.\n\nL'équipe Portail`,
+            }),
+          });
+        } catch (e) {
+          console.error("Failed to send tenant confirmation email", e);
+        }
       }
+
       await fetch(`${supabaseUrl}/rest/v1/expenses`, {
         method: "POST",
         headers: adminHeaders,

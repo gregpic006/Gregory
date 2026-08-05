@@ -882,6 +882,16 @@ alter table work_orders add column if not exists entry_permission text;
 alter table work_orders add column if not exists billing_terms text;
 alter table work_orders add column if not exists due_by date;
 
+-- Étape manquante du cycle de réparation : confirmation du locataire
+-- avant fermeture définitive du dossier. Le service_request reste
+-- "in_progress" après complétion tant que le locataire n'a pas
+-- confirmé (ou que le délai de relance n'est pas expiré).
+alter table work_orders add column if not exists tenant_confirmed boolean;
+alter table work_orders add column if not exists tenant_confirmation_sent_at timestamptz;
+alter table work_orders add column if not exists tenant_confirmation_token uuid default gen_random_uuid();
+alter table work_orders add column if not exists tenant_confirmation_note text;
+alter table work_orders add column if not exists tenant_reminder_sent boolean default false;
+
 create or replace function notify_worker_new_job()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
@@ -1011,6 +1021,128 @@ end;
 $$;
 
 select cron.schedule('worker-response-timeouts', '*/15 * * * *', $$select process_worker_response_timeouts()$$);
+
+-- ============================================================
+-- ORCHESTRATEUR DU CYCLE DE RÉPARATION
+-- ============================================================
+-- Surveille le cycle complet (reçue -> diagnostic -> travailleur
+-- assigné -> intervention -> preuve -> confirmation du locataire) et
+-- journalise (audit_log, dédupliqué par fenêtre glissante) tout
+-- dossier resté trop longtemps dans une étape, pour qu'un humain le
+-- retrouve dans le centre de commandement plutôt que de le perdre.
+create or replace function flag_stuck_repair_cases()
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  r record;
+begin
+  -- 1. Reçue depuis plus de 2 jours sans catégorisation IA.
+  for r in
+    select id, description from service_requests
+    where status = 'open' and ai_category is null
+    and created_at <= now() - interval '2 days'
+  loop
+    insert into audit_log (actor_type, action, entity_type, entity_id, details)
+    select 'system', 'repair_case.stuck_no_diagnosis', 'service_requests', r.id, jsonb_build_object('description', r.description)
+    where not exists (
+      select 1 from audit_log where entity_type = 'service_requests' and entity_id = r.id
+      and action = 'repair_case.stuck_no_diagnosis' and created_at >= now() - interval '2 days'
+    );
+  end loop;
+
+  -- 2. Diagnostiquée mais aucun travailleur assigné (3 jours, 1 jour si urgent/sécurité).
+  for r in
+    select sr.id, sr.description
+    from service_requests sr
+    where sr.status = 'open' and sr.ai_category is not null
+    and not exists (select 1 from work_orders wo where wo.service_request_id = sr.id and wo.status <> 'cancelled')
+    and sr.created_at <= now() - (case when coalesce(sr.safety_override, false) or sr.ai_urgency = 'urgence' then interval '1 day' else interval '3 days' end)
+  loop
+    insert into audit_log (actor_type, action, entity_type, entity_id, details)
+    select 'system', 'repair_case.stuck_no_worker_assigned', 'service_requests', r.id, jsonb_build_object('description', r.description)
+    where not exists (
+      select 1 from audit_log where entity_type = 'service_requests' and entity_id = r.id
+      and action = 'repair_case.stuck_no_worker_assigned' and created_at >= now() - interval '1 day'
+    );
+  end loop;
+
+  -- 3. Travailleur a accepté (status "in_progress") mais le travail
+  --    n'est toujours pas complété 5 jours plus tard.
+  for r in
+    select id, description from work_orders
+    where status = 'in_progress' and worker_response = 'accepted'
+    and worker_response_at <= now() - interval '5 days'
+  loop
+    insert into audit_log (actor_type, action, entity_type, entity_id, details)
+    select 'system', 'repair_case.stuck_not_started', 'work_orders', r.id, jsonb_build_object('description', r.description)
+    where not exists (
+      select 1 from audit_log where entity_type = 'work_orders' and entity_id = r.id
+      and action = 'repair_case.stuck_not_started' and created_at >= now() - interval '2 days'
+    );
+  end loop;
+
+  -- 4. Dépense sans reçu depuis plus de 5 jours.
+  for r in
+    select id, description from expenses
+    where receipt_document_id is null
+    and expense_date <= current_date - interval '5 days'
+  loop
+    insert into audit_log (actor_type, action, entity_type, entity_id, details)
+    select 'system', 'repair_case.stuck_missing_receipt', 'expenses', r.id, jsonb_build_object('description', r.description)
+    where not exists (
+      select 1 from audit_log where entity_type = 'expenses' and entity_id = r.id
+      and action = 'repair_case.stuck_missing_receipt' and created_at >= now() - interval '2 days'
+    );
+  end loop;
+
+  -- 5. Complété, en attente de confirmation du locataire depuis plus de
+  --    3 jours : un seul rappel envoyé. Après 7 jours sans réponse, on
+  --    ferme automatiquement le dossier plutôt que de le laisser en
+  --    attente indéfiniment (le locataire ne perd rien : il peut
+  --    toujours rouvrir une nouvelle demande si besoin).
+  for r in
+    select wo.id, wo.description, wo.tenant_confirmation_sent_at, wo.tenant_reminder_sent, sr.id as service_request_id, sr.tenant_id
+    from work_orders wo
+    join service_requests sr on sr.id = wo.service_request_id
+    where wo.status = 'completed' and coalesce(wo.tenant_confirmed, false) = false
+    and wo.tenant_confirmation_sent_at is not null
+    and wo.tenant_confirmation_sent_at <= now() - interval '7 days'
+  loop
+    update work_orders set tenant_confirmed = true, tenant_confirmation_note = 'Fermé automatiquement après 7 jours sans réponse du locataire.' where id = r.id;
+    update service_requests set status = 'closed' where id = r.service_request_id;
+    insert into audit_log (actor_type, action, entity_type, entity_id, details)
+    values ('system', 'repair_case.auto_closed_no_tenant_response', 'work_orders', r.id, jsonb_build_object('description', r.description));
+  end loop;
+
+  for r in
+    select wo.id, wo.description
+    from work_orders wo
+    where wo.status = 'completed' and coalesce(wo.tenant_confirmed, false) = false
+    and wo.tenant_confirmation_sent_at is not null
+    and wo.tenant_confirmation_sent_at <= now() - interval '3 days'
+    and coalesce(wo.tenant_reminder_sent, false) = false
+  loop
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-tenant-confirmation',
+      body := jsonb_build_object('action', 'send_reminder', 'work_order_id', r.id),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+    update work_orders set tenant_reminder_sent = true where id = r.id;
+
+    insert into audit_log (actor_type, action, entity_type, entity_id, details)
+    select 'system', 'repair_case.stuck_no_tenant_confirmation', 'work_orders', r.id, jsonb_build_object('description', r.description)
+    where not exists (
+      select 1 from audit_log where entity_type = 'work_orders' and entity_id = r.id
+      and action = 'repair_case.stuck_no_tenant_confirmation' and created_at >= now() - interval '2 days'
+    );
+  end loop;
+end;
+$$;
+
+select cron.schedule('daily-flag-stuck-repair-cases', '0 12 * * *', $$select flag_stuck_repair_cases()$$);
 
 -- ============================================================
 -- DÉCISION D'APPROBATION — ferme automatiquement la boucle
