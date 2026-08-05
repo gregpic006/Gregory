@@ -3,8 +3,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const OWNER_PORTAL_URL = "https://gregpic006.github.io/Gregory/portail-proprietaire.html";
-const TENANT_PORTAL_URL = "https://gregpic006.github.io/Gregory/portail-locataire.html";
+const OWNER_PORTAL_URL = "https://portailgestion.ca/portail-proprietaire.html";
+const TENANT_PORTAL_URL = "https://portailgestion.ca/portail-locataire.html";
 
 function randomPassword() {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 14);

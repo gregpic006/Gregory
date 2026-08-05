@@ -253,7 +253,7 @@ Deno.serve(async (req) => {
 
       if (tenant?.email && confirmationToken) {
         const address = wo.units?.buildings?.address;
-        const confirmUrl = `https://gregpic006.github.io/Gregory/confirmer-reparation.html?wo=${work_order_id}&token=${confirmationToken}`;
+        const confirmUrl = `https://portailgestion.ca/confirmer-reparation.html?wo=${work_order_id}&token=${confirmationToken}`;
         try {
           await fetch("https://api.resend.com/emails", {
             method: "POST",
@@ -342,7 +342,7 @@ Deno.serve(async (req) => {
       });
       const [visit] = await insertRes.json();
 
-      const confirmUrl = `https://gregpic006.github.io/Gregory/confirmer-visite.html?visit=${visit?.id}&token=${visit?.confirmation_token}`;
+      const confirmUrl = `https://portailgestion.ca/confirmer-visite.html?visit=${visit?.id}&token=${visit?.confirmation_token}`;
       const whenLabel = new Date(proposed_at).toLocaleString("fr-CA", { dateStyle: "full", timeStyle: "short" });
       await fetch("https://api.resend.com/emails", {
         method: "POST",

@@ -4,7 +4,7 @@
 // Marketplace (titre/prix/description, assemblés déterministiquement à
 // partir du même contenu déjà validé par l'IA — pas un second appel
 // IA) et avise l'équipe par courriel qu'il ne reste qu'à publier.
-const SITE_BASE_URL = "https://gregpic006.github.io/Gregory";
+const SITE_BASE_URL = "https://portailgestion.ca";
 
 Deno.serve(async (req) => {
   try {

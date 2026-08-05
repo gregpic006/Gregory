@@ -9,7 +9,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const SITE_BASE_URL = "https://gregpic006.github.io/Gregory";
+const SITE_BASE_URL = "https://portailgestion.ca";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {

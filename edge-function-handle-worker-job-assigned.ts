@@ -1,6 +1,6 @@
 // Page publique où le travailleur répond (accepter/refuser/proposer
 // une heure/demander des infos) — voir edge-function-handle-worker-response.ts
-const SITE_BASE_URL = "https://gregpic006.github.io/Gregory";
+const SITE_BASE_URL = "https://portailgestion.ca";
 
 Deno.serve(async (req) => {
   try {
