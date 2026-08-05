@@ -286,6 +286,27 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
+    if (action === "list_marketplace_listings") {
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/units?marketplace_generated_at=not.is.null&status=in.(available,soon_available)&select=id,unit_type,rent,suggested_rent,marketplace_title,marketplace_description,marketplace_generated_at,marketplace_posted_at,buildings(address)&order=marketplace_generated_at.desc`,
+        { headers: adminHeaders },
+      );
+      return new Response(JSON.stringify({ listings: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "mark_marketplace_posted") {
+      const { unit_id, posted } = body;
+      if (!unit_id) {
+        return new Response(JSON.stringify({ error: "unit_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/units?id=eq.${unit_id}`, {
+        method: "PATCH", headers: adminHeaders,
+        body: JSON.stringify({ marketplace_posted_at: posted === false ? null : new Date().toISOString() }),
+      });
+      await logAudit(posted === false ? "marketplace.unmarked_posted" : "marketplace.marked_posted", "units", unit_id, {});
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     if (action === "list_visit_inquiries") {
       const res = await fetch(
         `${supabaseUrl}/rest/v1/inquiries?type=eq.visite&status=eq.new&select=id,full_name,email,phone,message,unit_id,units(unit_number,buildings(address))&order=created_at.asc`,

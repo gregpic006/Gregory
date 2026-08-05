@@ -1417,6 +1417,16 @@ alter table units add column if not exists listing_quality_score int;
 alter table units add column if not exists listing_quality_notes text;
 alter table units add column if not exists listing_description_short text;
 
+-- Marketplace (Facebook) n'offre aucune API publique pour publier une
+-- annonce automatiquement — impossible à automatiser de bout en bout.
+-- Le système prépare donc tout (titre, prix, description, lien de
+-- visite) dès que l'annonce du site est générée, puis avise l'équipe
+-- par courriel qu'il ne reste qu'à copier-coller sur Marketplace.
+alter table units add column if not exists marketplace_title text;
+alter table units add column if not exists marketplace_description text;
+alter table units add column if not exists marketplace_generated_at timestamptz;
+alter table units add column if not exists marketplace_posted_at timestamptz;
+
 create or replace function notify_listing_needed()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin

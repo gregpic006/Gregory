@@ -179,6 +179,10 @@
   <p id="wk-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
   <div id="workers-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 
+  <h1 style="margin-top:40px;font-size:22px;">Annonces à publier (Facebook Marketplace)</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Préparées automatiquement dès qu'un logement devient vacant — Facebook ne permet pas la publication automatique, il ne reste qu'à copier-coller</p>
+  <div id="marketplace-listings-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
   <h1 style="margin-top:40px;font-size:22px;">Visites</h1>
   <p class="subtitle" style="margin-bottom:16px;">L'IA ne propose ni ne confirme jamais une heure — c'est toi qui choisis, le candidat confirme via un lien</p>
   <div id="visit-inquiries-body" style="margin-bottom:16px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
@@ -692,6 +696,7 @@ async function callOpsApi(payload){
 }
 
 async function loadOps(){
+  await loadMarketplaceListings();
   await loadWorkersAdmin();
   await loadVisitInquiries();
   await loadVisitsAdmin();
@@ -760,6 +765,52 @@ async function loadVisitsAdmin(){
 async function markVisitOutcome(visit_id, outcome){
   const res = await callOpsApi({ action: 'mark_visit_outcome', visit_id, outcome });
   if(res?.ok){ await loadVisitsAdmin(); }
+}
+
+async function copyToClipboard(text, btn){
+  try {
+    await navigator.clipboard.writeText(text);
+    if(btn){ const orig = btn.textContent; btn.textContent = 'Copié !'; setTimeout(() => { btn.textContent = orig; }, 1500); }
+  } catch (e) {
+    alert('Impossible de copier automatiquement — sélectionne le texte manuellement.');
+  }
+}
+
+async function loadMarketplaceListings(){
+  const data = await callOpsApi({ action: 'list_marketplace_listings' });
+  const container = document.getElementById('marketplace-listings-body');
+  const listings = data?.listings || [];
+  if(!listings.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune annonce en attente de publication.</p>';
+    return;
+  }
+  container.innerHTML = listings.map(u => {
+    const price = u.suggested_rent ?? u.rent;
+    const posted = !!u.marketplace_posted_at;
+    return `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${esc(u.buildings?.address) || ''} ${u.unit_type ? '— ' + esc(u.unit_type) : ''}</b>
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">Préparée le ${new Date(u.marketplace_generated_at).toLocaleDateString('fr-CA')} — ${posted ? `<span style="background:#4c7a4c;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">PUBLIÉE</span>` : `<span style="background:#e6a817;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">À PUBLIER</span>`}</span>
+      <div style="margin-bottom:8px;">
+        <label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Titre</label>
+        <div style="display:flex;gap:8px;align-items:center;"><input readonly value="${esc(u.marketplace_title)}" style="flex:1;padding:8px;border:1px solid var(--line);font-size:12.5px;"><button onclick="copyToClipboard(${JSON.stringify(u.marketplace_title || '')}, this)" style="border:1px solid var(--ink);background:none;padding:8px 12px;font-size:11.5px;cursor:pointer;">Copier</button></div>
+      </div>
+      <div style="margin-bottom:8px;">
+        <label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Prix</label>
+        <div style="display:flex;gap:8px;align-items:center;"><input readonly value="${price ?? ''}" style="width:120px;padding:8px;border:1px solid var(--line);font-size:12.5px;"><button onclick="copyToClipboard(${JSON.stringify(String(price ?? ''))}, this)" style="border:1px solid var(--ink);background:none;padding:8px 12px;font-size:11.5px;cursor:pointer;">Copier</button></div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description</label>
+        <div style="display:flex;gap:8px;align-items:flex-start;"><textarea readonly style="flex:1;padding:8px;border:1px solid var(--line);font-size:12.5px;min-height:90px;">${esc(u.marketplace_description)}</textarea><button onclick="copyToClipboard(${JSON.stringify(u.marketplace_description || '')}, this)" style="border:1px solid var(--ink);background:none;padding:8px 12px;font-size:11.5px;cursor:pointer;">Copier</button></div>
+      </div>
+      <button onclick="markMarketplacePosted('${u.id}', ${!posted})" style="background:${posted ? 'transparent' : 'var(--ink)'};color:${posted ? 'var(--ink)' : 'var(--paper)'};border:1px solid var(--ink);padding:9px 16px;font-size:12.5px;cursor:pointer;">${posted ? 'Annuler (pas encore publiée)' : 'Marquer publiée sur Marketplace'}</button>
+    </div>`;
+  }).join('');
+}
+
+async function markMarketplacePosted(unit_id, posted){
+  const res = await callOpsApi({ action: 'mark_marketplace_posted', unit_id, posted });
+  if(res?.ok){ await loadMarketplaceListings(); }
 }
 
 async function loadWorkersAdmin(){
