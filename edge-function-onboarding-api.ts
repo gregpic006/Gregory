@@ -132,6 +132,13 @@ Deno.serve(async (req) => {
         const ownerRes = await fetch(`${supabaseUrl}/rest/v1/owners?user_id=eq.${ownerUser.id}&select=id`, { headers: adminHeaders });
         const [owner] = await ownerRes.json().catch(() => [null]);
         if (owner) {
+          // Sans ceci, la suppression des dépenses/travaux/propriétaire
+          // plus bas échoue silencieusement (ces tables référencent
+          // owner_id/expense_id/work_order_id sans cascade).
+          await del("financial_anomalies", `owner_id=eq.${owner.id}`);
+          await del("approvals", `owner_id=eq.${owner.id}`);
+          await del("documents", `owner_id=eq.${owner.id}`);
+
           const buildingsRes = await fetch(`${supabaseUrl}/rest/v1/buildings?owner_id=eq.${owner.id}&select=id`, { headers: adminHeaders });
           const buildings = await buildingsRes.json().catch(() => []);
           for (const b of buildings) {
@@ -176,12 +183,17 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: "owner_id requis" }), { status: 400, headers: corsHeaders });
       }
       const summary: Record<string, number> = {};
+      const errors: string[] = [];
       const del = async (table: string, query: string) => {
         const res = await fetch(`${supabaseUrl}/rest/v1/${table}?${query}`, {
           method: "DELETE",
           headers: { ...adminHeaders, Prefer: "return=representation" },
         });
         const rows = await res.json().catch(() => []);
+        if (!res.ok) {
+          errors.push(`${table}: ${JSON.stringify(rows)}`);
+          return [];
+        }
         const count = Array.isArray(rows) ? rows.length : 0;
         summary[table] = (summary[table] || 0) + count;
         return Array.isArray(rows) ? rows : [];
@@ -196,6 +208,14 @@ Deno.serve(async (req) => {
       if (!owner) {
         return new Response(JSON.stringify({ error: "Propriétaire introuvable" }), { status: 404, headers: corsHeaders });
       }
+
+      // Ces tables référencent owner_id/expense_id/work_order_id SANS
+      // suppression en cascade — sans ce nettoyage préalable, la suppression
+      // des dépenses/travaux/propriétaire plus bas échoue silencieusement
+      // (l'API PostgREST renvoie une erreur, mais rien ne la fait remonter).
+      await del("financial_anomalies", `owner_id=eq.${owner_id}`);
+      await del("approvals", `owner_id=eq.${owner_id}`);
+      await del("documents", `owner_id=eq.${owner_id}`);
 
       const buildingsRes = await fetch(`${supabaseUrl}/rest/v1/buildings?owner_id=eq.${owner_id}&select=id`, { headers: adminHeaders });
       const buildings = await buildingsRes.json().catch(() => []);
@@ -227,11 +247,15 @@ Deno.serve(async (req) => {
         }
         await del("buildings", `id=eq.${b.id}`);
       }
-      await del("owners", `id=eq.${owner_id}`);
+      const deletedOwners = await del("owners", `id=eq.${owner_id}`);
       if (owner.user_id) await deleteAuthUser(owner.user_id);
 
-      await logAudit("owner.delete_cascade", "owners", owner_id, { summary });
-      return new Response(JSON.stringify({ ok: true, summary }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      await logAudit("owner.delete_cascade", "owners", owner_id, { summary, errors });
+      const stillExists = deletedOwners.length === 0;
+      return new Response(JSON.stringify({ ok: !stillExists && errors.length === 0, summary, errors }), {
+        status: stillExists ? 500 : 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     if (action === "create_owner") {
