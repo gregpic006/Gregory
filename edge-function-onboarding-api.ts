@@ -80,6 +80,89 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ owner: owner || null }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Aide au nettoyage manuel : montre ce qui reste dans les tables
+    // souvent polluées par les tests (anomalies, prospects, journal
+    // d'audit), avec assez de contexte pour distinguer une vraie donnée
+    // (ex: propriétaire Gregory) d'un reste de diagnostic — sans rien
+    // supprimer automatiquement.
+    if (action === "inspect_test_data") {
+      const anomaliesRes = await fetch(
+        `${supabaseUrl}/rest/v1/financial_anomalies?select=id,type,severity,description,status,created_at,owners(full_name)&order=created_at.desc`,
+        { headers: adminHeaders },
+      );
+      const prospectsRes = await fetch(
+        `${supabaseUrl}/rest/v1/prospects?select=id,full_name,email,company_name,stage,created_at&order=created_at.desc`,
+        { headers: adminHeaders },
+      );
+
+      // Une ligne d'audit_log est "orpheline" si l'entité qu'elle décrit
+      // n'existe plus (ex: owner.create pour un propriétaire déjà
+      // supprimé) — donc sans risque de retirer une vraie trace encore
+      // pertinente.
+      const auditRes = await fetch(`${supabaseUrl}/rest/v1/audit_log?select=id,action,entity_type,entity_id,created_at&order=created_at.desc&limit=1000`, { headers: adminHeaders });
+      const auditRows = await auditRes.json().catch(() => []);
+      const byType: Record<string, Set<string>> = {};
+      for (const row of auditRows) {
+        if (!row.entity_type || !row.entity_id) continue;
+        (byType[row.entity_type] ??= new Set()).add(row.entity_id);
+      }
+      const tableForEntityType: Record<string, string> = {
+        owners: "owners", buildings: "buildings", units: "units", tenants: "tenants",
+        work_orders: "work_orders", service_requests: "service_requests", prospects: "prospects",
+      };
+      const existingIds: Record<string, Set<string>> = {};
+      for (const [entityType, ids] of Object.entries(byType)) {
+        const table = tableForEntityType[entityType];
+        if (!table) continue;
+        const idsRes = await fetch(`${supabaseUrl}/rest/v1/${table}?id=in.(${[...ids].join(",")})&select=id`, { headers: adminHeaders });
+        const rows = await idsRes.json().catch(() => []);
+        existingIds[entityType] = new Set(rows.map((r: any) => r.id));
+      }
+      const orphanedAuditIds = auditRows
+        .filter((row: any) => row.entity_type && row.entity_id && tableForEntityType[row.entity_type] && !existingIds[row.entity_type]?.has(row.entity_id))
+        .map((row: any) => row.id);
+
+      return new Response(JSON.stringify({
+        financial_anomalies: await anomaliesRes.json().catch(() => []),
+        prospects: await prospectsRes.json().catch(() => []),
+        audit_log_total: auditRows.length,
+        audit_log_orphaned_count: orphanedAuditIds.length,
+        audit_log_orphaned_ids: orphanedAuditIds,
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Supprime uniquement les lignes audit_log dont l'entité décrite
+    // n'existe plus (voir inspect_test_data) — jamais les traces
+    // d'entités toujours actives.
+    if (action === "purge_orphaned_audit_log") {
+      const { ids } = body;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return new Response(JSON.stringify({ error: "ids requis (tableau non vide)" }), { status: 400, headers: corsHeaders });
+      }
+      const res = await fetch(`${supabaseUrl}/rest/v1/audit_log?id=in.(${ids.join(",")})`, {
+        method: "DELETE",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+      });
+      const rows = await res.json().catch(() => []);
+      return new Response(JSON.stringify({ ok: res.ok, deleted: Array.isArray(rows) ? rows.length : 0 }), { status: res.ok ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Supprime des lignes précises de financial_anomalies ou prospects,
+    // choisies après revue manuelle via inspect_test_data.
+    if (action === "delete_rows") {
+      const { table, ids } = body;
+      const allowed = ["financial_anomalies", "prospects"];
+      if (!allowed.includes(table) || !Array.isArray(ids) || ids.length === 0) {
+        return new Response(JSON.stringify({ error: "table (financial_anomalies|prospects) et ids requis" }), { status: 400, headers: corsHeaders });
+      }
+      const res = await fetch(`${supabaseUrl}/rest/v1/${table}?id=in.(${ids.join(",")})`, {
+        method: "DELETE",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+      });
+      const rows = await res.json().catch(() => []);
+      return new Response(JSON.stringify({ ok: res.ok, deleted: Array.isArray(rows) ? rows.length : 0 }), { status: res.ok ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (action === "find_tenant_by_email") {
       const res = await fetch(`${supabaseUrl}/rest/v1/tenants?email=eq.${encodeURIComponent(body.email)}&select=id,full_name`, { headers: adminHeaders });
       const [tenant] = await res.json();
