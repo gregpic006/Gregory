@@ -164,6 +164,76 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, summary }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Suppression complète et ciblée d'un propriétaire (immeubles, unités,
+    // travaux, dépenses, demandes de service, baux/paiements en cascade,
+    // locataires liés et leur compte Auth). Contrairement à
+    // cleanup_e2e_diagnostic_data (qui cible par courriel exact), celle-ci
+    // cible par owner_id — utile quand des données de test ont été créées
+    // sous un courriel qui ne correspond pas au motif attendu.
+    if (action === "delete_owner_completely") {
+      const { owner_id } = body;
+      if (!owner_id) {
+        return new Response(JSON.stringify({ error: "owner_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      const summary: Record<string, number> = {};
+      const del = async (table: string, query: string) => {
+        const res = await fetch(`${supabaseUrl}/rest/v1/${table}?${query}`, {
+          method: "DELETE",
+          headers: { ...adminHeaders, Prefer: "return=representation" },
+        });
+        const rows = await res.json().catch(() => []);
+        const count = Array.isArray(rows) ? rows.length : 0;
+        summary[table] = (summary[table] || 0) + count;
+        return Array.isArray(rows) ? rows : [];
+      };
+      const deleteAuthUser = async (id: string) => {
+        await fetch(`${supabaseUrl}/auth/v1/admin/users/${id}`, { method: "DELETE", headers: adminHeaders }).catch(() => null);
+        summary.auth_users = (summary.auth_users || 0) + 1;
+      };
+
+      const ownerRes = await fetch(`${supabaseUrl}/rest/v1/owners?id=eq.${owner_id}&select=id,user_id`, { headers: adminHeaders });
+      const [owner] = await ownerRes.json().catch(() => [null]);
+      if (!owner) {
+        return new Response(JSON.stringify({ error: "Propriétaire introuvable" }), { status: 404, headers: corsHeaders });
+      }
+
+      const buildingsRes = await fetch(`${supabaseUrl}/rest/v1/buildings?owner_id=eq.${owner_id}&select=id`, { headers: adminHeaders });
+      const buildings = await buildingsRes.json().catch(() => []);
+      for (const b of buildings) {
+        const unitsRes = await fetch(`${supabaseUrl}/rest/v1/units?building_id=eq.${b.id}&select=id`, { headers: adminHeaders });
+        const units = await unitsRes.json().catch(() => []);
+        for (const u of units) {
+          // Capturer les locataires liés avant que la suppression de
+          // l'unité ne fasse disparaître leur bail en cascade.
+          const leasesRes = await fetch(`${supabaseUrl}/rest/v1/leases?unit_id=eq.${u.id}&select=tenant_id`, { headers: adminHeaders });
+          const leases = await leasesRes.json().catch(() => []);
+
+          const woRes = await fetch(`${supabaseUrl}/rest/v1/work_orders?unit_id=eq.${u.id}&select=id`, { headers: adminHeaders });
+          const workOrders = await woRes.json().catch(() => []);
+          for (const wo of workOrders) await del("expenses", `work_order_id=eq.${wo.id}`);
+          await del("work_orders", `unit_id=eq.${u.id}`);
+          await del("service_requests", `unit_id=eq.${u.id}`);
+          await del("units", `id=eq.${u.id}`); // cascade : leases -> payments
+
+          for (const l of leases) {
+            if (!l.tenant_id) continue;
+            const tenantRes = await fetch(`${supabaseUrl}/rest/v1/tenants?id=eq.${l.tenant_id}&select=id,user_id`, { headers: adminHeaders });
+            const [tenant] = await tenantRes.json().catch(() => [null]);
+            if (tenant) {
+              await del("tenants", `id=eq.${tenant.id}`);
+              if (tenant.user_id) await deleteAuthUser(tenant.user_id);
+            }
+          }
+        }
+        await del("buildings", `id=eq.${b.id}`);
+      }
+      await del("owners", `id=eq.${owner_id}`);
+      if (owner.user_id) await deleteAuthUser(owner.user_id);
+
+      await logAudit("owner.delete_cascade", "owners", owner_id, { summary });
+      return new Response(JSON.stringify({ ok: true, summary }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (action === "create_owner") {
       const { full_name, email, phone, company_name, management_rate, spending_cap } = body;
       if (!full_name || !email) {
