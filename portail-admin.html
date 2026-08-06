@@ -160,10 +160,8 @@
   </div>
 
   <h1 style="margin-top:40px;font-size:22px;">Journal d'audit</h1>
-  <p class="subtitle" style="margin-bottom:16px;">Dernières décisions et actions sensibles — 100 plus récentes</p>
-  <table><thead><tr><th>Date</th><th>Acteur</th><th>Action</th><th>Détails</th></tr></thead>
-    <tbody id="audit-log-body"><tr class="empty-row"><td colspan="4">Chargement...</td></tr></tbody>
-  </table>
+  <p class="subtitle" style="margin-bottom:16px;">Dernières décisions et actions sensibles — 100 plus récentes, classées par catégorie</p>
+  <div id="audit-log-groups"><p class="subtitle">Chargement...</p></div>
 
   <h1 style="margin-top:40px;font-size:22px;">Travailleurs — vérification</h1>
   <p class="subtitle" style="margin-bottom:16px;">Un travailleur non conforme (licence RBQ ou assurance manquante/expirée) ne peut pas être assigné à un travail — blocage automatique en temps réel</p>
@@ -666,6 +664,15 @@ const auditActionLabel = {
   'work_order.create': 'Travail créé', 'work_order.reassign': 'Travail réassigné', 'work_order.complete': 'Travail complété',
   'prospect.stage_change': 'Statut prospect modifié', 'anomaly.update': 'Anomalie mise à jour',
 };
+const auditEntityLabel = {
+  owners: 'Propriétaires', buildings: 'Immeubles', units: 'Unités', tenants: 'Locataires',
+  work_orders: 'Travaux', service_requests: 'Demandes de service', approvals: 'Approbations',
+  prospects: 'Prospects', leases: 'Baux', payments: 'Paiements', workers: 'Travailleurs (répertoire)',
+  autre: 'Autre',
+};
+
+let auditLogData = [];
+const auditGroupsOpen = new Set();
 
 async function loadAuditLog(){
   const { data } = await supabaseClient
@@ -673,18 +680,53 @@ async function loadAuditLog(){
     .select('*')
     .order('created_at', { ascending: false })
     .limit(100);
-  const body = document.getElementById('audit-log-body');
-  if(!data || !data.length){
-    body.innerHTML = '<tr class="empty-row"><td colspan="4">Aucune entrée.</td></tr>';
+  auditLogData = data || [];
+  renderAuditGroups();
+}
+
+function renderAuditGroups(){
+  const container = document.getElementById('audit-log-groups');
+  if(!auditLogData.length){
+    container.innerHTML = '<p class="subtitle">Aucune entrée.</p>';
     return;
   }
-  body.innerHTML = data.map(a => `
-    <tr>
-      <td>${new Date(a.created_at).toLocaleString('fr-CA')}</td>
-      <td>${esc(a.actor_type)}</td>
-      <td>${esc(auditActionLabel[a.action] || a.action)}</td>
-      <td style="font-size:12px;">${esc(JSON.stringify(a.details || {}))}</td>
-    </tr>`).join('');
+  const groups = {};
+  for(const a of auditLogData){
+    const key = a.entity_type || 'autre';
+    (groups[key] ??= []).push(a);
+  }
+  const order = Object.keys(groups).sort((x, y) => groups[y].length - groups[x].length);
+  container.innerHTML = order.map(key => {
+    const items = groups[key];
+    const label = auditEntityLabel[key] || key;
+    const isOpen = auditGroupsOpen.has(key);
+    const rows = items.map(a => `
+      <tr>
+        <td>${new Date(a.created_at).toLocaleString('fr-CA')}</td>
+        <td>${esc(a.actor_type)}</td>
+        <td>${esc(auditActionLabel[a.action] || a.action)}</td>
+        <td style="font-size:12px;">${esc(JSON.stringify(a.details || {}))}</td>
+      </tr>`).join('');
+    return `
+      <div style="border:1px solid var(--line);margin-bottom:10px;background:var(--paper-2);">
+        <button onclick="toggleAuditGroup('${key}')" style="width:100%;display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:none;border:none;cursor:pointer;font-family:'Inter',sans-serif;font-size:13.5px;text-align:left;">
+          <span>${esc(label)} <span style="color:var(--muted);font-size:12px;">(${items.length})</span></span>
+          <span style="color:var(--muted);">${isOpen ? '▾' : '▸'}</span>
+        </button>
+        ${isOpen ? `
+        <div style="max-height:320px;overflow-y:auto;border-top:1px solid var(--line);">
+          <table style="border:none;"><thead><tr><th>Date</th><th>Acteur</th><th>Action</th><th>Détails</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+function toggleAuditGroup(key){
+  if(auditGroupsOpen.has(key)) auditGroupsOpen.delete(key);
+  else auditGroupsOpen.add(key);
+  renderAuditGroups();
 }
 
 let workersDirectory = [];
