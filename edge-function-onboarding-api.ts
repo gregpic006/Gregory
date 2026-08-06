@@ -71,6 +71,57 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ units: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Retrouve le courriel de connexion actuel d'un propriétaire à partir
+    // de son owner_id — utile quand on ne sait pas si l'owner a été créé
+    // sous un courriel différent de celui attendu (ex: réutilisation d'une
+    // ancienne ligne de données de démonstration).
+    if (action === "get_owner_login") {
+      const { owner_id } = body;
+      if (!owner_id) {
+        return new Response(JSON.stringify({ error: "owner_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      const ownerRes = await fetch(`${supabaseUrl}/rest/v1/owners?id=eq.${owner_id}&select=id,full_name,user_id`, { headers: adminHeaders });
+      const [owner] = await ownerRes.json().catch(() => [null]);
+      if (!owner) {
+        return new Response(JSON.stringify({ error: "Propriétaire introuvable" }), { status: 404, headers: corsHeaders });
+      }
+      let email: string | null = null;
+      if (owner.user_id) {
+        const userRes = await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${owner.user_id}&select=email`, { headers: adminHeaders });
+        const [userRow] = await userRes.json().catch(() => [null]);
+        email = userRow?.email ?? null;
+      }
+      return new Response(JSON.stringify({ owner_id: owner.id, full_name: owner.full_name, user_id: owner.user_id, email }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Change le courriel de connexion ET remet un nouveau mot de passe
+    // temporaire pour un propriétaire déjà créé — utile pour corriger une
+    // ligne réutilisée depuis une ancienne donnée de démonstration sans
+    // devoir migrer tout son immeuble/unités vers un nouveau compte.
+    if (action === "update_owner_login") {
+      const { owner_id, email } = body;
+      if (!owner_id || !email) {
+        return new Response(JSON.stringify({ error: "owner_id et email requis" }), { status: 400, headers: corsHeaders });
+      }
+      const ownerRes = await fetch(`${supabaseUrl}/rest/v1/owners?id=eq.${owner_id}&select=id,user_id`, { headers: adminHeaders });
+      const [owner] = await ownerRes.json().catch(() => [null]);
+      if (!owner || !owner.user_id) {
+        return new Response(JSON.stringify({ error: "Propriétaire ou compte introuvable" }), { status: 404, headers: corsHeaders });
+      }
+      const password = randomPassword();
+      const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users/${owner.user_id}`, {
+        method: "PUT",
+        headers: adminHeaders,
+        body: JSON.stringify({ email, password, email_confirm: true }),
+      });
+      const authData = await authRes.json().catch(() => ({}));
+      if (!authRes.ok) {
+        return new Response(JSON.stringify({ error: authData.msg || authData.error_description || "Impossible de mettre à jour le compte" }), { status: 400, headers: corsHeaders });
+      }
+      await logAudit("owner.update_login", "owners", owner_id, { new_email: email });
+      return new Response(JSON.stringify({ ok: true, email, temp_password: password }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (action === "find_owner_by_email") {
       const res = await fetch(`${supabaseUrl}/rest/v1/users?email=eq.${encodeURIComponent(body.email)}&role=eq.owner&select=id`, { headers: adminHeaders });
       const [userRow] = await res.json();
