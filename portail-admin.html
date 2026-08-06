@@ -149,8 +149,8 @@
         <select id="ob-tenant-unit" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir un immeuble d'abord —</option></select>
       </div>
       <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom complet</label><input type="text" id="ob-tenant-name" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel</label><input type="email" id="ob-tenant-email" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone</label><input type="text" id="ob-tenant-phone" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel (optionnel — vide = aucun compte de connexion créé)</label><input type="email" id="ob-tenant-email" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone (optionnel)</label><input type="text" id="ob-tenant-phone" style="padding:8px;border:1px solid var(--line);"></div>
       <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Loyer mensuel ($)</label><input type="number" id="ob-tenant-rent" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
       <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Début du bail</label><input type="date" id="ob-tenant-start" style="padding:8px;border:1px solid var(--line);"></div>
       <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fin du bail (optionnel)</label><input type="date" id="ob-tenant-end" style="padding:8px;border:1px solid var(--line);"></div>
@@ -650,11 +650,11 @@ async function obCreateTenant(){
   const start_date = document.getElementById('ob-tenant-start').value;
   const end_date = document.getElementById('ob-tenant-end').value || null;
   const msg = document.getElementById('ob-tenant-msg');
-  if(!unit_id || !full_name || !email || !monthly_rent || !start_date){ msg.textContent = 'Tous les champs sauf téléphone et fin de bail sont requis.'; return; }
+  if(!unit_id || !full_name || !monthly_rent || !start_date){ msg.textContent = 'Unité, nom, loyer et date de début sont requis.'; return; }
   msg.textContent = 'Création en cours...';
-  const res = await callOnboardingApi({ action: 'create_tenant', full_name, email, phone, unit_id, monthly_rent, start_date, end_date });
+  const res = await callOnboardingApi({ action: 'create_tenant', full_name, email: email || null, phone, unit_id, monthly_rent, start_date, end_date });
   if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
-  msg.textContent = 'Compte créé et identifiants envoyés à ' + email + ' !';
+  msg.textContent = email ? ('Compte créé et identifiants envoyés à ' + email + ' !') : 'Locataire ajouté (dossier seulement, aucun compte de connexion créé).';
   document.getElementById('ob-tenant-name').value = '';
   document.getElementById('ob-tenant-email').value = '';
   document.getElementById('ob-tenant-phone').value = '';

@@ -229,29 +229,39 @@ Deno.serve(async (req) => {
 
     if (action === "create_tenant") {
       const { full_name, email, phone, unit_id, monthly_rent, start_date, end_date } = body;
-      if (!full_name || !email || !unit_id || !monthly_rent || !start_date) {
-        return new Response(JSON.stringify({ error: "Champs manquants (nom, courriel, unité, loyer, date de début)" }), { status: 400, headers: corsHeaders });
-      }
-      const password = randomPassword();
-      const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
-        method: "POST",
-        headers: adminHeaders,
-        body: JSON.stringify({ email, password, email_confirm: true }),
-      });
-      const authData = await authRes.json();
-      if (!authRes.ok || !authData.id) {
-        return new Response(JSON.stringify({ error: authData.msg || authData.error_description || "Impossible de créer le compte" }), { status: 400, headers: corsHeaders });
+      if (!full_name || !unit_id || !monthly_rent || !start_date) {
+        return new Response(JSON.stringify({ error: "Champs manquants (nom, unité, loyer, date de début)" }), { status: 400, headers: corsHeaders });
       }
 
-      // Le déclencheur d'inscription met "owner" par défaut — on corrige pour "tenant".
-      await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${authData.id}`, {
-        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ role: "tenant" }),
-      });
+      // Le courriel est optionnel : un locataire réel dont on gère le
+      // logement n'a pas nécessairement été informé de ce système et n'a
+      // donc pas à recevoir un compte/courriel de bienvenue. Sans courriel,
+      // on enregistre seulement le dossier (nom, bail) sans compte Auth.
+      let authUserId: string | null = null;
+      let tempPassword: string | null = null;
+      if (email) {
+        tempPassword = randomPassword();
+        const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+          method: "POST",
+          headers: adminHeaders,
+          body: JSON.stringify({ email, password: tempPassword, email_confirm: true }),
+        });
+        const authData = await authRes.json();
+        if (!authRes.ok || !authData.id) {
+          return new Response(JSON.stringify({ error: authData.msg || authData.error_description || "Impossible de créer le compte" }), { status: 400, headers: corsHeaders });
+        }
+        authUserId = authData.id;
+
+        // Le déclencheur d'inscription met "owner" par défaut — on corrige pour "tenant".
+        await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${authUserId}`, {
+          method: "PATCH", headers: adminHeaders, body: JSON.stringify({ role: "tenant" }),
+        });
+      }
 
       const tenantRes = await fetch(`${supabaseUrl}/rest/v1/tenants`, {
         method: "POST",
         headers: { ...adminHeaders, Prefer: "return=representation" },
-        body: JSON.stringify({ user_id: authData.id, full_name, email, phone: phone || null }),
+        body: JSON.stringify({ user_id: authUserId, full_name, email: email || null, phone: phone || null }),
       });
       const [tenant] = await tenantRes.json();
 
@@ -265,11 +275,13 @@ Deno.serve(async (req) => {
         method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "occupied" }),
       });
 
-      await sendEmail(email, "Bienvenue sur Portail — ton accès locataire",
-        `Bonjour ${full_name},\n\nTon compte locataire Portail est prêt.\n\nPortail : ${TENANT_PORTAL_URL}\nCourriel : ${email}\nMot de passe temporaire : ${password}\n\nConnecte-toi pour voir ton bail, tes paiements et faire une demande de service. Tu peux changer ton mot de passe via "Mot de passe oublié" sur la page de connexion.\n\nL'équipe Portail`);
+      if (email) {
+        await sendEmail(email, "Bienvenue sur Portail — ton accès locataire",
+          `Bonjour ${full_name},\n\nTon compte locataire Portail est prêt.\n\nPortail : ${TENANT_PORTAL_URL}\nCourriel : ${email}\nMot de passe temporaire : ${tempPassword}\n\nConnecte-toi pour voir ton bail, tes paiements et faire une demande de service. Tu peux changer ton mot de passe via "Mot de passe oublié" sur la page de connexion.\n\nL'équipe Portail`);
+      }
 
-      await logAudit("tenant.create", "tenants", tenant?.id ?? null, { email, unit_id });
-      return new Response(JSON.stringify({ ok: true, tenant_id: tenant?.id, temp_password: password }), { status: 200, headers: corsHeaders });
+      await logAudit("tenant.create", "tenants", tenant?.id ?? null, { email: email || null, unit_id, has_login: !!authUserId });
+      return new Response(JSON.stringify({ ok: true, tenant_id: tenant?.id, temp_password: tempPassword }), { status: 200, headers: corsHeaders });
     }
 
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
