@@ -18,7 +18,8 @@ function checkSafetyOverride(description: string) {
 }
 
 const MODEL_VERSION = "claude-haiku-4-5-20251001";
-const PROMPT_VERSION = "service-request-v2-enriched";
+const PROMPT_VERSION = "service-request-v3-photos";
+const MAX_PHOTOS = 5;
 
 Deno.serve(async (req) => {
   try {
@@ -94,10 +95,32 @@ Deno.serve(async (req) => {
     let aiUsage: { input_tokens?: number; output_tokens?: number } | null = null;
     const aiStartedAt = Date.now();
 
+    // Récupère les photos jointes par le locataire (si présentes) pour les
+    // envoyer à l'IA en plus du texte — c'est ce qui manquait pour que
+    // l'analyse porte vraiment sur "texte ET photos", pas juste le texte.
+    const photoPaths: string[] = Array.isArray(record.photo_urls) ? record.photo_urls.slice(0, MAX_PHOTOS) : [];
+    const photoBlocks: Record<string, unknown>[] = [];
+    for (const path of photoPaths) {
+      try {
+        const fileRes = await fetch(`${supabaseUrl}/storage/v1/object/service-request-photos/${path}`, {
+          headers: { Authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey ?? "" },
+        });
+        if (!fileRes.ok) continue;
+        const mediaType = fileRes.headers.get("content-type") || "image/jpeg";
+        const bytes = new Uint8Array(await fileRes.arrayBuffer());
+        let binary = "";
+        for (const b of bytes) binary += String.fromCharCode(b);
+        photoBlocks.push({ type: "image", source: { type: "base64", media_type: mediaType, data: btoa(binary) } });
+      } catch (e) {
+        console.error("Failed to fetch service request photo", path, e);
+      }
+    }
+
     try {
       const prompt = `Tu es l'assistant technique d'une entreprise de gestion immobilière résidentielle au Québec. Un locataire vient de soumettre une demande de service pour son logement.
 
 Description du problème: ${record.description}
+${photoBlocks.length ? `\n${photoBlocks.length} photo(s) du problème sont jointes ci-dessus — utilise-les pour affiner ton diagnostic (gravité, étendue, type d'appareil ou de matériau visible, etc.), pas seulement le texte.` : "Aucune photo n'a été jointe."}
 
 Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec exactement ces champs:
 {
@@ -106,9 +129,9 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
   "urgency": "le niveau d'urgence parmi: faible, normal, élevé, urgence",
   "cost_min": un nombre représentant l'estimation basse du coût de réparation en dollars canadiens, basée sur les tarifs typiques au Québec,
   "cost_max": un nombre représentant l'estimation haute du coût de réparation en dollars canadiens,
-  "confidence": un nombre entre 0 et 100 représentant ta confiance dans cette évaluation (sois honnête — une description vague doit donner une confiance basse),
-  "missing_info": "ce qui manque pour évaluer avec certitude (ex: 'photo du bris', 'âge de l'appareil'), ou null si rien ne manque",
-  "photos_needed": true ou false selon si des photos aideraient à confirmer le diagnostic,
+  "confidence": un nombre entre 0 et 100 représentant ta confiance dans cette évaluation (sois honnête — une description vague sans photo doit donner une confiance basse ; des photos claires peuvent la justifier plus haute),
+  "missing_info": "ce qui manque pour évaluer avec certitude (ex: 'photo du bris', 'âge de l'appareil') — ne redemande jamais une photo déjà fournie ci-dessus, ou null si rien ne manque",
+  "photos_needed": true ou false selon si des photos additionnelles aideraient à confirmer le diagnostic (toujours false si des photos suffisantes sont déjà jointes),
   "recommended_trade": "le métier à contacter en priorité (plombier, électricien, technicien CVC, ébéniste, etc.)",
   "immediate_action": "une action simple et sécuritaire que le locataire peut faire tout de suite en attendant l'intervention (ex: 'fermer le robinet d'arrêt sous l'évier'), ou null si aucune action n'est nécessaire ou sécuritaire",
   "risk_if_no_action": "le risque concret en une phrase si la situation n'est pas traitée rapidement"
@@ -123,8 +146,8 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
         },
         body: JSON.stringify({
           model: MODEL_VERSION,
-          max_tokens: 700,
-          messages: [{ role: "user", content: prompt }],
+          max_tokens: 800,
+          messages: [{ role: "user", content: photoBlocks.length ? [...photoBlocks, { type: "text", text: prompt }] : prompt }],
         }),
       });
 
@@ -188,6 +211,39 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
     if (!patchRes.ok || !patchData || patchData.length === 0) {
       console.error("Failed to update service_requests", record.id, patchRes.status, JSON.stringify(patchData));
       return new Response(JSON.stringify({ ok: false, error: "db_update_failed", status: patchRes.status, detail: patchData }), { status: 500 });
+    }
+
+    // Suivi automatique au locataire : instruction de sécurité temporaire
+    // et/ou demande d'information manquante — jusqu'ici ces champs étaient
+    // calculés mais seulement visibles par l'admin, jamais transmis au
+    // locataire qui en a pourtant besoin en premier.
+    if ((aiImmediateAction || aiMissingInfo) && resendKey) {
+      try {
+        const tenantRes = await fetch(`${supabaseUrl}/rest/v1/tenants?id=eq.${record.tenant_id}&select=email,full_name`, { headers: adminHeaders });
+        const [tenant] = await tenantRes.json().catch(() => [null]);
+        if (tenant?.email) {
+          const lines = [`Bonjour ${tenant.full_name?.split(" ")[0] || ""},`, "", "Merci pour ta demande de service — voici où ça en est."];
+          if (aiImmediateAction) {
+            lines.push("", `En attendant l'intervention, voici ce que tu peux faire dès maintenant : ${aiImmediateAction}`);
+          }
+          if (aiMissingInfo) {
+            lines.push("", `Pour traiter ta demande plus rapidement, pourrais-tu nous fournir : ${aiMissingInfo} ? Tu peux répondre directement à ce courriel ou ajouter une photo depuis ton portail locataire.`);
+          }
+          lines.push("", "L'équipe Portail");
+          await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              from: "Portail <onboarding@resend.dev>",
+              to: [tenant.email],
+              subject: "Ta demande de service — suivi",
+              text: lines.join("\n"),
+            }),
+          });
+        }
+      } catch (e) {
+        console.error("Failed to send tenant follow-up email", e);
+      }
     }
 
     // Traçabilité de cet appel IA — indépendante du drapeau ai_needs_review

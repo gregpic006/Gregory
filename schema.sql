@@ -2149,6 +2149,36 @@ create policy "owner delete own documents" on storage.objects for delete
   using (bucket_id = 'documents' and (storage.foldername(name))[1] = auth_owner_id()::text);
 
 -- ============================================================
+-- STOCKAGE — photos des demandes de service (avant/après travaux)
+-- ============================================================
+-- Bucket privé, classé par tenant_id (comme "documents" l'est par
+-- owner_id). Un locataire ne peut écrire/lire que dans son propre
+-- dossier ; un propriétaire peut lire les photos des locataires de ses
+-- propres unités (mais jamais en écrire) ; l'admin a accès à tout.
+alter table service_requests add column if not exists photo_urls jsonb default '[]'::jsonb;
+alter table work_orders add column if not exists photo_before_urls jsonb default '[]'::jsonb;
+alter table work_orders add column if not exists photo_after_urls jsonb default '[]'::jsonb;
+
+create or replace function can_access_tenant_files(target_tenant_id uuid)
+returns boolean language sql stable security definer set search_path = public set row_security = off
+as $$
+  select target_tenant_id = auth_tenant_id()
+    or exists (select 1 from leases where tenant_id = target_tenant_id and unit_id in (select owned_unit_ids()))
+    or auth_is_admin()
+$$;
+
+insert into storage.buckets (id, name, public)
+values ('service-request-photos', 'service-request-photos', false)
+on conflict (id) do nothing;
+
+create policy "tenant upload own service request photos" on storage.objects for insert
+  with check (bucket_id = 'service-request-photos' and (storage.foldername(name))[1] = auth_tenant_id()::text);
+create policy "access service request photos" on storage.objects for select
+  using (bucket_id = 'service-request-photos' and can_access_tenant_files(((storage.foldername(name))[1])::uuid));
+create policy "tenant delete own service request photos" on storage.objects for delete
+  using (bucket_id = 'service-request-photos' and (storage.foldername(name))[1] = auth_tenant_id()::text);
+
+-- ============================================================
 -- NOTE (résolue) — architecture des accès admin
 -- ============================================================
 -- Cette note datait d'avant la mise en place de l'architecture actuelle

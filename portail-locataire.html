@@ -160,7 +160,11 @@
               <label>Décris le problème</label>
               <textarea id="request-message" required placeholder="Ex: Le chauffe-eau ne chauffe plus."></textarea>
             </div>
-            <button class="submit" type="submit">Envoyer la demande</button>
+            <div class="f">
+              <label>Photos (optionnel, mais ça aide beaucoup à diagnostiquer rapidement)</label>
+              <input type="file" id="request-photos" accept="image/*" multiple>
+            </div>
+            <button class="submit" type="submit" id="request-submit-btn">Envoyer la demande</button>
             <p class="form-note" id="request-note"></p>
           </form>
         </div>
@@ -348,6 +352,7 @@ async function loadRequests(){
 async function submitServiceRequest(event){
   event.preventDefault();
   const noteEl = document.getElementById('request-note');
+  const btn = document.getElementById('request-submit-btn');
   if(!currentLease?.units?.id){
     noteEl.textContent = "Impossible d'envoyer : aucun logement associé à ton compte.";
     noteEl.style.color = 'var(--rust)';
@@ -355,10 +360,33 @@ async function submitServiceRequest(event){
     return;
   }
   const message = document.getElementById('request-message').value;
+  const fileInput = document.getElementById('request-photos');
+  const files = Array.from(fileInput.files || []);
+
+  btn.disabled = true;
+  btn.textContent = files.length ? 'Envoi des photos...' : 'Envoi...';
+
+  const photoUrls = [];
+  for (const file of files) {
+    const path = `${tenantRecord.id}/${Date.now()}_${file.name}`;
+    const { error: uploadError } = await supabaseClient.storage.from('service-request-photos').upload(path, file);
+    if (uploadError) {
+      noteEl.textContent = "Erreur lors de l'envoi d'une photo : " + uploadError.message;
+      noteEl.style.color = 'var(--rust)';
+      noteEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Envoyer la demande';
+      return;
+    }
+    photoUrls.push(path);
+  }
+
+  btn.textContent = 'Envoi...';
   const { error } = await supabaseClient.from('service_requests').insert({
     unit_id: currentLease.units.id,
     tenant_id: tenantRecord.id,
     description: message,
+    photo_urls: photoUrls,
   });
   if(error){
     noteEl.textContent = "Une erreur est survenue, réessaie.";
@@ -367,9 +395,12 @@ async function submitServiceRequest(event){
     noteEl.textContent = "Demande envoyée !";
     noteEl.style.color = 'var(--sage)';
     document.getElementById('request-message').value = '';
+    fileInput.value = '';
     await loadRequests();
   }
   noteEl.style.display = 'block';
+  btn.disabled = false;
+  btn.textContent = 'Envoyer la demande';
 }
 
 function showTab(id){
