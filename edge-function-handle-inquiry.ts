@@ -75,7 +75,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: "Portail <onboarding@resend.dev>",
+        from: "Portail <onboarding@mail.portailgestion.ca>",
         to: [record.email],
         subject: parsed.reply_subject,
         text: replyBody,

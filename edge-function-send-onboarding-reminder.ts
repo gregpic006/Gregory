@@ -119,7 +119,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
       method: "POST",
       headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: "Portail <onboarding@resend.dev>",
+        from: "Portail <onboarding@mail.portailgestion.ca>",
         to: [userRow.email],
         subject: parsed.subject,
         text: parsed.body,

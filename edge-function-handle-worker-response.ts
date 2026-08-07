@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
         await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ from: "Portail <onboarding@resend.dev>", to: adminEmails, subject, text }),
+          body: JSON.stringify({ from: "Portail <onboarding@mail.portailgestion.ca>", to: adminEmails, subject, text }),
         });
       }
     };

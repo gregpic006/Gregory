@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
             method: "POST",
             headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              from: "Portail <onboarding@resend.dev>",
+              from: "Portail <onboarding@mail.portailgestion.ca>",
               to: adminEmails,
               subject: `URGENCE SÉCURITÉ — demande de service #${String(record.id).slice(0, 8)}`,
               text: `Une demande de service a déclenché une alerte de sécurité automatique (règle déterministe, indépendante de l'IA).\n\nMotif(s) : ${matchedRules.map((r) => r.label).join(", ")}\n\nDescription du locataire : ${record.description}\n\nCette demande a été marquée "urgence" automatiquement. Veuillez intervenir immédiatement.`,
@@ -234,7 +234,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
             method: "POST",
             headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              from: "Portail <onboarding@resend.dev>",
+              from: "Portail <onboarding@mail.portailgestion.ca>",
               to: [tenant.email],
               subject: "Ta demande de service — suivi",
               text: lines.join("\n"),

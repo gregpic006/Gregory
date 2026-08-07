@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
           method: "POST",
           headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            from: "Portail <onboarding@resend.dev>",
+            from: "Portail <onboarding@mail.portailgestion.ca>",
             to: adminEmails,
             subject: `Aucun travailleur disponible — ${address || ""}, unité ${unit?.unit_number || ""}`,
             text: `Aucun travailleur n'a répondu dans les délais pour ce travail (${workOrder.description}) et la liste des travailleurs disponibles est épuisée. Une assignation manuelle est requise dans le portail admin.`,
@@ -94,7 +94,7 @@ L'équipe Portail`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: "Portail <onboarding@resend.dev>",
+        from: "Portail <onboarding@mail.portailgestion.ca>",
         to: [worker.email],
         subject,
         text: bodyText,

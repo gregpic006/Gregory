@@ -94,7 +94,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: "Portail <onboarding@resend.dev>",
+        from: "Portail <onboarding@mail.portailgestion.ca>",
         to: [tenant.email],
         subject: parsed.subject,
         text: parsed.body,

@@ -126,7 +126,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
             method: "POST",
             headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              from: "Portail <onboarding@resend.dev>",
+              from: "Portail <onboarding@mail.portailgestion.ca>",
               to: adminEmails,
               subject: `⚠ Signal d'insatisfaction à traiter (${subject_type === "owner" ? "propriétaire" : "locataire"})`,
               text: `Un signal d'insatisfaction a été détecté et nécessite ton attention.\n\nSource : ${source}\nExtrait : "${content.slice(0, 500)}"\n\nAnalyse IA (sentiment : ${sentiment}) : ${parsed.reasoning || "aucune explication fournie"}\n\nCeci est une classification automatique à titre indicatif — la décision d'action revient à l'équipe. Voir la section "Signaux d'insatisfaction" du portail admin.`,

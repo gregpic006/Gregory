@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
         method: "POST",
         headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          from: "Portail <onboarding@resend.dev>",
+          from: "Portail <onboarding@mail.portailgestion.ca>",
           to: [visit.prospect_email],
           subject: `Rappel — ta visite de demain`,
           text: `Bonjour ${visit.prospect_name},\n\nPetit rappel pour ta visite prévue :\n${address || ""}, unité ${unit?.unit_number || ""}\n${whenLabel}\n\nUn empêchement ? Avise-nous ici : ${confirmUrl}\n\nL'équipe Portail`,

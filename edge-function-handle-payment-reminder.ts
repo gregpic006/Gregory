@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
             method: "POST",
             headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              from: "Portail <onboarding@resend.dev>",
+              from: "Portail <onboarding@mail.portailgestion.ca>",
               to: adminEmails,
               subject: `Suivi humain requis — loyer impayé, unité ${unit?.unit_number || ""}`,
               text: `${tenant.full_name} (${tenant.email}) n'a pas payé le loyer dû le ${payment.due_date} (${payment.amount} $) malgré 3 rappels automatiques envoyés à ${address || ""}, unité ${unit?.unit_number || ""}.\n\nAucun autre rappel automatique ne sera envoyé à ce locataire pour ce paiement. Un suivi humain (appel, entente, mise en demeure si applicable) est requis.`,
@@ -130,7 +130,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: "Portail <onboarding@resend.dev>",
+        from: "Portail <onboarding@mail.portailgestion.ca>",
         to: [tenant.email],
         subject: parsed.subject,
         text: parsed.body,

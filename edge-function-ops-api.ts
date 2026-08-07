@@ -259,7 +259,7 @@ Deno.serve(async (req) => {
             method: "POST",
             headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              from: "Portail <onboarding@resend.dev>",
+              from: "Portail <onboarding@mail.portailgestion.ca>",
               to: [tenant.email],
               subject: `Ta réparation est complétée — confirme que tout est réglé`,
               text: `Bonjour ${tenant.full_name},\n\nLa réparation suivante a été complétée à ton logement (${address || ""}, unité ${wo.units?.unit_number || ""}) :\n${wo.description}\n\nPeux-tu confirmer que tout est réglé ? ${confirmUrl}\n\nSi rien ne se passe d'ici quelques jours, on considérera le dossier réglé automatiquement — mais si le problème persiste, dis-le-nous via ce lien.\n\nL'équipe Portail`,
@@ -348,7 +348,7 @@ Deno.serve(async (req) => {
         method: "POST",
         headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          from: "Portail <onboarding@resend.dev>",
+          from: "Portail <onboarding@mail.portailgestion.ca>",
           to: [prospect_email],
           subject: `Proposition de visite — ${unit?.buildings?.address || ""}`,
           text: `Bonjour ${prospect_name},\n\nNous te proposons une visite du logement suivant :\n${unit?.buildings?.address || ""}, unité ${unit?.unit_number || ""}\nDate et heure proposées : ${whenLabel}\n\nMerci de confirmer, refuser ou proposer un autre moment via ce lien : ${confirmUrl}\n\nL'équipe Portail`,
