@@ -280,6 +280,10 @@
       <section id="reports" class="section">
         <div class="toolbar"><h2>Rapports mensuels</h2></div>
         <div id="reports-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
+        <div class="toolbar" style="margin-top:32px;"><h2>Factures — frais de gestion Portail</h2></div>
+        <p style="color:var(--muted);font-size:13.5px;margin-bottom:14px;">Frais de gestion et de coordination des travaux, déjà déduits du montant net qui te revient chaque mois — voici le détail formel pour ta comptabilité.</p>
+        <div id="invoices-body-owner"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
       </section>
     </main>
   </div>
@@ -417,6 +421,7 @@ async function loadBuildings(){
   await loadDocuments();
   await loadMessages();
   await loadReports();
+  await loadOwnerInvoices();
   await loadRentals();
 }
 
@@ -856,6 +861,34 @@ async function loadReports(){
         <ul style="margin:6px 0 0 18px;padding:0;">${r.over_estimate_work_orders.map(w => `<li>${esc(w.description)} — estimé ${Number(w.estimated_cost).toLocaleString('fr-CA')} $, réel ${Number(w.actual_cost).toLocaleString('fr-CA')} $ (+${Number(w.overage).toLocaleString('fr-CA')} $)</li>`).join('')}</ul>
       </details>` : ''}
       <span style="font-size:11.5px;color:var(--muted);">Rapprochement bancaire : ${r.bank_reconciliation_status === 'non_connecte' ? 'aucun compte bancaire lié pour l\'instant' : esc(r.bank_reconciliation_status)}</span>
+    </div>`).join('');
+}
+
+async function loadOwnerInvoices(){
+  const { data } = await supabaseClient
+    .from('invoices')
+    .select('*')
+    .eq('owner_id', ownerRecord.id)
+    .order('period_start', { ascending: false });
+
+  const body = document.getElementById('invoices-body-owner');
+  if(!data || !data.length){
+    body.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune facture pour l\'instant.</p>';
+    return;
+  }
+  const invoiceStatusLabel = { issued: 'Émise', paid: 'Payée' };
+  body.innerHTML = data.map(inv => `
+    <div class="approve-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+      <b>${esc(inv.invoice_number)}</b>
+      <span style="color:var(--muted);font-size:12.5px;">${esc(inv.period_start)} au ${esc(inv.period_end)} — ${invoiceStatusLabel[inv.status] || esc(inv.status)}</span>
+      <div style="font-size:12.5px;">
+        Frais de gestion : ${Number(inv.management_fee_amount).toLocaleString('fr-CA')} $<br>
+        Frais de coordination des travaux : ${Number(inv.coordination_fees_amount).toLocaleString('fr-CA')} $<br>
+        Sous-total : ${Number(inv.subtotal).toLocaleString('fr-CA')} $<br>
+        ${Number(inv.gst_amount) > 0 ? `TPS : ${Number(inv.gst_amount).toLocaleString('fr-CA')} $<br>` : ''}
+        ${Number(inv.qst_amount) > 0 ? `TVQ : ${Number(inv.qst_amount).toLocaleString('fr-CA')} $<br>` : ''}
+        <b>Total : ${Number(inv.total_amount).toLocaleString('fr-CA')} $</b>
+      </div>
     </div>`).join('');
 }
 

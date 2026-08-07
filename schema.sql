@@ -2232,6 +2232,55 @@ $$;
 select cron.schedule('daily-flinks-sync', '0 10 * * *', $$select trigger_flinks_daily_sync()$$);
 
 -- ============================================================
+-- FACTURATION — Portail vers propriétaire
+-- ============================================================
+-- Formalise en vraies factures ce qui n'était jusqu'ici qu'un calcul
+-- interne (management_fee et coordination_fee déjà soustraits du
+-- net_due_to_owner dans les rapports mensuels — voir
+-- generate-owner-report.ts). Les numéros de taxes sont vides tant que
+-- Portail n'est pas incorporé (prévu 15 août 2026) : les taxes ne
+-- s'appliquent automatiquement que lorsque les numéros sont renseignés
+-- dans company_settings, sans changement de code à faire ce jour-là.
+create table if not exists company_settings (
+  id boolean primary key default true check (id),
+  legal_name text default 'Portail',
+  address text,
+  gst_number text,
+  qst_number text,
+  gst_rate numeric(5,3) default 5.000,
+  qst_rate numeric(5,3) default 9.975,
+  updated_at timestamptz default now()
+);
+insert into company_settings (id) values (true) on conflict (id) do nothing;
+alter table company_settings enable row level security;
+create policy "admin manages company settings" on company_settings for all
+  using (auth_is_admin()) with check (auth_is_admin());
+create policy "anyone authenticated views company settings" on company_settings for select
+  using (auth.uid() is not null);
+
+create table if not exists invoices (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid references owners(id) on delete cascade,
+  invoice_number text not null unique,
+  period_start date not null,
+  period_end date not null,
+  management_fee_amount numeric(10,2) not null default 0,
+  coordination_fees_amount numeric(10,2) not null default 0,
+  subtotal numeric(10,2) not null default 0,
+  gst_amount numeric(10,2) not null default 0,
+  qst_amount numeric(10,2) not null default 0,
+  total_amount numeric(10,2) not null default 0,
+  status text default 'issued' check (status in ('issued','paid')),
+  created_at timestamptz default now(),
+  unique (owner_id, period_start, period_end)
+);
+alter table invoices enable row level security;
+create policy "admin manages invoices" on invoices for all
+  using (auth_is_admin()) with check (auth_is_admin());
+create policy "owner views own invoices" on invoices for select
+  using (owner_id = auth_owner_id());
+
+-- ============================================================
 -- NOTE (résolue) — architecture des accès admin
 -- ============================================================
 -- Cette note datait d'avant la mise en place de l'architecture actuelle

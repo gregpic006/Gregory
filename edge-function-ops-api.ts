@@ -402,6 +402,45 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ signed_url: `${supabaseUrl}/storage/v1${signed.signedURL}` }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    if (action === "get_company_settings") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/company_settings?id=eq.true&select=*`, { headers: adminHeaders });
+      const [settings] = await res.json().catch(() => [null]);
+      return new Response(JSON.stringify({ settings }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "update_company_settings") {
+      const { legal_name, address, gst_number, qst_number } = body;
+      await fetch(`${supabaseUrl}/rest/v1/company_settings?id=eq.true`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({
+          legal_name: legal_name || null, address: address || null,
+          gst_number: gst_number || null, qst_number: qst_number || null,
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      await logAudit("company_settings.updated", "company_settings", null, { gst_number: !!gst_number, qst_number: !!qst_number });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "list_invoices") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/invoices?select=*,owners(full_name)&order=period_end.desc`, { headers: adminHeaders });
+      return new Response(JSON.stringify({ invoices: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "mark_invoice_paid") {
+      const { invoice_id, paid } = body;
+      if (!invoice_id) {
+        return new Response(JSON.stringify({ error: "invoice_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/invoices?id=eq.${invoice_id}`, {
+        method: "PATCH", headers: adminHeaders,
+        body: JSON.stringify({ status: paid === false ? "issued" : "paid" }),
+      });
+      await logAudit(paid === false ? "invoice.reopened" : "invoice.marked_paid", "invoices", invoice_id, {});
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     if (action === "toggle_payment_reminder_pause") {
       const { payment_id, paused } = body;
       if (!payment_id) {

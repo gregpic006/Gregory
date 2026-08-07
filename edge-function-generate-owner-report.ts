@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
       .map((e: any) => ({ expense_id: e.id, description: e.description, amount: Number(e.amount), expense_date: e.expense_date }));
 
     const woRes = await fetch(
-      `${supabaseUrl}/rest/v1/work_orders?unit_id=in.${unitFilter}&select=id,description,status,created_at,estimated_cost`,
+      `${supabaseUrl}/rest/v1/work_orders?unit_id=in.${unitFilter}&select=id,description,status,created_at,estimated_cost,coordination_fee`,
       { headers: adminHeaders },
     );
     const workOrders = await woRes.json();
@@ -211,6 +211,44 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         prev_net_due_to_owner: prevReport?.net_due_to_owner ?? null,
       }),
     });
+
+    // ---- Facture Portail → propriétaire (frais de gestion + coordination) ----
+    // Ces montants sont déjà soustraits de net_due_to_owner ci-dessus ;
+    // la facture ne fait que les formaliser pour la comptabilité du
+    // propriétaire. Les taxes ne s'appliquent que si Portail a un numéro
+    // de TPS/TVQ enregistré dans company_settings (vide avant le 15 août
+    // 2026) — aucun changement de code à faire une fois incorporé.
+    const expensesWithWorkOrder = expenses.filter((e: any) => e.work_order_id && workOrdersById.has(e.work_order_id));
+    const coordinationFeesTotal = Math.round(
+      expensesWithWorkOrder.reduce((sum: number, e: any) => sum + Number(workOrdersById.get(e.work_order_id)?.coordination_fee || 0), 0) * 100,
+    ) / 100;
+
+    const settingsRes = await fetch(`${supabaseUrl}/rest/v1/company_settings?id=eq.true&select=*`, { headers: adminHeaders });
+    const [companySettings] = await settingsRes.json().catch(() => [null]);
+    const gstRate = companySettings?.gst_number ? Number(companySettings.gst_rate || 0) : 0;
+    const qstRate = companySettings?.qst_number ? Number(companySettings.qst_rate || 0) : 0;
+
+    const invoiceSubtotal = Math.round((managementFee + coordinationFeesTotal) * 100) / 100;
+    const gstAmount = Math.round(invoiceSubtotal * (gstRate / 100) * 100) / 100;
+    const qstAmount = Math.round(invoiceSubtotal * (qstRate / 100) * 100) / 100;
+    const invoiceTotal = Math.round((invoiceSubtotal + gstAmount + qstAmount) * 100) / 100;
+
+    if (invoiceSubtotal > 0) {
+      const yearPrefix = period_end.slice(0, 4);
+      const countRes = await fetch(`${supabaseUrl}/rest/v1/invoices?invoice_number=like.PORT-${yearPrefix}-*&select=id`, { headers: adminHeaders });
+      const existingInvoicesThisYear = await countRes.json().catch(() => []);
+      const invoiceNumber = `PORT-${yearPrefix}-${String((Array.isArray(existingInvoicesThisYear) ? existingInvoicesThisYear.length : 0) + 1).padStart(4, "0")}`;
+
+      await fetch(`${supabaseUrl}/rest/v1/invoices?on_conflict=owner_id,period_start,period_end`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "resolution=ignore-duplicates" },
+        body: JSON.stringify({
+          owner_id, invoice_number: invoiceNumber, period_start, period_end,
+          management_fee_amount: managementFee, coordination_fees_amount: coordinationFeesTotal,
+          subtotal: invoiceSubtotal, gst_amount: gstAmount, qst_amount: qstAmount, total_amount: invoiceTotal,
+        }),
+      });
+    }
 
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   } catch (err) {
