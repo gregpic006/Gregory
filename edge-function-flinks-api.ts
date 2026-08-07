@@ -208,8 +208,11 @@ Deno.serve(async (req) => {
     if (action === "link_account") {
       const owner_id = resolveOwnerId(body.owner_id);
       const { login_id } = body;
-      if (!owner_id || !login_id) {
-        return new Response(JSON.stringify({ error: "owner_id et login_id requis" }), { status: 400, headers: corsHeaders });
+      if (!owner_id) {
+        return new Response(JSON.stringify({ error: `owner_id manquant (isAdmin=${isAdmin}, callerOwnerId=${callerOwnerId})` }), { status: 400, headers: corsHeaders });
+      }
+      if (!login_id) {
+        return new Response(JSON.stringify({ error: "login_id manquant" }), { status: 400, headers: corsHeaders });
       }
       const token = await flinksGenerateAuthorizeToken();
       const auth = await flinksAuthorize(token, login_id);
