@@ -228,8 +228,13 @@ Deno.serve(async (req) => {
             headers: { ...adminHeaders, Prefer: "return=representation" },
             body: JSON.stringify({ owner_id, transaction_date: txDate, description, amount, match_status: matchStatus, matched_payment_id: matchedPaymentId, ai_suggestion_note: note, external_id: externalId }),
           });
-          const [inserted] = await insertRes.json().catch(() => [null]);
+          // Un conflit de clé unique (import concurrent de la même
+          // transaction) renvoie un objet d'erreur, pas un tableau —
+          // on l'ignore plutôt que de planter dessus.
+          const insertedRows = insertRes.ok ? await insertRes.json().catch(() => []) : [];
+          const inserted = Array.isArray(insertedRows) ? insertedRows[0] : null;
           if (inserted) results.push(inserted);
+          else results.push({ skipped: true, reason: "conflit d'import concurrent", description, amount });
           continue;
         }
 
@@ -359,8 +364,10 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
             ai_suggested_tenant_id: aiSuggestedTenantId, ai_suggestion_note: note, external_id: externalId,
           }),
         });
-        const [inserted] = await insertRes.json().catch(() => [null]);
+        const insertedRows = insertRes.ok ? await insertRes.json().catch(() => []) : [];
+        const inserted = Array.isArray(insertedRows) ? insertedRows[0] : null;
         if (inserted) results.push(inserted);
+        else results.push({ skipped: true, reason: "conflit d'import concurrent", description, amount });
       }
 
       await logAudit("bank_reconciliation.import", "bank_transactions", null, { owner_id, count: rows.length });
