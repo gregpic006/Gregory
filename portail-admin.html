@@ -200,6 +200,27 @@
   <p class="subtitle" style="margin-bottom:16px;">Rappels automatiques (max 3, un tous les 5 jours) — mets en pause si une entente est conclue avec le locataire</p>
   <div id="late-payments-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 
+  <h1 style="margin-top:40px;font-size:22px;">Connexions bancaires (Flinks)</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Connexion en lecture seule — aucun identifiant bancaire n'est stocké côté Portail. Une fois liée, la synchronisation des transactions est automatique (une fois par jour) et alimente le rapprochement ci-dessous.</p>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:12px;">
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Client</label>
+        <select id="flinks-owner" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir —</option></select>
+      </div>
+      <button onclick="startFlinksConnect()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Connecter une banque</button>
+    </div>
+    <div id="flinks-widget-wrap" style="display:none;margin-bottom:12px;">
+      <iframe id="flinks-iframe" height="700" style="width:100%;max-width:520px;border:1px solid var(--line);"></iframe>
+      <p style="font-size:11.5px;color:var(--muted);margin-top:6px;">Une fois la connexion réussie dans le widget ci-dessus, la liaison se fait automatiquement. Si rien ne se passe après quelques secondes, ouvre la console du navigateur (F12) pour voir le message reçu et colle son contenu ici :</p>
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <input type="text" id="flinks-manual-loginid" placeholder="LoginId (secours manuel)" style="flex:1;padding:8px;border:1px solid var(--line);">
+        <button onclick="linkFlinksManual()" style="border:1px solid var(--ink);background:none;padding:8px 14px;font-size:12.5px;cursor:pointer;">Lier ce compte</button>
+      </div>
+    </div>
+    <p id="flinks-msg" style="font-size:12.5px;"></p>
+  </div>
+  <div id="flinks-connections-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
   <h1 style="margin-top:40px;font-size:22px;">Rapprochement bancaire</h1>
   <p class="subtitle" style="margin-bottom:16px;">Importe un relevé bancaire (CSV : date,description,montant) — le matching locataire/bail/mois est automatique, l'IA ne fait que suggérer une piste sur les dépôts non identifiés</p>
   <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
@@ -357,6 +378,12 @@ async function loadAdminDashboard(){
   const currentReconOwner = reconOwnerSelect.value;
   reconOwnerSelect.innerHTML = '<option value="">— Choisir —</option>' + clients.map(c => `<option value="${c.id}">${esc(c.full_name)}</option>`).join('');
   if(currentReconOwner) reconOwnerSelect.value = currentReconOwner;
+
+  const flinksOwnerSelect = document.getElementById('flinks-owner');
+  const currentFlinksOwner = flinksOwnerSelect.value;
+  flinksOwnerSelect.innerHTML = '<option value="">— Choisir —</option>' + clients.map(c => `<option value="${c.id}">${esc(c.full_name)}</option>`).join('');
+  if(currentFlinksOwner) flinksOwnerSelect.value = currentFlinksOwner;
+  await loadFlinksConnections();
 
   await loadOps();
   await loadProspects();
@@ -1202,6 +1229,97 @@ async function promptCorrectCall(prospect_id, call_index){
   if(Object.keys(corrections).length === 0){ return; }
   await callCrmApi({ action: 'correct_call', prospect_id, call_index, corrections, correction_note });
   await loadProspects();
+}
+
+async function callFlinksApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('flinks-api', { body: payload });
+  if(error){ alert('Erreur Flinks : ' + error.message); return null; }
+  return data;
+}
+
+let flinksMessageHandler = null;
+
+async function startFlinksConnect(){
+  const ownerId = document.getElementById('flinks-owner').value;
+  const msg = document.getElementById('flinks-msg');
+  if(!ownerId){ msg.textContent = 'Choisis un client d\'abord.'; return; }
+  msg.textContent = 'Ouverture du widget...';
+
+  const res = await callFlinksApi({ action: 'generate_connect_token' });
+  if(!res?.ok){ msg.textContent = 'Impossible de générer le jeton de connexion.'; return; }
+
+  const iframe = document.getElementById('flinks-iframe');
+  iframe.src = `${res.iframe_base_url}/v2/?customerId=${res.customer_id}&authorizeToken=${res.token}`;
+  document.getElementById('flinks-widget-wrap').style.display = 'block';
+  msg.textContent = 'Connecte-toi à la banque dans le widget ci-dessous.';
+
+  if(flinksMessageHandler) window.removeEventListener('message', flinksMessageHandler);
+  flinksMessageHandler = async (e) => {
+    const data = e.data;
+    if(!data || typeof data !== 'object') return;
+    console.log('Message Flinks Connect reçu :', data);
+    const loginId = data.loginId || data.LoginId || data?.data?.loginId;
+    if(loginId){
+      await finishFlinksLink(loginId);
+    }
+  };
+  window.addEventListener('message', flinksMessageHandler);
+}
+
+async function finishFlinksLink(loginId){
+  const ownerId = document.getElementById('flinks-owner').value;
+  const msg = document.getElementById('flinks-msg');
+  msg.textContent = 'Liaison en cours...';
+  const res = await callFlinksApi({ action: 'link_account', owner_id: ownerId, login_id: loginId });
+  if(res?.ok){
+    msg.textContent = `Compte lié avec succès — ${res.institution_name}. La synchronisation démarre dès ce soir (ou clique "Synchroniser maintenant" ci-dessous).`;
+    document.getElementById('flinks-widget-wrap').style.display = 'none';
+    if(flinksMessageHandler){ window.removeEventListener('message', flinksMessageHandler); flinksMessageHandler = null; }
+    await loadFlinksConnections();
+  } else {
+    msg.textContent = 'Échec de la liaison — vérifie le LoginId ou réessaie.';
+  }
+}
+
+async function linkFlinksManual(){
+  const loginId = document.getElementById('flinks-manual-loginid').value.trim();
+  if(!loginId){ return; }
+  await finishFlinksLink(loginId);
+}
+
+async function loadFlinksConnections(){
+  const container = document.getElementById('flinks-connections-body');
+  const res = await callFlinksApi({ action: 'list_connections' });
+  const connections = res?.connections || [];
+  if(!connections.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune connexion bancaire pour l\'instant.</p>';
+    return;
+  }
+  const statusLabel = { active: 'Active', error: 'Erreur — voir détail', disconnected: 'Déconnectée' };
+  const statusColor = { active: 'var(--sage)', error: 'var(--rust)', disconnected: 'var(--muted)' };
+  container.innerHTML = connections.map(c => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${esc(c.owners?.full_name) ?? ''} — ${esc(c.institution_name) || 'Institution inconnue'}</b>
+      <span style="font-size:12.5px;color:${statusColor[c.status] || 'var(--muted)'};font-weight:600;">${statusLabel[c.status] || esc(c.status)}</span>
+      <span style="font-size:12.5px;color:var(--muted);"> — dernière synchro : ${c.last_synced_at ? new Date(c.last_synced_at).toLocaleString('fr-CA') : 'jamais'}</span>
+      ${c.last_sync_error ? `<div style="font-size:12px;color:var(--rust);margin-top:4px;">${esc(c.last_sync_error)}</div>` : ''}
+      <div style="margin-top:8px;">
+        <button onclick="syncFlinksNow('${c.id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Synchroniser maintenant</button>
+        ${c.status !== 'disconnected' ? `<button onclick="disconnectFlinks('${c.id}')" style="border:1px solid var(--line);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Déconnecter</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+async function syncFlinksNow(connection_id){
+  const res = await callFlinksApi({ action: 'sync_now', connection_id });
+  if(res?.ok){ alert(`Synchronisé — ${res.fetched} transaction(s) trouvée(s), ${res.imported} nouvelle(s) importée(s).`); }
+  await loadFlinksConnections();
+}
+
+async function disconnectFlinks(connection_id){
+  if(!confirm('Déconnecter ce compte bancaire ? La synchronisation automatique s\'arrêtera.')) return;
+  await callFlinksApi({ action: 'disconnect', connection_id });
+  await loadFlinksConnections();
 }
 
 async function callReconApi(payload){

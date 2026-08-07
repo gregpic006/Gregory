@@ -2185,6 +2185,53 @@ create policy "tenant delete own service request photos" on storage.objects for 
   using (bucket_id = 'service-request-photos' and (storage.foldername(name))[1] = auth_tenant_id()::text);
 
 -- ============================================================
+-- CONNEXIONS BANCAIRES (Flinks — lecture seule, Connect/Data Aggregation)
+-- ============================================================
+-- Un propriétaire lie son compte bancaire une fois via le widget Flinks
+-- Connect dans le portail admin (flinks-api.ts / generate_connect_token
+-- + link_account). Le LoginId obtenu est conservé ici ; il ne remplace
+-- jamais un mot de passe — aucun identifiant bancaire n'est stocké côté
+-- Portail, seulement l'identifiant de session Flinks. Une synchronisation
+-- quotidienne (voir plus bas) réutilise ce LoginId pour récupérer les
+-- transactions et les faire passer par le même moteur de rapprochement
+-- déterministe que l'import CSV manuel (reconcile-bank-transactions.ts).
+create table if not exists bank_connections (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid references owners(id) on delete cascade,
+  flinks_login_id uuid not null,
+  institution_name text,
+  status text default 'active' check (status in ('active','error','disconnected')),
+  last_synced_at timestamptz,
+  last_sync_error text,
+  created_at timestamptz default now(),
+  unique (owner_id, flinks_login_id)
+);
+alter table bank_connections enable row level security;
+create policy "admin manages bank connections" on bank_connections for all
+  using (auth_is_admin()) with check (auth_is_admin());
+create policy "owner views own bank connections" on bank_connections for select
+  using (owner_id = auth_owner_id());
+
+-- Synchronisation quotidienne : appelle la fonction Edge flinks-api,
+-- action "sync_all", qui parcourt toutes les connexions actives.
+create or replace function trigger_flinks_daily_sync()
+returns void language plpgsql as $$
+begin
+  perform net.http_post(
+    url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/flinks-api',
+    body := jsonb_build_object('action', 'sync_all'),
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+      'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+    )
+  );
+end;
+$$;
+
+select cron.schedule('daily-flinks-sync', '0 10 * * *', $$select trigger_flinks_daily_sync()$$);
+
+-- ============================================================
 -- NOTE (résolue) — architecture des accès admin
 -- ============================================================
 -- Cette note datait d'avant la mise en place de l'architecture actuelle

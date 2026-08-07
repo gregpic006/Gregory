@@ -67,15 +67,6 @@ Deno.serve(async (req) => {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
   try {
-    const authHeader = req.headers.get("Authorization") || "";
-    const jwt = authHeader.replace("Bearer ", "");
-    if (!jwt) {
-      return new Response(JSON.stringify({ error: "Non authentifié" }), { status: 401, headers: corsHeaders });
-    }
-    const payloadBase64 = jwt.split(".")[1];
-    const claims = JSON.parse(atob(payloadBase64.replace(/-/g, "+").replace(/_/g, "/")));
-    const userId = claims.sub;
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
@@ -86,17 +77,37 @@ Deno.serve(async (req) => {
       "Content-Type": "application/json",
     };
 
-    const userRes = await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${userId}&select=is_admin`, { headers: adminHeaders });
-    const userRows = await userRes.json();
-    if (!userRows?.[0]?.is_admin) {
-      return new Response(JSON.stringify({ error: "Accès refusé — compte non admin" }), { status: 403, headers: corsHeaders });
+    // Appel système : la synchronisation Flinks (flinks-api.ts, action
+    // sync_all/sync_now) réutilise ce même moteur de matching via
+    // l'action "import_csv", sans JWT utilisateur — protégé par une clé
+    // partagée (FLINKS_SYNC_SECRET) plutôt qu'une session admin.
+    const systemKey = req.headers.get("x-flinks-sync-key") || "";
+    const flinksSyncSecret = Deno.env.get("FLINKS_SYNC_SECRET");
+    const isSystemCall = !!flinksSyncSecret && systemKey === flinksSyncSecret;
+
+    let userId: string | null = null;
+    if (!isSystemCall) {
+      const authHeader = req.headers.get("Authorization") || "";
+      const jwt = authHeader.replace("Bearer ", "");
+      if (!jwt) {
+        return new Response(JSON.stringify({ error: "Non authentifié" }), { status: 401, headers: corsHeaders });
+      }
+      const payloadBase64 = jwt.split(".")[1];
+      const claims = JSON.parse(atob(payloadBase64.replace(/-/g, "+").replace(/_/g, "/")));
+      userId = claims.sub;
+
+      const userRes = await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${userId}&select=is_admin`, { headers: adminHeaders });
+      const userRows = await userRes.json();
+      if (!userRows?.[0]?.is_admin) {
+        return new Response(JSON.stringify({ error: "Accès refusé — compte non admin" }), { status: 403, headers: corsHeaders });
+      }
     }
 
     const logAudit = (action: string, entityType: string, entityId: string | null, details: Record<string, unknown>) =>
       fetch(`${supabaseUrl}/rest/v1/audit_log`, {
         method: "POST",
         headers: adminHeaders,
-        body: JSON.stringify({ actor_type: "admin", actor_id: userId, action, entity_type: entityType, entity_id: entityId, details }),
+        body: JSON.stringify({ actor_type: isSystemCall ? "system" : "admin", actor_id: userId, action, entity_type: entityType, entity_id: entityId, details }),
       });
 
     const notifyAdmins = async (subject: string, text: string) => {
