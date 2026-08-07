@@ -196,8 +196,12 @@ Deno.serve(async (req) => {
 
     if (action === "generate_connect_token") {
       const token = await flinksGenerateAuthorizeToken();
+      // demo=true active l'institution de test FlinksCapital dans le
+      // widget — uniquement en sandbox (instance "toolbox"), retiré
+      // automatiquement dès que FLINKS_API_BASE_URL pointera vers Live.
+      const isSandbox = FLINKS_API_BASE_URL.includes("toolbox");
       return new Response(JSON.stringify({
-        ok: true, token, customer_id: FLINKS_CUSTOMER_ID, iframe_base_url: FLINKS_IFRAME_BASE_URL,
+        ok: true, token, customer_id: FLINKS_CUSTOMER_ID, iframe_base_url: FLINKS_IFRAME_BASE_URL, is_sandbox: isSandbox,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 

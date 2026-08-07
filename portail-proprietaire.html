@@ -492,7 +492,7 @@ async function startOwnerBankConnect(){
   if(!res?.ok){ msg.textContent = "Impossible d'ouvrir la connexion pour le moment."; return; }
 
   const iframe = document.getElementById('bank-connect-iframe');
-  iframe.src = `${res.iframe_base_url}/v2/?customerId=${res.customer_id}&authorizeToken=${res.token}`;
+  iframe.src = `${res.iframe_base_url}/v2/?customerId=${res.customer_id}&authorizeToken=${res.token}${res.is_sandbox ? '&demo=true' : ''}`;
   document.getElementById('bank-connect-widget-wrap').style.display = 'block';
   msg.textContent = 'Connecte-toi à ta banque dans la fenêtre ci-dessous.';
 

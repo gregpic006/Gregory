@@ -1249,7 +1249,7 @@ async function startFlinksConnect(){
   if(!res?.ok){ msg.textContent = 'Impossible de générer le jeton de connexion.'; return; }
 
   const iframe = document.getElementById('flinks-iframe');
-  iframe.src = `${res.iframe_base_url}/v2/?customerId=${res.customer_id}&authorizeToken=${res.token}`;
+  iframe.src = `${res.iframe_base_url}/v2/?customerId=${res.customer_id}&authorizeToken=${res.token}${res.is_sandbox ? '&demo=true' : ''}`;
   document.getElementById('flinks-widget-wrap').style.display = 'block';
   msg.textContent = 'Connecte-toi à la banque dans le widget ci-dessous.';
 
