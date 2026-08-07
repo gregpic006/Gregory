@@ -196,6 +196,16 @@
       </section>
 
       <section id="payments" class="section">
+        <div class="toolbar"><h2>Connexion bancaire</h2></div>
+        <p style="color:var(--muted);font-size:13.5px;margin-bottom:14px;">Connecte ton compte bancaire pour que les loyers reçus soient rapprochés automatiquement — en lecture seule, Portail n'a jamais accès à tes identifiants bancaires (tu les entres directement dans la fenêtre sécurisée de Flinks, notre partenaire).</p>
+        <div id="bank-connections-body" style="margin-bottom:14px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+        <button onclick="startOwnerBankConnect()" id="bank-connect-btn" style="margin-bottom:14px;">Connecter mon compte bancaire</button>
+        <div id="bank-connect-widget-wrap" style="display:none;margin-bottom:14px;">
+          <iframe id="bank-connect-iframe" height="700" style="width:100%;max-width:520px;border:1px solid var(--line);"></iframe>
+          <p style="font-size:11.5px;color:var(--muted);margin-top:6px;">Une fois la connexion réussie ci-dessus, la liaison se fait automatiquement en quelques secondes.</p>
+        </div>
+        <p id="bank-connect-msg" style="font-size:12.5px;margin-bottom:24px;"></p>
+
         <div class="toolbar"><h2>Loyers et paiements</h2></div>
         <table><thead><tr><th>Locataire</th><th>Montant</th><th>Échéance</th><th>Statut</th></tr></thead>
           <tbody id="payments-body"><tr class="empty-row"><td colspan="4">Chargement...</td></tr></tbody>
@@ -399,6 +409,7 @@ async function loadBuildings(){
   renderBuildingsTab(buildings || []);
   renderUnitsTab(buildings || []);
   renderPaymentsTab(buildings || []);
+  await loadOwnerBankConnections();
   await loadExpenses();
   await loadWorkTab();
   await loadApprovals();
@@ -464,6 +475,64 @@ function renderPaymentsTab(buildings){
     rows.push(`<tr><td>${esc(tenant)}</td><td>${Number(p.amount).toLocaleString('fr-CA')} $</td><td>${esc(p.due_date)}</td><td><span class="tag ${tagClass}">${tagLabel}</span></td></tr>`);
   }))));
   body.innerHTML = rows.length ? rows.join('') : '<tr class="empty-row"><td colspan="4">Aucun paiement.</td></tr>';
+}
+
+async function callFlinksApiOwner(payload){
+  const { data, error } = await supabaseClient.functions.invoke('flinks-api', { body: payload });
+  if(error){ alert('Erreur : ' + error.message); return null; }
+  return data;
+}
+
+let ownerFlinksMessageHandler = null;
+
+async function startOwnerBankConnect(){
+  const msg = document.getElementById('bank-connect-msg');
+  msg.textContent = 'Ouverture de la connexion sécurisée...';
+  const res = await callFlinksApiOwner({ action: 'generate_connect_token' });
+  if(!res?.ok){ msg.textContent = "Impossible d'ouvrir la connexion pour le moment."; return; }
+
+  const iframe = document.getElementById('bank-connect-iframe');
+  iframe.src = `${res.iframe_base_url}/v2/?customerId=${res.customer_id}&authorizeToken=${res.token}`;
+  document.getElementById('bank-connect-widget-wrap').style.display = 'block';
+  msg.textContent = 'Connecte-toi à ta banque dans la fenêtre ci-dessous.';
+
+  if(ownerFlinksMessageHandler) window.removeEventListener('message', ownerFlinksMessageHandler);
+  ownerFlinksMessageHandler = async (e) => {
+    const data = e.data;
+    if(!data || typeof data !== 'object') return;
+    const loginId = data.loginId || data.LoginId || data?.data?.loginId;
+    if(loginId){
+      msg.textContent = 'Liaison en cours...';
+      const linkRes = await callFlinksApiOwner({ action: 'link_account', login_id: loginId });
+      if(linkRes?.ok){
+        msg.textContent = `Compte lié avec succès — ${linkRes.institution_name}.`;
+        document.getElementById('bank-connect-widget-wrap').style.display = 'none';
+        window.removeEventListener('message', ownerFlinksMessageHandler);
+        ownerFlinksMessageHandler = null;
+        await loadOwnerBankConnections();
+      } else {
+        msg.textContent = 'Échec de la liaison — réessaie.';
+      }
+    }
+  };
+  window.addEventListener('message', ownerFlinksMessageHandler);
+}
+
+async function loadOwnerBankConnections(){
+  const container = document.getElementById('bank-connections-body');
+  const res = await callFlinksApiOwner({ action: 'list_connections' });
+  const connections = res?.connections || [];
+  if(!connections.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun compte bancaire connecté.</p>';
+    return;
+  }
+  const statusLabel = { active: 'Active', error: 'Erreur — resynchronise ou reconnecte', disconnected: 'Déconnectée' };
+  container.innerHTML = connections.map(c => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:12px 14px;margin-bottom:8px;font-size:13px;">
+      <b>${esc(c.institution_name) || 'Institution inconnue'}</b> — ${statusLabel[c.status] || esc(c.status)}
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Dernière synchro : ${c.last_synced_at ? new Date(c.last_synced_at).toLocaleString('fr-CA') : 'jamais'}</div>
+      ${c.last_sync_error ? `<div style="color:var(--rust);font-size:12px;margin-top:2px;">${esc(c.last_sync_error)}</div>` : ''}
+    </div>`).join('');
 }
 
 async function loadExpenses(){

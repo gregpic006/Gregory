@@ -163,7 +163,11 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, results }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // ---- Actions admin : JWT requis ----
+    // ---- Actions admin OU propriétaire : JWT requis ----
+    // Un propriétaire peut lier/consulter/synchroniser SON PROPRE compte
+    // (c'est le chemin recommandé — il entre lui-même ses identifiants
+    // bancaires dans le widget Flinks, jamais l'admin). L'admin garde la
+    // capacité d'agir pour n'importe quel propriétaire (dépannage).
     const authHeader = req.headers.get("Authorization") || "";
     const jwt = authHeader.replace("Bearer ", "");
     if (!jwt) {
@@ -173,9 +177,22 @@ Deno.serve(async (req) => {
     const userId = claims.sub;
     const userRes = await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${userId}&select=is_admin`, { headers: adminHeaders });
     const [user] = await userRes.json();
-    if (!user?.is_admin) {
-      return new Response(JSON.stringify({ error: "Accès refusé — compte non admin" }), { status: 403, headers: corsHeaders });
+    const isAdmin = !!user?.is_admin;
+
+    let callerOwnerId: string | null = null;
+    if (!isAdmin) {
+      const ownerRes = await fetch(`${supabaseUrl}/rest/v1/owners?user_id=eq.${userId}&select=id`, { headers: adminHeaders });
+      const [ownerRow] = await ownerRes.json();
+      callerOwnerId = ownerRow?.id ?? null;
+      if (!callerOwnerId) {
+        return new Response(JSON.stringify({ error: "Accès refusé" }), { status: 403, headers: corsHeaders });
+      }
     }
+    // Un propriétaire ne peut jamais agir sur un owner_id autre que le
+    // sien, quoi qu'il envoie dans le corps de la requête.
+    const resolveOwnerId = (requested?: string) => (isAdmin ? requested ?? null : callerOwnerId);
+    const actorType = isAdmin ? "admin" : "owner";
+    const actorId = isAdmin ? userId : callerOwnerId;
 
     if (action === "generate_connect_token") {
       const token = await flinksGenerateAuthorizeToken();
@@ -185,7 +202,8 @@ Deno.serve(async (req) => {
     }
 
     if (action === "link_account") {
-      const { owner_id, login_id } = body;
+      const owner_id = resolveOwnerId(body.owner_id);
+      const { login_id } = body;
       if (!owner_id || !login_id) {
         return new Response(JSON.stringify({ error: "owner_id et login_id requis" }), { status: 400, headers: corsHeaders });
       }
@@ -196,12 +214,13 @@ Deno.serve(async (req) => {
         headers: { ...adminHeaders, Prefer: "resolution=merge-duplicates" },
         body: JSON.stringify({ owner_id, flinks_login_id: login_id, institution_name: auth.InstitutionName, status: "active" }),
       });
-      await logAudit("admin", userId, "bank_connection.linked", null, { owner_id, institution_name: auth.InstitutionName });
+      await logAudit(actorType, actorId, "bank_connection.linked", null, { owner_id, institution_name: auth.InstitutionName });
       return new Response(JSON.stringify({ ok: true, institution_name: auth.InstitutionName }), { status: 200, headers: corsHeaders });
     }
 
     if (action === "list_connections") {
-      const res = await fetch(`${supabaseUrl}/rest/v1/bank_connections?select=*,owners(full_name)&order=created_at.desc`, { headers: adminHeaders });
+      const filter = isAdmin ? "" : `&owner_id=eq.${callerOwnerId}`;
+      const res = await fetch(`${supabaseUrl}/rest/v1/bank_connections?select=*,owners(full_name)&order=created_at.desc${filter}`, { headers: adminHeaders });
       return new Response(JSON.stringify({ connections: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -212,12 +231,12 @@ Deno.serve(async (req) => {
       }
       const connRes = await fetch(`${supabaseUrl}/rest/v1/bank_connections?id=eq.${connection_id}&select=id,owner_id,flinks_login_id`, { headers: adminHeaders });
       const [conn] = await connRes.json();
-      if (!conn) {
+      if (!conn || (!isAdmin && conn.owner_id !== callerOwnerId)) {
         return new Response(JSON.stringify({ error: "Connexion introuvable" }), { status: 404, headers: corsHeaders });
       }
       try {
         const result = await syncOneConnection(conn);
-        await logAudit("admin", userId, "bank_connection.manual_sync", connection_id, result);
+        await logAudit(actorType, actorId, "bank_connection.manual_sync", connection_id, result);
         return new Response(JSON.stringify({ ok: true, ...result }), { status: 200, headers: corsHeaders });
       } catch (e) {
         await fetch(`${supabaseUrl}/rest/v1/bank_connections?id=eq.${connection_id}`, {
@@ -232,10 +251,15 @@ Deno.serve(async (req) => {
       if (!connection_id) {
         return new Response(JSON.stringify({ error: "connection_id manquant" }), { status: 400, headers: corsHeaders });
       }
+      const connRes = await fetch(`${supabaseUrl}/rest/v1/bank_connections?id=eq.${connection_id}&select=id,owner_id`, { headers: adminHeaders });
+      const [conn] = await connRes.json();
+      if (!conn || (!isAdmin && conn.owner_id !== callerOwnerId)) {
+        return new Response(JSON.stringify({ error: "Connexion introuvable" }), { status: 404, headers: corsHeaders });
+      }
       await fetch(`${supabaseUrl}/rest/v1/bank_connections?id=eq.${connection_id}`, {
         method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "disconnected" }),
       });
-      await logAudit("admin", userId, "bank_connection.disconnected", connection_id, {});
+      await logAudit(actorType, actorId, "bank_connection.disconnected", connection_id, {});
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
