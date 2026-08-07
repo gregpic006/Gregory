@@ -37,11 +37,65 @@ Deno.serve(async (req) => {
 
     if (action === "list") {
       const res = await fetch(
-        `${supabaseUrl}/rest/v1/prospects?select=*&order=potential_monthly_revenue.desc.nullslast`,
+        `${supabaseUrl}/rest/v1/prospects?select=*,cold_callers(id,full_name)&order=potential_monthly_revenue.desc.nullslast`,
         { headers: adminHeaders },
       );
       const prospects = await res.json();
       return new Response(JSON.stringify({ prospects }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "list_callers") {
+      const callersRes = await fetch(`${supabaseUrl}/rest/v1/cold_callers?select=id,full_name,phone,email,active&order=full_name.asc`, { headers: adminHeaders });
+      const callers = await callersRes.json();
+      const prospRes = await fetch(`${supabaseUrl}/rest/v1/prospects?assigned_caller_id=not.is.null&select=assigned_caller_id,stage,call_history`, { headers: adminHeaders });
+      const prospects = await prospRes.json();
+      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+      const stats: Record<string, { total_assigned: number; by_stage: Record<string, number>; calls_this_week: number }> = {};
+      for (const p of prospects) {
+        const s = (stats[p.assigned_caller_id] ??= { total_assigned: 0, by_stage: {}, calls_this_week: 0 });
+        s.total_assigned++;
+        s.by_stage[p.stage] = (s.by_stage[p.stage] || 0) + 1;
+        const history = Array.isArray(p.call_history) ? p.call_history : [];
+        for (const c of history) {
+          if (String(c.date || "").slice(0, 10) >= weekAgo) s.calls_this_week++;
+        }
+      }
+      const callersWithStats = callers.map((c: any) => ({ ...c, stats: stats[c.id] || { total_assigned: 0, by_stage: {}, calls_this_week: 0 } }));
+      return new Response(JSON.stringify({ callers: callersWithStats }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "assign_caller") {
+      const { prospect_id, caller_id } = body;
+      if (!prospect_id) {
+        return new Response(JSON.stringify({ error: "prospect_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/prospects?id=eq.${prospect_id}`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ assigned_caller_id: caller_id || null }),
+      });
+      await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ actor_type: "admin", actor_id: userId, action: "prospect.caller_assigned", entity_type: "prospects", entity_id: prospect_id, details: { caller_id: caller_id || null } }),
+      });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "toggle_caller_active") {
+      const { caller_id, active } = body;
+      if (!caller_id) {
+        return new Response(JSON.stringify({ error: "caller_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/cold_callers?id=eq.${caller_id}`, {
+        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ active: !!active }),
+      });
+      await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ actor_type: "admin", actor_id: userId, action: active ? "cold_caller.reactivated" : "cold_caller.deactivated", entity_type: "cold_callers", entity_id: caller_id, details: {} }),
+      });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
     if (action === "create") {

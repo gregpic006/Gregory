@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portail cold caller</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png">
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
+    --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E; --amber:#B98A2E;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;}
+
+  #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;}
+  .login-box{width:100%;max-width:340px;padding:36px;background:var(--paper-2);border:1px solid var(--line);}
+  .login-box .brand{font-family:'Fraunces',serif;font-weight:600;font-size:22px;margin-bottom:4px;}
+  .login-box .sub{font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:24px;}
+  .login-box label{display:block;font-size:12.5px;font-weight:500;margin-bottom:6px;}
+  .login-box .f{margin-bottom:14px;}
+  .login-box input{width:100%;padding:10px 12px;border:1px solid var(--line);background:var(--paper);font-size:13.5px;font-family:'Inter',sans-serif;}
+  .login-box input:focus{outline:none;border-color:var(--brass);}
+  .login-box button{width:100%;background:var(--ink);color:var(--paper);border:none;padding:12px;font-size:13.5px;font-weight:500;cursor:pointer;margin-top:6px;}
+  .login-box button:hover{background:var(--brass-dark);}
+  .login-error{color:var(--rust);font-size:12.5px;margin-top:10px;display:none;}
+
+  #app-shell{display:none;min-height:100vh;}
+  .shell{display:flex;min-height:100vh;}
+  aside{width:230px;border-right:1px solid var(--ink);padding:24px 0;flex-shrink:0;}
+  .brand{font-family:'Fraunces',serif;font-weight:600;font-size:18px;padding:0 22px 6px;}
+  .brand-sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;padding:0 22px 20px;border-bottom:1px solid var(--line);margin-bottom:16px;display:block;}
+  .tab-btn{display:block;width:100%;text-align:left;background:none;border:none;padding:10px 22px;font-size:13.5px;color:var(--ink);cursor:pointer;border-left:2px solid transparent;font-family:'Inter',sans-serif;}
+  .tab-btn:hover{background:var(--paper-2);}
+  .tab-btn.active{border-left-color:var(--brass);background:var(--paper-2);font-weight:500;}
+  .signout{margin-top:20px;padding-top:16px;border-top:1px solid var(--line);}
+
+  main{flex:1;padding:32px 40px;max-width:900px;}
+  h1{font-family:'Fraunces',serif;font-weight:600;font-size:26px;margin-bottom:6px;}
+  .subtitle{color:var(--muted);font-size:13.5px;margin-bottom:24px;}
+
+  .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:28px;}
+  .stat-box{background:var(--paper-2);border:1px solid var(--line);padding:16px;}
+  .stat-box .num{font-family:'Fraunces',serif;font-size:26px;font-weight:600;}
+  .stat-box .label{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:0.04em;margin-top:4px;}
+
+  .prospect-card{background:var(--paper-2);border:1px solid var(--line);padding:18px 20px;margin-bottom:14px;}
+  .prospect-card .name{font-family:'Fraunces',serif;font-size:17px;font-weight:600;}
+  .prospect-card .contact{color:var(--muted);font-size:12.5px;margin-top:2px;}
+  .prospect-card .meta{color:var(--muted);font-size:12px;margin-top:8px;}
+  .prospect-card .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+  .prospect-card button{font-size:12px;padding:7px 12px;border:1px solid var(--ink);background:none;color:var(--ink);cursor:pointer;font-family:'Inter',sans-serif;}
+  .prospect-card button:hover{background:var(--brass-dark);color:#fff;border-color:var(--brass-dark);}
+  .prospect-card button.primary{background:var(--ink);color:var(--paper);}
+  .call-form{display:none;margin-top:12px;}
+  .call-form.active{display:block;}
+  .call-form textarea{width:100%;padding:10px 12px;border:1px solid var(--line);background:var(--paper);font-size:13px;font-family:'Inter',sans-serif;min-height:80px;resize:vertical;margin-bottom:8px;}
+  .call-history{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;display:none;}
+  .call-history.active{display:block;}
+  .call-history .entry{border-bottom:1px solid var(--line);padding:8px 0;}
+  .call-history .entry:last-child{border-bottom:none;}
+
+  .tag{font-size:11px;padding:3px 9px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:0.04em;}
+  .tag.new{background:var(--line);color:var(--ink);}
+  .tag.contacted{background:var(--amber);color:var(--paper);}
+  .tag.interested{background:var(--sage);color:var(--paper);}
+  .tag.proposal_sent{background:var(--brass-dark);color:var(--paper);}
+  .tag.signed{background:var(--sage);color:var(--paper);}
+  .tag.lost{background:var(--rust);color:var(--paper);}
+
+  .section{display:none;}
+  .section.active{display:block;}
+  .empty-note{color:var(--muted);font-style:italic;font-size:13.5px;}
+
+  @media (max-width:760px){
+    .shell{flex-direction:column;}
+    aside{width:100%;border-right:none;border-bottom:1px solid var(--ink);padding:10px 0;display:flex;align-items:center;overflow-x:auto;white-space:nowrap;}
+    aside .brand, aside .brand-sub{display:none;}
+    .tab-btn{display:inline-block;width:auto;border-left:none;border-bottom:2px solid transparent;padding:10px 14px;flex-shrink:0;}
+    .tab-btn.active{border-left:none;border-bottom-color:var(--brass);}
+    .signout{margin-top:0;padding-top:0;border-top:none;display:inline-block;flex-shrink:0;}
+    main{padding:20px 16px;max-width:100%;}
+  }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box">
+    <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
+    <div class="sub">Espace cold caller</div>
+    <div class="f"><label>Courriel</label><input type="email" id="login-email"></div>
+    <div class="f"><label>Mot de passe</label><input type="password" id="login-password"></div>
+    <button onclick="handleLogin()">Se connecter</button>
+    <p class="login-error" id="login-error"></p>
+    <p style="text-align:center;margin-top:12px;"><a href="#" onclick="showResetForm();return false;" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Mot de passe oublié ?</a></p>
+  </div>
+
+  <div class="login-box" id="reset-box" style="display:none;">
+    <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
+    <div class="sub">Réinitialiser le mot de passe</div>
+    <div class="f"><label>Courriel</label><input type="email" id="reset-email"></div>
+    <button onclick="sendResetLink()">Envoyer le lien</button>
+    <p class="login-error" id="reset-error"></p>
+    <p class="login-error" id="reset-success" style="color:var(--sage);"></p>
+    <p style="text-align:center;margin-top:12px;"><a href="#" onclick="showLoginForm();return false;" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Retour à la connexion</a></p>
+  </div>
+
+  <div class="login-box" id="newpw-box" style="display:none;">
+    <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
+    <div class="sub">Choisir un nouveau mot de passe</div>
+    <div class="f"><label>Nouveau mot de passe</label><input type="password" id="newpw-value"></div>
+    <button onclick="confirmNewPassword()">Confirmer</button>
+    <p class="login-error" id="newpw-error"></p>
+  </div>
+</div>
+
+<div id="app-shell">
+  <div class="shell">
+    <aside>
+      <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
+      <span class="brand-sub">Espace cold caller</span>
+      <button class="tab-btn active" data-tab="queue" onclick="showTab('queue')">Ma file d'appels</button>
+      <div class="signout">
+        <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
+      </div>
+    </aside>
+
+    <main>
+      <section id="queue" class="section active">
+        <h1 id="caller-greeting">Bonjour</h1>
+        <p class="subtitle">Voici tes prospects à contacter, triés par prochain suivi</p>
+
+        <div class="stats-grid" id="stats-grid">
+          <div class="stat-box"><div class="num">—</div><div class="label">Chargement</div></div>
+        </div>
+
+        <div id="prospects-list"><p class="empty-note">Chargement...</p></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
+
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+function esc(str){
+  return (str == null ? '' : String(str)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+let callerRecord = null;
+
+supabaseClient.auth.onAuthStateChange((event) => {
+  if(event === 'PASSWORD_RECOVERY'){
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('app-shell').style.display = 'none';
+    showNewPasswordForm();
+  }
+});
+
+function showResetForm(){
+  document.querySelector('#login-screen .login-box').style.display = 'none';
+  document.getElementById('reset-box').style.display = 'block';
+}
+function showLoginForm(){
+  document.getElementById('reset-box').style.display = 'none';
+  document.getElementById('newpw-box').style.display = 'none';
+  document.querySelector('#login-screen .login-box').style.display = 'block';
+}
+function showNewPasswordForm(){
+  document.querySelector('#login-screen .login-box').style.display = 'none';
+  document.getElementById('reset-box').style.display = 'none';
+  document.getElementById('newpw-box').style.display = 'block';
+}
+
+async function sendResetLink(){
+  const email = document.getElementById('reset-email').value;
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.href.split('#')[0].split('?')[0],
+  });
+  const errEl = document.getElementById('reset-error');
+  const okEl = document.getElementById('reset-success');
+  if(error){ errEl.textContent = error.message; errEl.style.display = 'block'; okEl.style.display = 'none'; return; }
+  errEl.style.display = 'none';
+  okEl.textContent = 'Lien envoyé ! Vérifie ta boîte courriel.';
+  okEl.style.display = 'block';
+}
+
+async function confirmNewPassword(){
+  const newPassword = document.getElementById('newpw-value').value;
+  const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+  const errEl = document.getElementById('newpw-error');
+  if(error){ errEl.textContent = error.message; errEl.style.display = 'block'; return; }
+  await supabaseClient.auth.signOut();
+  showLoginForm();
+  showLoginError('Mot de passe mis à jour — reconnecte-toi.');
+}
+
+async function init(){
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(session) await loadCallerDashboard(session.user.id);
+}
+
+async function handleLogin(){
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if(error){ showLoginError(error.message); return; }
+  await loadCallerDashboard(data.user.id);
+}
+
+async function handleSignOut(){
+  await supabaseClient.auth.signOut();
+  document.getElementById('app-shell').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+}
+
+function showLoginError(msg){
+  const el = document.getElementById('login-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function callCallerApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('caller-api', { body: payload });
+  if(error){
+    let detail = error.message;
+    try { const body = await error.context?.json(); if(body?.error) detail = body.error; } catch(e){}
+    return { error: detail };
+  }
+  return data;
+}
+
+async function loadCallerDashboard(userId){
+  const { data: caller, error } = await supabaseClient
+    .from('cold_callers').select('*').eq('user_id', userId).single();
+
+  if(error || !caller){
+    showLoginError("Aucun profil cold caller associé à ce compte.");
+    return;
+  }
+  if(!caller.active){
+    showLoginError("Ton compte est désactivé — contacte l'équipe Portail.");
+    return;
+  }
+  callerRecord = caller;
+
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-shell').style.display = 'block';
+  document.getElementById('caller-greeting').textContent = 'Bonjour, ' + caller.full_name.split(' ')[0];
+
+  await loadStats();
+  await loadQueue();
+}
+
+async function loadStats(){
+  const data = await callCallerApi({ action: 'my_stats' });
+  const grid = document.getElementById('stats-grid');
+  if(data?.error){ grid.innerHTML = `<div class="stat-box"><div class="num">—</div><div class="label">${esc(data.error)}</div></div>`; return; }
+  const stageAbbrev = { new:'nouveau', contacted:'contacté', interested:'intéressé' };
+  const stageBreakdown = Object.entries(data.by_stage || {}).map(([k,v]) => `${stageAbbrev[k] || esc(k)}: ${v}`).join(' · ') || '—';
+  grid.innerHTML = `
+    <div class="stat-box"><div class="num">${data.total_assigned ?? 0}</div><div class="label">Prospects assignés</div></div>
+    <div class="stat-box"><div class="num">${data.calls_today ?? 0}</div><div class="label">Appels aujourd'hui</div></div>
+    <div class="stat-box"><div class="num">${data.calls_this_week ?? 0}</div><div class="label">Appels cette semaine</div></div>
+    <div class="stat-box"><div class="num">${data.overdue_followups ?? 0}</div><div class="label">Suivis en retard</div></div>
+    <div class="stat-box" style="grid-column:span 2;"><div class="num" style="font-size:15px;">${stageBreakdown}</div><div class="label">Répartition par statut</div></div>
+  `;
+}
+
+const stageLabel = { new:'Nouveau', contacted:'Contacté', interested:'Intéressé', proposal_sent:'Proposition envoyée', signed:'Signé', lost:'Perdu' };
+const CALLER_ALLOWED_STAGES = ['contacted', 'interested'];
+
+async function loadQueue(){
+  const data = await callCallerApi({ action: 'list_my_prospects' });
+  const container = document.getElementById('prospects-list');
+  if(data?.error){ container.innerHTML = `<p class="empty-note">${esc(data.error)}</p>`; return; }
+  const prospects = data?.prospects || [];
+  if(!prospects.length){
+    container.innerHTML = '<p class="empty-note">Aucun prospect ne t\'est assigné pour le moment.</p>';
+    return;
+  }
+  container.innerHTML = prospects.map(p => {
+    const nextStages = CALLER_ALLOWED_STAGES.filter(s => s !== p.stage);
+    const history = Array.isArray(p.call_history) ? p.call_history : [];
+    return `
+    <div class="prospect-card" data-prospect-id="${esc(p.id)}">
+      <div class="name">${esc(p.full_name)}${p.company_name ? ' — ' + esc(p.company_name) : ''}</div>
+      <div class="contact">${esc(p.email) || ''} ${esc(p.phone) || ''}</div>
+      <div class="meta">
+        <span class="tag ${esc(p.stage)}">${stageLabel[p.stage] || esc(p.stage)}</span>
+        ${p.num_doors != null ? ` · ${p.num_doors} porte(s)` : ''}
+        ${p.potential_monthly_revenue != null ? ` · revenu potentiel ${Number(p.potential_monthly_revenue).toLocaleString('fr-CA')} $/mois` : ''}
+        ${p.next_followup_date ? ` · prochain suivi : ${esc(p.next_followup_date)}` : ''}
+      </div>
+      ${p.notes ? `<div class="meta">Note : ${esc(p.notes)}</div>` : ''}
+      <div class="actions">
+        <button class="primary" onclick="toggleCallForm(this)" data-prospect="${esc(p.id)}">+ Logger un appel</button>
+        ${nextStages.map(s => `<button onclick="setStage('${esc(p.id)}','${s}')">Marquer ${stageLabel[s].toLowerCase()}</button>`).join('')}
+        ${history.length ? `<button onclick="toggleHistory(this)" data-prospect="${esc(p.id)}">Historique (${history.length})</button>` : ''}
+      </div>
+      <div class="call-form" data-prospect="${esc(p.id)}">
+        <textarea placeholder="Résumé ou transcription de l'appel..."></textarea>
+        <button class="primary" onclick="submitCall(this)" data-prospect="${esc(p.id)}">Envoyer</button>
+      </div>
+      ${history.length ? `
+      <div class="call-history" data-prospect="${esc(p.id)}">
+        ${history.slice().reverse().map(c => `
+          <div class="entry">
+            <b>${new Date(c.date).toLocaleString('fr-CA')}</b> — confiance IA ${c.confidence != null ? c.confidence + '%' : '—'}<br>
+            <b>Résumé :</b> ${esc(c.summary)}<br>
+            ${c.next_step ? `<b>Prochaine étape :</b> ${esc(c.next_step)}<br>` : ''}
+          </div>`).join('')}
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function toggleCallForm(btn){
+  const id = btn.dataset.prospect;
+  const form = document.querySelector(`.call-form[data-prospect="${CSS.escape(id)}"]`);
+  if(form) form.classList.toggle('active');
+}
+
+function toggleHistory(btn){
+  const id = btn.dataset.prospect;
+  const hist = document.querySelector(`.call-history[data-prospect="${CSS.escape(id)}"]`);
+  if(hist) hist.classList.toggle('active');
+}
+
+async function submitCall(btn){
+  const prospect_id = btn.dataset.prospect;
+  const form = btn.closest('.call-form');
+  const textarea = form.querySelector('textarea');
+  const transcript = textarea.value.trim();
+  if(!transcript) return;
+  btn.disabled = true;
+  btn.textContent = 'Envoi...';
+  const res = await callCallerApi({ action: 'add_call', prospect_id, transcript });
+  if(res?.error){
+    alert('Erreur : ' + res.error);
+    btn.disabled = false;
+    btn.textContent = 'Envoyer';
+    return;
+  }
+  await loadStats();
+  await loadQueue();
+}
+
+async function setStage(prospect_id, stage){
+  const res = await callCallerApi({ action: 'update_my_stage', prospect_id, stage });
+  if(res?.error){ alert('Erreur : ' + res.error); return; }
+  await loadStats();
+  await loadQueue();
+}
+
+function showTab(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelector(`.tab-btn[data-tab="${id}"]`)?.classList.add('active');
+}
+
+init();
+</script>
+</body>
+</html>

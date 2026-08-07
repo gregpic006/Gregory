@@ -301,8 +301,23 @@
     <button onclick="createProspect()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter un prospect</button>
   </div>
 
-  <table><thead><tr><th>Prospect</th><th class="num">Portes</th><th class="num">Revenu potentiel/mois</th><th>Intérêt</th><th>Statut</th><th class="num">Complétude</th><th class="num">Prob. signature</th><th>Prochain geste</th><th>Prochain suivi</th><th></th></tr></thead>
-    <tbody id="prospects-body"><tr class="empty-row"><td colspan="10">Chargement...</td></tr></tbody>
+  <table><thead><tr><th>Prospect</th><th class="num">Portes</th><th class="num">Revenu potentiel/mois</th><th>Intérêt</th><th>Statut</th><th class="num">Complétude</th><th class="num">Prob. signature</th><th>Prochain geste</th><th>Prochain suivi</th><th>Cold caller</th><th></th></tr></thead>
+    <tbody id="prospects-body"><tr class="empty-row"><td colspan="11">Chargement...</td></tr></tbody>
+  </table>
+
+  <h1 style="margin-top:40px;font-size:22px;">Cold callers — prospection téléphonique</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Comptes des travailleurs autonomes qui font de la prospection par téléphone — ils voient uniquement les prospects qui leur sont assignés ci-dessus</p>
+
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom complet</label><input type="text" id="cc-name" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel</label><input type="email" id="cc-email" style="padding:8px;border:1px solid var(--line);"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone (optionnel)</label><input type="text" id="cc-phone" style="padding:8px;border:1px solid var(--line);"></div>
+    <button onclick="createColdCaller()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Créer le compte + envoyer l'accès</button>
+  </div>
+  <p id="cc-msg" style="font-size:12.5px;margin-top:-8px;margin-bottom:16px;"></p>
+
+  <table><thead><tr><th>Cold caller</th><th class="num">Prospects assignés</th><th>Répartition</th><th class="num">Appels (7j)</th><th>Statut</th><th></th></tr></thead>
+    <tbody id="callers-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
   </table>
 
   <h1 style="margin-top:40px;font-size:22px;">Confidentialité (Loi 25)</h1>
@@ -436,6 +451,7 @@ async function loadAdminDashboard(){
   await loadPadAuthorizations();
 
   await loadOps();
+  await loadCallers();
   await loadProspects();
   await loadLeaseRenewals();
   await loadAuditLog();
@@ -773,6 +789,9 @@ const auditActionLabel = {
   'work_order.worker_reported_done': 'Travailleur : travail signalé terminé', 'work_order.worker_accepted': 'Travailleur : assignation acceptée',
   'work_order.worker_declined': 'Travailleur : assignation refusée', 'work_order.worker_propose_time': 'Travailleur : autre heure proposée',
   'work_order.worker_request_info': 'Travailleur : informations demandées',
+  'prospect.caller_assigned': 'Prospect assigné à un cold caller', 'cold_caller.create': 'Cold caller créé',
+  'cold_caller.reactivated': 'Cold caller réactivé', 'cold_caller.deactivated': 'Cold caller désactivé',
+  'prospect.call_logged_by_caller': 'Appel loggé par un cold caller', 'prospect.stage_change_by_caller': 'Statut prospect modifié par un cold caller',
 };
 const auditEntityLabel = {
   owners: 'Propriétaires', buildings: 'Immeubles', units: 'Unités', tenants: 'Locataires',
@@ -781,6 +800,7 @@ const auditEntityLabel = {
   bank_connections: 'Connexions bancaires', bank_transactions: 'Transactions bancaires', visits: 'Visites',
   company_settings: "Paramètres de l'entreprise", invoices: 'Factures', pad_authorizations: 'Autorisations de prélèvement',
   privacy_incidents: 'Incidents de confidentialité', personal_data_requests: "Demandes d'accès/rectification",
+  cold_callers: 'Cold callers',
   autre: 'Autre',
 };
 
@@ -1362,12 +1382,18 @@ async function callCrmApi(payload){
   return data;
 }
 
+let callersDirectory = [];
+
+function callerOptionsHtml(selectedId){
+  return '<option value="">— Non assigné —</option>' + callersDirectory.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${esc(c.full_name)}${c.active ? '' : ' (inactif)'}</option>`).join('');
+}
+
 async function loadProspects(){
   const data = await callCrmApi({ action: 'list' });
   const body = document.getElementById('prospects-body');
   const prospects = data?.prospects || [];
   if(!prospects.length){
-    body.innerHTML = '<tr class="empty-row"><td colspan="10">Aucun prospect.</td></tr>';
+    body.innerHTML = '<tr class="empty-row"><td colspan="11">Aucun prospect.</td></tr>';
     return;
   }
   body.innerHTML = prospects.map(p => `
@@ -1381,6 +1407,7 @@ async function loadProspects(){
       <td class="num">${p.signing_probability != null ? p.signing_probability + '%' : '—'}</td>
       <td style="font-size:12px;">${esc(p.next_action) || '—'}</td>
       <td>${p.next_followup_date || '—'}</td>
+      <td><select onchange="assignCallerToProspect('${p.id}', this.value)">${callerOptionsHtml(p.cold_callers?.id)}</select></td>
       <td>
         <button onclick="promptAddCall('${p.id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">+ Appel</button>
         ${(p.call_history && p.call_history.length) ? `<button onclick="toggleCallHistory('${p.id}')" style="border:1px solid var(--line);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;margin-top:4px;">Historique (${p.call_history.length})</button>` : ''}
@@ -1388,7 +1415,7 @@ async function loadProspects(){
     </tr>
     ${(p.call_history && p.call_history.length) ? `
     <tr id="call-history-${p.id}" style="display:none;">
-      <td colspan="10" style="background:var(--paper-2);font-size:12px;">
+      <td colspan="11" style="background:var(--paper-2);font-size:12px;">
         ${p.call_history.map((c, i) => `
           <div style="border-bottom:1px solid var(--line);padding:8px 0;">
             <b>${new Date(c.date).toLocaleString('fr-CA')}</b> ${c.corrected ? '<span style="color:var(--brass-dark);">(corrigé)</span>' : ''} — confiance IA ${c.confidence != null ? c.confidence + '%' : '—'}<br>
@@ -1402,6 +1429,58 @@ async function loadProspects(){
           </div>`).join('')}
       </td>
     </tr>` : ''}`).join('');
+}
+
+async function assignCallerToProspect(prospect_id, caller_id){
+  await callCrmApi({ action: 'assign_caller', prospect_id, caller_id: caller_id || null });
+  await loadProspects();
+}
+
+async function loadCallers(){
+  const data = await callCrmApi({ action: 'list_callers' });
+  callersDirectory = data?.callers || [];
+  const body = document.getElementById('callers-body');
+  if(!callersDirectory.length){
+    body.innerHTML = '<tr class="empty-row"><td colspan="6">Aucun cold caller.</td></tr>';
+    return;
+  }
+  const stageAbbrev = { new:'nouveau', contacted:'contacté', interested:'intéressé', proposal_sent:'proposition', signed:'signé', lost:'perdu' };
+  body.innerHTML = callersDirectory.map(c => {
+    const s = c.stats || { total_assigned: 0, by_stage: {}, calls_this_week: 0 };
+    const breakdown = Object.entries(s.by_stage).map(([k, v]) => `${stageAbbrev[k] || esc(k)} : ${v}`).join(', ') || '—';
+    return `
+    <tr>
+      <td>${esc(c.full_name)}<br><span style="color:var(--muted);font-size:11.5px;">${esc(c.email) || ''} ${esc(c.phone) || ''}</span></td>
+      <td class="num">${s.total_assigned}</td>
+      <td style="font-size:12px;">${breakdown}</td>
+      <td class="num">${s.calls_this_week}</td>
+      <td>${c.active ? 'Actif' : 'Inactif'}</td>
+      <td><button onclick="toggleCallerActive('${c.id}', ${!c.active})" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">${c.active ? 'Désactiver' : 'Réactiver'}</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function createColdCaller(){
+  const full_name = document.getElementById('cc-name').value;
+  const email = document.getElementById('cc-email').value;
+  const phone = document.getElementById('cc-phone').value;
+  const msg = document.getElementById('cc-msg');
+  if(!full_name || !email){ msg.textContent = 'Nom et courriel requis.'; return; }
+  msg.textContent = 'Création en cours...';
+  const res = await callOnboardingApi({ action: 'create_cold_caller', full_name, email, phone });
+  if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
+  msg.textContent = 'Compte créé et identifiants envoyés à ' + email + ' !';
+  document.getElementById('cc-name').value = '';
+  document.getElementById('cc-email').value = '';
+  document.getElementById('cc-phone').value = '';
+  await loadCallers();
+  await loadProspects();
+}
+
+async function toggleCallerActive(caller_id, active){
+  await callCrmApi({ action: 'toggle_caller_active', caller_id, active });
+  await loadCallers();
+  await loadProspects();
 }
 
 function toggleCallHistory(prospectId){

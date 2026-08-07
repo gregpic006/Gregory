@@ -2344,6 +2344,47 @@ alter table visits add constraint visits_status_check
   check (status in ('proposed','confirmed','declined','completed','no_show','cancelled','other_time_proposed'));
 
 -- ============================================================
+-- PORTAIL COLD CALLERS — prospection téléphonique
+-- ============================================================
+-- Un travailleur autonome de cold call a son propre portail (comme
+-- propriétaire/locataire) mais AUCUN accès direct aux prospects par RLS :
+-- la table prospects reste verrouillée au rôle service_role (voir plus
+-- haut, "Pas de policy RLS ouverte") et tout passe par l'Edge Function
+-- caller-api.ts, qui vérifie que le prospect demandé est bien assigné à
+-- l'appelant. Ça évite de dupliquer la logique de sécurité entre RLS et
+-- l'admin (crm-api.ts) qui gère déjà cette table de la même façon.
+alter table users drop constraint if exists users_role_check;
+alter table users add constraint users_role_check
+  check (role in ('owner','tenant','admin','worker','caller'));
+
+create table if not exists cold_callers (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references users(id) on delete cascade,
+  full_name text not null,
+  phone text,
+  email text,
+  active boolean default true,
+  created_at timestamptz default now()
+);
+alter table cold_callers enable row level security;
+drop policy if exists "admin manages cold callers" on cold_callers;
+create policy "admin manages cold callers" on cold_callers for all
+  using (auth_is_admin()) with check (auth_is_admin());
+drop policy if exists "caller views own profile" on cold_callers;
+create policy "caller views own profile" on cold_callers for select
+  using (user_id = auth.uid());
+
+create or replace function auth_caller_id()
+returns uuid
+language sql stable security definer set search_path = public set row_security = off
+as $$ select id from cold_callers where user_id = auth.uid() $$;
+
+-- Assignation d'un prospect à un cold caller précis. Reste nullable : un
+-- prospect sans assignation n'apparaît simplement dans la file d'appel
+-- d'aucun cold caller (l'admin peut toujours le voir/appeler lui-même).
+alter table prospects add column if not exists assigned_caller_id uuid references cold_callers(id);
+
+-- ============================================================
 -- NOTE (résolue) — architecture des accès admin
 -- ============================================================
 -- Cette note datait d'avant la mise en place de l'architecture actuelle

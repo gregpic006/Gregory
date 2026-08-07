@@ -5,6 +5,7 @@ const corsHeaders = {
 
 const OWNER_PORTAL_URL = "https://portailgestion.ca/portail-proprietaire.html";
 const TENANT_PORTAL_URL = "https://portailgestion.ca/portail-locataire.html";
+const CALLER_PORTAL_URL = "https://portailgestion.ca/portail-cold-caller.html";
 
 function randomPassword() {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 14);
@@ -510,6 +511,41 @@ Deno.serve(async (req) => {
 
       await logAudit("tenant.create", "tenants", tenant?.id ?? null, { email: email || null, unit_id, has_login: !!authUserId });
       return new Response(JSON.stringify({ ok: true, tenant_id: tenant?.id, temp_password: tempPassword }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "create_cold_caller") {
+      const { full_name, email, phone } = body;
+      if (!full_name || !email) {
+        return new Response(JSON.stringify({ error: "Nom et courriel requis" }), { status: 400, headers: corsHeaders });
+      }
+      const password = randomPassword();
+      const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ email, password, email_confirm: true }),
+      });
+      const authData = await authRes.json();
+      if (!authRes.ok || !authData.id) {
+        return new Response(JSON.stringify({ error: authData.msg || authData.error_description || "Impossible de créer le compte" }), { status: 400, headers: corsHeaders });
+      }
+
+      // Le déclencheur d'inscription met "owner" par défaut — on corrige pour "caller".
+      await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${authData.id}`, {
+        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ role: "caller" }),
+      });
+
+      const callerRes = await fetch(`${supabaseUrl}/rest/v1/cold_callers`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({ user_id: authData.id, full_name, phone: phone || null, email }),
+      });
+      const [caller] = await callerRes.json();
+
+      await sendEmail(email, "Bienvenue sur Portail — ton accès cold caller",
+        `Bonjour ${full_name},\n\nTon compte Portail pour la prospection téléphonique est prêt.\n\nPortail : ${CALLER_PORTAL_URL}\nCourriel : ${email}\nMot de passe temporaire : ${password}\n\nConnecte-toi pour voir ta file d'appels et logger tes appels. Tu peux changer ton mot de passe via "Mot de passe oublié" sur la page de connexion.\n\nL'équipe Portail`);
+
+      await logAudit("cold_caller.create", "cold_callers", caller?.id ?? null, { email });
+      return new Response(JSON.stringify({ ok: true, caller_id: caller?.id, temp_password: password }), { status: 200, headers: corsHeaders });
     }
 
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
