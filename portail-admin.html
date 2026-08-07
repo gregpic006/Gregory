@@ -1233,7 +1233,13 @@ async function promptCorrectCall(prospect_id, call_index){
 
 async function callFlinksApi(payload){
   const { data, error } = await supabaseClient.functions.invoke('flinks-api', { body: payload });
-  if(error){ alert('Erreur Flinks : ' + error.message); return null; }
+  if(error){
+    let detail = error.message;
+    try { const body = await error.context?.json(); if(body?.error) detail = body.error; } catch(e){}
+    console.error('Erreur Flinks', detail, error);
+    alert('Erreur Flinks : ' + detail);
+    return null;
+  }
   return data;
 }
 
@@ -1260,6 +1266,8 @@ async function startFlinksConnect(){
     console.log('Message Flinks Connect reçu :', data);
     const loginId = data.loginId || data.LoginId || data?.data?.loginId;
     if(loginId){
+      window.removeEventListener('message', flinksMessageHandler);
+      flinksMessageHandler = null;
       await finishFlinksLink(loginId);
     }
   };

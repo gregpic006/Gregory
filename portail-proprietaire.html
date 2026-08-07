@@ -479,7 +479,13 @@ function renderPaymentsTab(buildings){
 
 async function callFlinksApiOwner(payload){
   const { data, error } = await supabaseClient.functions.invoke('flinks-api', { body: payload });
-  if(error){ alert('Erreur : ' + error.message); return null; }
+  if(error){
+    let detail = error.message;
+    try { const body = await error.context?.json(); if(body?.error) detail = body.error; } catch(e){}
+    console.error('Erreur Flinks', detail, error);
+    alert('Erreur : ' + detail);
+    return null;
+  }
   return data;
 }
 
@@ -500,15 +506,16 @@ async function startOwnerBankConnect(){
   ownerFlinksMessageHandler = async (e) => {
     const data = e.data;
     if(!data || typeof data !== 'object') return;
+    console.log('Message Flinks Connect reçu :', data);
     const loginId = data.loginId || data.LoginId || data?.data?.loginId;
     if(loginId){
+      window.removeEventListener('message', ownerFlinksMessageHandler);
+      ownerFlinksMessageHandler = null;
       msg.textContent = 'Liaison en cours...';
       const linkRes = await callFlinksApiOwner({ action: 'link_account', login_id: loginId });
       if(linkRes?.ok){
         msg.textContent = `Compte lié avec succès — ${linkRes.institution_name}.`;
         document.getElementById('bank-connect-widget-wrap').style.display = 'none';
-        window.removeEventListener('message', ownerFlinksMessageHandler);
-        ownerFlinksMessageHandler = null;
         await loadOwnerBankConnections();
       } else {
         msg.textContent = 'Échec de la liaison — réessaie.';
