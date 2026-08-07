@@ -150,7 +150,6 @@
       <button class="tab-btn active" data-tab="overview" onclick="showTab('overview')">Vue d'ensemble</button>
       <button class="tab-btn" data-tab="buildings" onclick="showTab('buildings')">Immeubles</button>
       <button class="tab-btn" data-tab="units" onclick="showTab('units')">Logements et locataires</button>
-      <button class="tab-btn" data-tab="leases" onclick="showTab('leases')">Mes baux</button>
       <button class="tab-btn" data-tab="rentals" onclick="showTab('rentals')">Location</button>
       <button class="tab-btn" data-tab="payments" onclick="showTab('payments')">Loyers et paiements</button>
       <button class="tab-btn" data-tab="expenses" onclick="showTab('expenses')">Dépenses</button>
@@ -186,15 +185,8 @@
 
       <section id="units" class="section">
         <div class="toolbar"><h2>Logements et locataires</h2></div>
-        <table><thead><tr><th>Unité</th><th>Locataire</th><th>Loyer</th><th>Fin de bail</th><th>Statut</th></tr></thead>
-          <tbody id="units-body"><tr class="empty-row"><td colspan="5">Chargement...</td></tr></tbody>
-        </table>
-      </section>
-
-      <section id="leases" class="section">
-        <div class="toolbar"><h2>Mes baux</h2></div>
-        <table><thead><tr><th>Immeuble</th><th>Unité</th><th>Locataire</th><th>Début</th><th>Fin</th><th>Loyer</th><th>Statut</th></tr></thead>
-          <tbody id="leases-body"><tr class="empty-row"><td colspan="7">Chargement...</td></tr></tbody>
+        <table><thead><tr><th>Unité</th><th>Locataire</th><th>Loyer</th><th>Début</th><th>Fin de bail</th><th>Statut</th></tr></thead>
+          <tbody id="units-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
         </table>
       </section>
 
@@ -406,7 +398,6 @@ async function loadBuildings(){
   renderOverview(buildings || []);
   renderBuildingsTab(buildings || []);
   renderUnitsTab(buildings || []);
-  renderLeasesTab(buildings || []);
   renderPaymentsTab(buildings || []);
   await loadExpenses();
   await loadWorkTab();
@@ -455,33 +446,12 @@ function renderUnitsTab(buildings){
     const lease = (u.leases||[])[0];
     const tenant = lease?.tenants?.full_name || 'Vacant';
     const rent = u.rent ? u.rent.toLocaleString('fr-CA') + ' $' : '—';
+    const start = lease?.start_date || '—';
     const end = lease?.end_date || '—';
     const statusTag = u.status === 'occupied' ? '<span class="tag ok">Occupée</span>' : '<span class="tag neutral">Disponible</span>';
-    rows.push(`<tr><td>Unité ${esc(u.unit_number)}</td><td>${esc(tenant)}</td><td>${esc(rent)}</td><td>${esc(end)}</td><td>${statusTag}</td></tr>`);
+    rows.push(`<tr><td>Unité ${esc(u.unit_number)}</td><td>${esc(tenant)}</td><td>${esc(rent)}</td><td>${esc(start)}</td><td>${esc(end)}</td><td>${statusTag}</td></tr>`);
   }));
-  body.innerHTML = rows.length ? rows.join('') : '<tr class="empty-row"><td colspan="5">Aucun logement.</td></tr>';
-}
-
-function renderLeasesTab(buildings){
-  const body = document.getElementById('leases-body');
-  const statusTag = { active: '<span class="tag ok">Actif</span>', renewed: '<span class="tag ok">Renouvelé</span>', ended: '<span class="tag neutral">Terminé</span>' };
-  const rows = [];
-  buildings.forEach(b => (b.units||[]).forEach(u => (u.leases||[]).forEach(l => {
-    rows.push({
-      address: b.address, unit: u.unit_number, tenant: l.tenants?.full_name || '—',
-      start: l.start_date, end: l.end_date, rent: l.monthly_rent, status: l.status,
-    });
-  })));
-  rows.sort((a, b) => new Date(b.start || 0) - new Date(a.start || 0));
-  body.innerHTML = rows.length ? rows.map(r => `<tr>
-    <td>${esc(r.address)}</td>
-    <td>Unité ${esc(r.unit)}</td>
-    <td>${esc(r.tenant)}</td>
-    <td>${esc(r.start) || '—'}</td>
-    <td>${esc(r.end) || '—'}</td>
-    <td>${r.rent != null ? Number(r.rent).toLocaleString('fr-CA') + ' $' : '—'}</td>
-    <td>${statusTag[r.status] || esc(r.status)}</td>
-  </tr>`).join('') : '<tr class="empty-row"><td colspan="7">Aucun bail.</td></tr>';
+  body.innerHTML = rows.length ? rows.join('') : '<tr class="empty-row"><td colspan="6">Aucun logement.</td></tr>';
 }
 
 function renderPaymentsTab(buildings){
