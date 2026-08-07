@@ -791,6 +791,7 @@ const auditActionLabel = {
   'work_order.worker_request_info': 'Travailleur : informations demandées',
   'prospect.caller_assigned': 'Prospect assigné à un cold caller', 'cold_caller.create': 'Cold caller créé',
   'cold_caller.reactivated': 'Cold caller réactivé', 'cold_caller.deactivated': 'Cold caller désactivé',
+  'cold_caller.login_reset': 'Mot de passe cold caller réinitialisé',
   'prospect.call_logged_by_caller': 'Appel loggé par un cold caller', 'prospect.stage_change_by_caller': 'Statut prospect modifié par un cold caller',
 };
 const auditEntityLabel = {
@@ -1455,7 +1456,10 @@ async function loadCallers(){
       <td style="font-size:12px;">${breakdown}</td>
       <td class="num">${s.calls_this_week}</td>
       <td>${c.active ? 'Actif' : 'Inactif'}</td>
-      <td><button onclick="toggleCallerActive('${c.id}', ${!c.active})" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">${c.active ? 'Désactiver' : 'Réactiver'}</button></td>
+      <td>
+        <button onclick="toggleCallerActive('${c.id}', ${!c.active})" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">${c.active ? 'Désactiver' : 'Réactiver'}</button>
+        <button onclick="resetCallerLogin('${c.id}')" style="border:1px solid var(--line);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;margin-top:4px;">Réinitialiser le mot de passe</button>
+      </td>
     </tr>`;
   }).join('');
 }
@@ -1469,12 +1473,24 @@ async function createColdCaller(){
   msg.textContent = 'Création en cours...';
   const res = await callOnboardingApi({ action: 'create_cold_caller', full_name, email, phone });
   if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
-  msg.textContent = 'Compte créé et identifiants envoyés à ' + email + ' !';
+  // On affiche TOUJOURS le mot de passe temporaire, peu importe si le
+  // courriel a été envoyé — Resend peut échouer silencieusement (domaine
+  // expéditeur non vérifié, etc.) et sans ça le mot de passe serait perdu.
+  msg.innerHTML = res.email_sent
+    ? `Compte créé et identifiants envoyés à ${esc(email)}. Mot de passe temporaire (au cas où) : <b>${esc(res.temp_password)}</b>`
+    : `<span style="color:var(--rust);">Compte créé, mais le courriel n'a PAS pu être envoyé (${esc(res.email_error) || 'erreur inconnue'}). Communique ces identifiants manuellement — Courriel : ${esc(email)} — Mot de passe temporaire : <b>${esc(res.temp_password)}</b></span>`;
   document.getElementById('cc-name').value = '';
   document.getElementById('cc-email').value = '';
   document.getElementById('cc-phone').value = '';
   await loadCallers();
   await loadProspects();
+}
+
+async function resetCallerLogin(caller_id){
+  if(!confirm('Régénérer un mot de passe temporaire pour ce cold caller ?')) return;
+  const res = await callOnboardingApi({ action: 'reset_cold_caller_login', caller_id });
+  if(res?.error){ alert('Erreur : ' + res.error); return; }
+  alert(`Nouveau mot de passe temporaire pour ${res.email} :\n\n${res.temp_password}\n\nCommunique-le manuellement au cold caller (le courriel de bienvenue n'est pas renvoyé automatiquement ici).`);
 }
 
 async function toggleCallerActive(caller_id, active){

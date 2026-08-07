@@ -541,11 +541,56 @@ Deno.serve(async (req) => {
       });
       const [caller] = await callerRes.json();
 
-      await sendEmail(email, "Bienvenue sur Portail — ton accès cold caller",
-        `Bonjour ${full_name},\n\nTon compte Portail pour la prospection téléphonique est prêt.\n\nPortail : ${CALLER_PORTAL_URL}\nCourriel : ${email}\nMot de passe temporaire : ${password}\n\nConnecte-toi pour voir ta file d'appels et logger tes appels. Tu peux changer ton mot de passe via "Mot de passe oublié" sur la page de connexion.\n\nL'équipe Portail`);
+      // On ne fait jamais confiance à l'envoi du courriel : Resend peut
+      // échouer silencieusement (ex: domaine expéditeur non vérifié, qui
+      // limite l'envoi à l'adresse du compte Resend lui-même). Le mot de
+      // passe temporaire est donc TOUJOURS renvoyé dans la réponse — pas
+      // seulement quand le courriel échoue — pour que l'admin puisse le
+      // communiquer manuellement dans tous les cas.
+      let emailSent = false;
+      let emailError: string | null = null;
+      try {
+        const emailRes = await sendEmail(email, "Bienvenue sur Portail — ton accès cold caller",
+          `Bonjour ${full_name},\n\nTon compte Portail pour la prospection téléphonique est prêt.\n\nPortail : ${CALLER_PORTAL_URL}\nCourriel : ${email}\nMot de passe temporaire : ${password}\n\nConnecte-toi pour voir ta file d'appels et logger tes appels. Tu peux changer ton mot de passe via "Mot de passe oublié" sur la page de connexion.\n\nL'équipe Portail`);
+        emailSent = emailRes.ok;
+        if (!emailRes.ok) {
+          const errData = await emailRes.json().catch(() => ({}));
+          emailError = errData.message || `Resend a répondu ${emailRes.status}`;
+        }
+      } catch (e) {
+        emailError = String(e);
+      }
 
-      await logAudit("cold_caller.create", "cold_callers", caller?.id ?? null, { email });
-      return new Response(JSON.stringify({ ok: true, caller_id: caller?.id, temp_password: password }), { status: 200, headers: corsHeaders });
+      await logAudit("cold_caller.create", "cold_callers", caller?.id ?? null, { email, email_sent: emailSent, email_error: emailError });
+      return new Response(JSON.stringify({ ok: true, caller_id: caller?.id, temp_password: password, email_sent: emailSent, email_error: emailError }), { status: 200, headers: corsHeaders });
+    }
+
+    // Régénère un mot de passe temporaire pour un cold caller déjà créé —
+    // filet de sécurité si le courriel de bienvenue n'a jamais été reçu
+    // (voir la note dans create_cold_caller). Contrairement à
+    // update_owner_login, ne change pas le courriel de connexion.
+    if (action === "reset_cold_caller_login") {
+      const { caller_id } = body;
+      if (!caller_id) {
+        return new Response(JSON.stringify({ error: "caller_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      const callerRes = await fetch(`${supabaseUrl}/rest/v1/cold_callers?id=eq.${caller_id}&select=id,user_id,email,full_name`, { headers: adminHeaders });
+      const [caller] = await callerRes.json().catch(() => [null]);
+      if (!caller || !caller.user_id) {
+        return new Response(JSON.stringify({ error: "Cold caller ou compte introuvable" }), { status: 404, headers: corsHeaders });
+      }
+      const password = randomPassword();
+      const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users/${caller.user_id}`, {
+        method: "PUT",
+        headers: adminHeaders,
+        body: JSON.stringify({ password, email_confirm: true }),
+      });
+      const authData = await authRes.json().catch(() => ({}));
+      if (!authRes.ok) {
+        return new Response(JSON.stringify({ error: authData.msg || authData.error_description || "Impossible de mettre à jour le compte" }), { status: 400, headers: corsHeaders });
+      }
+      await logAudit("cold_caller.login_reset", "cold_callers", caller_id, {});
+      return new Response(JSON.stringify({ ok: true, email: caller.email, temp_password: password }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
