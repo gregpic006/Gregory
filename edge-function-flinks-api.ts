@@ -179,18 +179,21 @@ Deno.serve(async (req) => {
     const [user] = await userRes.json();
     const isAdmin = !!user?.is_admin;
 
-    let callerOwnerId: string | null = null;
-    if (!isAdmin) {
-      const ownerRes = await fetch(`${supabaseUrl}/rest/v1/owners?user_id=eq.${userId}&select=id`, { headers: adminHeaders });
-      const [ownerRow] = await ownerRes.json();
-      callerOwnerId = ownerRow?.id ?? null;
-      if (!callerOwnerId) {
-        return new Response(JSON.stringify({ error: "Accès refusé" }), { status: 403, headers: corsHeaders });
-      }
+    // On cherche systématiquement un dossier propriétaire lié à ce
+    // compte, même s'il est admin — un même compte peut être les deux à
+    // la fois (cas d'un opérateur solo, comme en phase pilote).
+    const ownerRes = await fetch(`${supabaseUrl}/rest/v1/owners?user_id=eq.${userId}&select=id`, { headers: adminHeaders });
+    const [ownerRow] = await ownerRes.json();
+    const callerOwnerId: string | null = ownerRow?.id ?? null;
+
+    if (!isAdmin && !callerOwnerId) {
+      return new Response(JSON.stringify({ error: "Accès refusé" }), { status: 403, headers: corsHeaders });
     }
-    // Un propriétaire ne peut jamais agir sur un owner_id autre que le
-    // sien, quoi qu'il envoie dans le corps de la requête.
-    const resolveOwnerId = (requested?: string) => (isAdmin ? requested ?? null : callerOwnerId);
+    // Priorité : un owner_id explicitement fourni par un admin agissant
+    // pour un propriétaire tiers (portail admin) ; sinon le propre
+    // dossier du demandeur (portail propriétaire, ou admin qui est aussi
+    // propriétaire et n'a rien précisé).
+    const resolveOwnerId = (requested?: string) => (isAdmin && requested ? requested : callerOwnerId);
     const actorType = isAdmin ? "admin" : "owner";
     const actorId = isAdmin ? userId : callerOwnerId;
 
@@ -208,11 +211,8 @@ Deno.serve(async (req) => {
     if (action === "link_account") {
       const owner_id = resolveOwnerId(body.owner_id);
       const { login_id } = body;
-      if (!owner_id) {
-        return new Response(JSON.stringify({ error: `owner_id manquant (isAdmin=${isAdmin}, callerOwnerId=${callerOwnerId})` }), { status: 400, headers: corsHeaders });
-      }
-      if (!login_id) {
-        return new Response(JSON.stringify({ error: "login_id manquant" }), { status: 400, headers: corsHeaders });
+      if (!owner_id || !login_id) {
+        return new Response(JSON.stringify({ error: "owner_id et login_id requis" }), { status: 400, headers: corsHeaders });
       }
       const token = await flinksGenerateAuthorizeToken();
       const auth = await flinksAuthorize(token, login_id);
@@ -226,7 +226,13 @@ Deno.serve(async (req) => {
     }
 
     if (action === "list_connections") {
-      const filter = isAdmin ? "" : `&owner_id=eq.${callerOwnerId}`;
+      // "all" n'est honoré que pour un admin explicitement en mode
+      // gestion multi-propriétaires (portail admin) — sinon, même un
+      // admin qui est aussi propriétaire ne voit que son propre compte
+      // (évite qu'un admin-propriétaire voie les comptes des autres en
+      // consultant simplement son propre portail propriétaire).
+      const wantsAll = isAdmin && body.all === true;
+      const filter = wantsAll ? "" : `&owner_id=eq.${callerOwnerId}`;
       const res = await fetch(`${supabaseUrl}/rest/v1/bank_connections?select=*,owners(full_name)&order=created_at.desc${filter}`, { headers: adminHeaders });
       return new Response(JSON.stringify({ connections: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }

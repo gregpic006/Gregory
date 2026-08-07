@@ -1297,7 +1297,7 @@ async function linkFlinksManual(){
 
 async function loadFlinksConnections(){
   const container = document.getElementById('flinks-connections-body');
-  const res = await callFlinksApi({ action: 'list_connections' });
+  const res = await callFlinksApi({ action: 'list_connections', all: true });
   const connections = res?.connections || [];
   if(!connections.length){
     container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune connexion bancaire pour l\'instant.</p>';
