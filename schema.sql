@@ -2385,6 +2385,32 @@ as $$ select id from cold_callers where user_id = auth.uid() $$;
 alter table prospects add column if not exists assigned_caller_id uuid references cold_callers(id);
 
 -- ============================================================
+-- PROSPECTION IA — recherche web de propriétaires auto-gestionnaires
+-- ============================================================
+-- source_url trace la page web réelle où le prospect a été trouvé (voir
+-- find-prospects-ai.ts) — obligatoire pour tout prospect lead_source =
+-- 'ai_web_search', jamais rempli pour les autres sources. Sert à vérifier
+-- qu'aucune coordonnée n'a été inventée par l'IA.
+alter table prospects add column if not exists source_url text;
+
+create or replace function trigger_find_prospects_ai()
+returns void language plpgsql as $$
+begin
+  perform net.http_post(
+    url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/find-prospects-ai',
+    body := jsonb_build_object('action', 'run'),
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+      'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+    )
+  );
+end;
+$$;
+
+select cron.schedule('daily-find-prospects-ai', '30 15 * * *', $$select trigger_find_prospects_ai()$$);
+
+-- ============================================================
 -- NOTE (résolue) — architecture des accès admin
 -- ============================================================
 -- Cette note datait d'avant la mise en place de l'architecture actuelle

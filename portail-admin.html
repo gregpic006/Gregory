@@ -305,6 +305,11 @@
     <tbody id="prospects-body"><tr class="empty-row"><td colspan="11">Chargement...</td></tr></tbody>
   </table>
 
+  <div style="display:flex;align-items:center;gap:12px;margin:-8px 0 32px;">
+    <button onclick="runFindProspectsAi()" id="find-prospects-btn" style="border:1px solid var(--ink);background:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">🔍 Chercher des prospects maintenant (IA)</button>
+    <span id="find-prospects-msg" style="font-size:12.5px;color:var(--muted);"></span>
+  </div>
+
   <h1 style="margin-top:40px;font-size:22px;">Cold callers — prospection téléphonique</h1>
   <p class="subtitle" style="margin-bottom:16px;">Comptes des travailleurs autonomes qui font de la prospection par téléphone — ils voient uniquement les prospects qui leur sont assignés ci-dessus</p>
 
@@ -793,6 +798,7 @@ const auditActionLabel = {
   'cold_caller.reactivated': 'Cold caller réactivé', 'cold_caller.deactivated': 'Cold caller désactivé',
   'cold_caller.login_reset': 'Mot de passe cold caller réinitialisé',
   'prospect.call_logged_by_caller': 'Appel loggé par un cold caller', 'prospect.stage_change_by_caller': 'Statut prospect modifié par un cold caller',
+  'prospect.ai_found_and_assigned': 'Prospect trouvé par l\'IA et assigné',
 };
 const auditEntityLabel = {
   owners: 'Propriétaires', buildings: 'Immeubles', units: 'Unités', tenants: 'Locataires',
@@ -1399,7 +1405,7 @@ async function loadProspects(){
   }
   body.innerHTML = prospects.map(p => `
     <tr>
-      <td>${esc(p.full_name)}<br><span style="color:var(--muted);font-size:11.5px;">${esc(p.email) || ''} ${esc(p.phone) || ''}</span><br><span style="color:var(--muted);font-size:11px;">Source : ${esc(p.lead_source) || 'inconnue'}${p.acquisition_cost != null ? ' — coût : ' + Number(p.acquisition_cost).toLocaleString('fr-CA') + ' $' : ''} <a href="#" onclick="promptAcquisitionCost('${p.id}', ${p.acquisition_cost ?? 'null'}); return false;">modifier</a></span>${p.stage === 'lost' && p.loss_reason ? '<br><span style="color:var(--rust);font-size:11px;">Raison de perte : ' + esc(p.loss_reason) + '</span>' : ''}</td>
+      <td>${esc(p.full_name)}<br><span style="color:var(--muted);font-size:11.5px;">${esc(p.email) || ''} ${esc(p.phone) || ''}</span><br><span style="color:var(--muted);font-size:11px;">Source : ${esc(p.lead_source) || 'inconnue'}${p.source_url ? ' (<a href="' + esc(p.source_url) + '" target="_blank" rel="noopener">vérifier</a>)' : ''}${p.acquisition_cost != null ? ' — coût : ' + Number(p.acquisition_cost).toLocaleString('fr-CA') + ' $' : ''} <a href="#" onclick="promptAcquisitionCost('${p.id}', ${p.acquisition_cost ?? 'null'}); return false;">modifier</a></span>${p.stage === 'lost' && p.loss_reason ? '<br><span style="color:var(--rust);font-size:11px;">Raison de perte : ' + esc(p.loss_reason) + '</span>' : ''}</td>
       <td class="num">${p.num_doors ?? '—'}</td>
       <td class="num">${p.potential_monthly_revenue != null ? Number(p.potential_monthly_revenue).toLocaleString('fr-CA') + ' $' : '—'}${p.vendor_commission_estimate != null ? '<br><span style="color:var(--muted);font-size:11px;">commission est. ' + Number(p.vendor_commission_estimate).toLocaleString('fr-CA') + ' $</span>' : ''}</td>
       <td>${esc(p.interest_level) || '—'}</td>
@@ -1435,6 +1441,32 @@ async function loadProspects(){
 async function assignCallerToProspect(prospect_id, caller_id){
   await callCrmApi({ action: 'assign_caller', prospect_id, caller_id: caller_id || null });
   await loadProspects();
+}
+
+async function runFindProspectsAi(){
+  const btn = document.getElementById('find-prospects-btn');
+  const msg = document.getElementById('find-prospects-msg');
+  btn.disabled = true;
+  msg.textContent = 'Recherche en cours (jusqu\'à une minute)...';
+  try {
+    const { data, error } = await supabaseClient.functions.invoke('find-prospects-ai', { body: { action: 'run' } });
+    if(error){
+      let detail = error.message;
+      try { const body = await error.context?.json(); if(body?.error) detail = body.error; } catch(e){}
+      msg.textContent = 'Erreur : ' + detail;
+      return;
+    }
+    if(data?.note){
+      msg.textContent = data.note;
+    } else if(data?.inserted){
+      msg.textContent = `${data.inserted} nouveau(x) prospect(s) trouvé(s) et assigné(s) — voir le tableau ci-dessus.`;
+    } else {
+      msg.textContent = 'Aucun nouveau prospect trouvé cette fois-ci.';
+    }
+    await loadProspects();
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function loadCallers(){
