@@ -423,7 +423,7 @@ Deno.serve(async (req) => {
         `Bonjour ${full_name},\n\nTon compte propriétaire Portail est prêt.\n\nPortail : ${OWNER_PORTAL_URL}\nCourriel : ${email}\nMot de passe temporaire : ${password}\n\nConnecte-toi puis change ton mot de passe si tu le souhaites (lien "Mot de passe oublié" sur la page de connexion).\n\nL'équipe Portail`);
 
       await logAudit("owner.create", "owners", owner?.id ?? null, { email });
-      return new Response(JSON.stringify({ ok: true, owner_id: owner?.id, temp_password: password }), { status: 200, headers: corsHeaders });
+      return new Response(JSON.stringify({ ok: true, owner_id: owner?.id, temp_password: password }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "add_building") {
@@ -438,7 +438,7 @@ Deno.serve(async (req) => {
       });
       const [building] = await res.json();
       await logAudit("building.create", "buildings", building?.id ?? null, { address });
-      return new Response(JSON.stringify({ ok: true, building_id: building?.id }), { status: 200, headers: corsHeaders });
+      return new Response(JSON.stringify({ ok: true, building_id: building?.id }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "add_unit") {
@@ -453,7 +453,7 @@ Deno.serve(async (req) => {
       });
       const [unit] = await res.json();
       await logAudit("unit.create", "units", unit?.id ?? null, { unit_number });
-      return new Response(JSON.stringify({ ok: true, unit_id: unit?.id }), { status: 200, headers: corsHeaders });
+      return new Response(JSON.stringify({ ok: true, unit_id: unit?.id }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "create_tenant") {
@@ -510,7 +510,7 @@ Deno.serve(async (req) => {
       }
 
       await logAudit("tenant.create", "tenants", tenant?.id ?? null, { email: email || null, unit_id, has_login: !!authUserId });
-      return new Response(JSON.stringify({ ok: true, tenant_id: tenant?.id, temp_password: tempPassword }), { status: 200, headers: corsHeaders });
+      return new Response(JSON.stringify({ ok: true, tenant_id: tenant?.id, temp_password: tempPassword }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "create_cold_caller") {
@@ -562,7 +562,7 @@ Deno.serve(async (req) => {
       }
 
       await logAudit("cold_caller.create", "cold_callers", caller?.id ?? null, { email, email_sent: emailSent, email_error: emailError });
-      return new Response(JSON.stringify({ ok: true, caller_id: caller?.id, temp_password: password, email_sent: emailSent, email_error: emailError }), { status: 200, headers: corsHeaders });
+      return new Response(JSON.stringify({ ok: true, caller_id: caller?.id, temp_password: password, email_sent: emailSent, email_error: emailError }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Régénère un mot de passe temporaire pour un cold caller déjà créé —
