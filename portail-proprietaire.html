@@ -539,7 +539,14 @@ async function loadOwnerBankConnections(){
       <b>${esc(c.institution_name) || 'Institution inconnue'}</b> — ${statusLabel[c.status] || esc(c.status)}
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Dernière synchro : ${c.last_synced_at ? new Date(c.last_synced_at).toLocaleString('fr-CA') : 'jamais'}</div>
       ${c.last_sync_error ? `<div style="color:var(--rust);font-size:12px;margin-top:2px;">${esc(c.last_sync_error)}</div>` : ''}
+      <button onclick="syncOwnerBankNow('${c.id}')" style="margin-top:8px;padding:6px 10px;font-size:11.5px;">Synchroniser maintenant</button>
     </div>`).join('');
+}
+
+async function syncOwnerBankNow(connection_id){
+  const res = await callFlinksApiOwner({ action: 'sync_now', connection_id });
+  if(res?.ok){ alert(`Synchronisé — ${res.fetched} transaction(s) trouvée(s), ${res.imported} nouvelle(s) importée(s).`); }
+  await loadOwnerBankConnections();
 }
 
 async function loadExpenses(){
