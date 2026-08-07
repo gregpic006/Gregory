@@ -450,6 +450,14 @@ alter table reports add column if not exists over_estimate_count int default 0;
 alter table reports add column if not exists over_estimate_work_orders jsonb;
 alter table reports add column if not exists owner_actions_needed jsonb;
 alter table reports add column if not exists bank_reconciliation_status text default 'non_connecte';
+
+-- Relevé mensuel structuré (Revenus | Dépenses | Honoraires | Loyers
+-- impayés | Travaux | Solde) — sépare les dépenses liées à un travail
+-- administré par Portail (déjà comptées dans expenses_total) du reste,
+-- et donne le montant réel des loyers impayés plutôt qu'un simple compte.
+alter table reports add column if not exists work_order_expenses_total numeric(10,2) default 0;
+alter table reports add column if not exists other_expenses_total numeric(10,2) default 0;
+alter table reports add column if not exists late_amount numeric(10,2) default 0;
 alter table reports add column if not exists prev_rent_received numeric(10,2);
 alter table reports add column if not exists prev_occupancy_rate numeric(5,2);
 alter table reports add column if not exists prev_expenses_total numeric(10,2);

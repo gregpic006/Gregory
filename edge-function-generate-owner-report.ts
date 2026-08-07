@@ -63,6 +63,7 @@ Deno.serve(async (req) => {
     const payments = await paymentsRes.json();
     const rentReceived = payments.filter((p: any) => p.status === "paid").reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
     const lateCount = payments.filter((p: any) => p.status === "late").length;
+    const lateAmount = Math.round(payments.filter((p: any) => p.status === "late").reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0) * 100) / 100;
 
     const expensesRes = await fetch(
       `${supabaseUrl}/rest/v1/expenses?building_id=in.${buildingFilter}&expense_date=gte.${period_start}&expense_date=lte.${period_end}&select=id,description,amount,expense_date,receipt_document_id,work_order_id`,
@@ -100,6 +101,15 @@ Deno.serve(async (req) => {
           : null;
       })
       .filter(Boolean);
+
+    // Relevé structuré : "Travaux" = dépenses liées à un travail assigné
+    // par Portail (worker_pay + coordination_fee déjà inclus dans le
+    // montant de la dépense) ; "Dépenses" = le reste (taxes municipales,
+    // assurances, etc. — jamais administré par Portail).
+    const workOrderExpensesTotal = Math.round(
+      expenses.filter((e: any) => e.work_order_id && workOrdersById.has(e.work_order_id)).reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0) * 100,
+    ) / 100;
+    const otherExpensesTotal = Math.round((expensesTotal - workOrderExpensesTotal) * 100) / 100;
 
     const approvalsRes = await fetch(
       `${supabaseUrl}/rest/v1/approvals?owner_id=eq.${owner_id}&status=eq.pending&select=id`,
@@ -191,8 +201,11 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         rent_expected: rentExpected,
         rent_received: rentReceived,
         late_count: lateCount,
+        late_amount: lateAmount,
         occupancy_rate: occupancyRate,
         expenses_total: expensesTotal,
+        work_order_expenses_total: workOrderExpensesTotal,
+        other_expenses_total: otherExpensesTotal,
         work_orders_completed: workOrdersCompleted,
         work_orders_in_progress: workOrdersInProgress,
         management_fee: managementFee,

@@ -820,9 +820,15 @@ async function loadReports(){
     .eq('owner_id', ownerRecord.id)
     .order('period_start', { ascending: false });
 
+  const { data: invoicesData } = await supabaseClient
+    .from('invoices')
+    .select('*')
+    .eq('owner_id', ownerRecord.id);
+  const invoiceByPeriod = new Map((invoicesData || []).map(inv => [`${inv.period_start}|${inv.period_end}`, inv]));
+
   const body = document.getElementById('reports-body');
   if(!data || !data.length){
-    body.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun rapport disponible pour l\'instant. Le premier rapport sera généré automatiquement au début du mois prochain.</p>';
+    body.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun relevé disponible pour l\'instant. Le premier sera généré automatiquement au début du mois prochain.</p>';
     return;
   }
   const pctChange = (curr, prev) => {
@@ -832,19 +838,30 @@ async function loadReports(){
     return ` <span style="color:${diff >= 0 ? 'var(--sage)' : 'var(--rust)'};">(${sign}${diff}% vs mois précédent)</span>`;
   };
 
-  body.innerHTML = data.map(r => `
+  body.innerHTML = data.map(r => {
+    const inv = invoiceByPeriod.get(`${r.period_start}|${r.period_end}`);
+    const honoraires = Number(r.management_fee ?? 0) + Number(inv?.coordination_fees_amount ?? 0);
+    const taxes = Number(inv?.gst_amount ?? 0) + Number(inv?.qst_amount ?? 0);
+    return `
     <div class="approve-row" style="flex-direction:column;align-items:flex-start;gap:10px;">
       <b>${new Date(r.period_start).toLocaleDateString('fr-CA', {month:'long', year:'numeric'})}</b>
       <span style="color:var(--muted);font-size:13px;">${esc(r.summary) || ''}</span>
-      <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:12.5px;">
-        <span>Loyers reçus : <b>${Number(r.rent_received ?? 0).toLocaleString('fr-CA')} $</b> / ${Number(r.rent_expected ?? 0).toLocaleString('fr-CA')} $${pctChange(r.rent_received, r.prev_rent_received)}</span>
-        <span>Retards : <b>${r.late_count ?? 0}</b></span>
-        <span>Occupation : <b>${r.occupancy_rate ?? 0} %</b>${pctChange(r.occupancy_rate, r.prev_occupancy_rate)}</span>
-        <span>Dépenses : <b>${Number(r.expenses_total ?? 0).toLocaleString('fr-CA')} $</b>${pctChange(r.expenses_total, r.prev_expenses_total)}</span>
-        <span>Frais de gestion : <b>${Number(r.management_fee ?? 0).toLocaleString('fr-CA')} $</b></span>
-        <span>Renouvellements à venir : <b>${r.renewals_upcoming ?? 0}</b></span>
-        <span>Net à te remettre : <b>${Number(r.net_due_to_owner ?? 0).toLocaleString('fr-CA')} $</b>${pctChange(r.net_due_to_owner, r.prev_net_due_to_owner)}</span>
-      </div>
+
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+        <thead><tr style="text-align:left;border-bottom:1px solid var(--line);">
+          <th style="padding:4px 8px 4px 0;">Revenus</th><th style="padding:4px 8px;">Dépenses</th><th style="padding:4px 8px;">Honoraires</th><th style="padding:4px 8px;">Loyers impayés</th><th style="padding:4px 8px;">Travaux</th><th style="padding:4px 0 4px 8px;">Solde</th>
+        </tr></thead>
+        <tbody><tr>
+          <td style="padding:6px 8px 6px 0;">${Number(r.rent_received ?? 0).toLocaleString('fr-CA')} $${pctChange(r.rent_received, r.prev_rent_received)}</td>
+          <td style="padding:6px 8px;">${Number(r.other_expenses_total ?? r.expenses_total ?? 0).toLocaleString('fr-CA')} $</td>
+          <td style="padding:6px 8px;">${honoraires.toLocaleString('fr-CA')} $${taxes > 0 ? ` (+${taxes.toLocaleString('fr-CA')} $ taxes)` : ''}</td>
+          <td style="padding:6px 8px;color:${Number(r.late_amount ?? 0) > 0 ? 'var(--rust)' : 'inherit'};">${Number(r.late_amount ?? 0).toLocaleString('fr-CA')} $ (${r.late_count ?? 0})</td>
+          <td style="padding:6px 8px;">${Number(r.work_order_expenses_total ?? 0).toLocaleString('fr-CA')} $</td>
+          <td style="padding:6px 0 6px 8px;"><b>${Number(r.net_due_to_owner ?? 0).toLocaleString('fr-CA')} $</b>${pctChange(r.net_due_to_owner, r.prev_net_due_to_owner)}</td>
+        </tr></tbody>
+      </table>
+      <span style="font-size:11.5px;color:var(--muted);">Occupation : ${r.occupancy_rate ?? 0} %${pctChange(r.occupancy_rate, r.prev_occupancy_rate)} · Renouvellements à venir : ${r.renewals_upcoming ?? 0}${inv ? ` · Facture ${esc(inv.invoice_number)}` : ''}</span>
+
       ${(r.owner_actions_needed && r.owner_actions_needed.length) ? `
       <div style="background:#fdf3e0;border-left:2px solid var(--brass);padding:10px 14px;font-size:12.5px;width:100%;">
         <b>Actions attendues de ta part :</b>
@@ -861,7 +878,8 @@ async function loadReports(){
         <ul style="margin:6px 0 0 18px;padding:0;">${r.over_estimate_work_orders.map(w => `<li>${esc(w.description)} — estimé ${Number(w.estimated_cost).toLocaleString('fr-CA')} $, réel ${Number(w.actual_cost).toLocaleString('fr-CA')} $ (+${Number(w.overage).toLocaleString('fr-CA')} $)</li>`).join('')}</ul>
       </details>` : ''}
       <span style="font-size:11.5px;color:var(--muted);">Rapprochement bancaire : ${r.bank_reconciliation_status === 'non_connecte' ? 'aucun compte bancaire lié pour l\'instant' : esc(r.bank_reconciliation_status)}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 async function loadOwnerInvoices(){
