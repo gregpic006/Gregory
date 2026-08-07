@@ -148,6 +148,27 @@ create table bank_transactions (
 -- sa création).
 alter table bank_transactions enable row level security;
 
+-- Moteur de rapprochement v2 :
+--   - external_id : identifiant unique de la transaction (fourni par le
+--     relevé/OFX, ou calculé par empreinte si absent) — empêche qu'une
+--     même transaction soit importée deux fois, même via deux fichiers
+--     différents qui se chevauchent.
+--   - match_confidence : score déterministe (0-100) du meilleur
+--     candidat trouvé, distinct de ai_confidence (qui ne sert que pour
+--     les dépôts non identifiables par les règles).
+--   - 'suggested' : score entre 75 et 94 — une correspondance probable
+--     existe mais nécessite une confirmation humaine avant d'être
+--     appliquée. 'reversed' : dépôt annulé/rejeté détecté (montant
+--     négatif correspondant à un paiement déjà marqué payé) — le
+--     paiement visé est automatiquement rouvert.
+alter table bank_transactions add column if not exists external_id text;
+alter table bank_transactions add column if not exists match_confidence numeric(5,2);
+alter table bank_transactions drop constraint if exists bank_transactions_match_status_check;
+alter table bank_transactions add constraint bank_transactions_match_status_check
+  check (match_status in ('matched','partial','overpaid','duplicate','unmatched','ignored','suggested','reversed'));
+create unique index if not exists bank_transactions_owner_external_id_key
+  on bank_transactions (owner_id, external_id) where external_id is not null;
+
 -- ============ PAYMENTS ============
 create table payments (
   id uuid primary key default gen_random_uuid(),
@@ -852,6 +873,50 @@ alter table payments add column if not exists late_reminder_count int default 0;
 alter table payments add column if not exists last_late_reminder_at timestamptz;
 alter table payments add column if not exists escalated_to_human boolean default false;
 
+-- amount_received : total cumulatif reçu pour ce paiement — nécessaire
+-- pour gérer les colocataires qui paient chacun une partie, ou un
+-- paiement partiel suivi d'un complément quelques jours plus tard. Le
+-- statut ne passe à 'paid' que lorsque le cumul atteint le montant dû
+-- (avec une petite tolérance pour les écarts de quelques dollars).
+alter table payments add column if not exists amount_received numeric(10,2) default 0;
+
+-- ============================================================
+-- GÉNÉRATION AUTOMATIQUE DES PAIEMENTS MENSUELS
+-- ============================================================
+-- Sans ceci, rien ne crée jamais les lignes "payments" à partir des
+-- baux actifs — tout le reste (rappels, rapprochement, rapports)
+-- dépendrait alors de lignes que personne n'insère jamais. Génère la
+-- ligne du mois courant ET du mois suivant pour chaque bail actif ou
+-- renouvelé (idempotent : ne recrée jamais une ligne déjà existante
+-- pour ce bail et cette échéance). Le loyer est toujours dû le 1er du
+-- mois, conformément aux baux réels utilisés dans ce projet (voir
+-- section E du formulaire TAL : "le paiement du loyer se fera le 1er
+-- jour du mois").
+create or replace function generate_monthly_payments()
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  l record;
+  target_month date;
+  months date[] := array[date_trunc('month', current_date)::date, date_trunc('month', current_date + interval '1 month')::date];
+begin
+  foreach target_month in array months loop
+    for l in
+      select id, monthly_rent from leases
+      where status in ('active','renewed')
+        and start_date <= target_month
+        and (end_date is null or end_date >= target_month)
+    loop
+      if not exists (select 1 from payments where lease_id = l.id and due_date = target_month) then
+        insert into payments (lease_id, amount, due_date, status)
+        values (l.id, l.monthly_rent, target_month, 'pending');
+      end if;
+    end loop;
+  end loop;
+end;
+$$;
+
+select cron.schedule('daily-generate-monthly-payments', '0 5 * * *', $$select generate_monthly_payments()$$);
+
 -- ============ PAYMENT REMINDERS (historique complet des rappels envoyés) ============
 create table payment_reminders (
   id uuid primary key default gen_random_uuid(),
@@ -898,14 +963,17 @@ begin
     update payments set reminder_upcoming_sent = true where id = p.id;
   end loop;
 
-  -- Rappels de retard : au plus 1 tous les 5 jours, plafonné à 3.
+  -- Rappels de retard aux jours 1, 3 et 5 après l'échéance (cadence
+  -- demandée par le propriétaire), plafonné à 3 rappels au locataire.
+  -- late_reminder_count sert d'index dans le tableau des seuils : 0e
+  -- rappel -> seuil jour 1, 1er rappel déjà envoyé -> seuil jour 3, etc.
   for p in
-    select id from payments
+    select id, due_date, late_reminder_count from payments
     where status = 'late'
     and coalesce(reminder_paused, false) = false
     and coalesce(escalated_to_human, false) = false
     and coalesce(late_reminder_count, 0) < 3
-    and (last_late_reminder_at is null or last_late_reminder_at <= now() - interval '5 days')
+    and (current_date - due_date) >= (array[1,3,5])[coalesce(late_reminder_count, 0) + 1]
   loop
     perform net.http_post(
       url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-payment-reminder',
@@ -919,15 +987,15 @@ begin
     update payments set late_reminder_count = coalesce(late_reminder_count, 0) + 1, last_late_reminder_at = now() where id = p.id;
   end loop;
 
-  -- Escalade humaine : 3 rappels envoyés, toujours en retard 5 jours plus
-  -- tard -> on cesse d'écrire au locataire et on avise un admin.
+  -- Escalade humaine au jour 8 de retard : on cesse d'écrire au
+  -- locataire et on avise un admin — l'IA ne poursuit jamais seule
+  -- au-delà de ce point, peu importe le nombre de rappels déjà envoyés.
   for p in
     select id from payments
     where status = 'late'
     and coalesce(reminder_paused, false) = false
     and coalesce(escalated_to_human, false) = false
-    and coalesce(late_reminder_count, 0) >= 3
-    and last_late_reminder_at <= now() - interval '5 days'
+    and (current_date - due_date) >= 8
   loop
     perform net.http_post(
       url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-payment-reminder',
