@@ -60,7 +60,7 @@
 
     <div id="panel-other-time" class="panel">
       <p class="muted" style="margin-bottom:8px;">Quel moment te conviendrait mieux ?</p>
-      <textarea id="other_time-message" placeholder="Ex: Plutôt samedi matin, ou en soirée en semaine."></textarea>
+      <textarea id="propose_other_time-message" placeholder="Ex: Plutôt samedi matin, ou en soirée en semaine."></textarea>
       <div class="actions">
         <button class="primary" onclick="respond('propose_other_time')">Envoyer</button>
         <button onclick="showPanel('choices')">Annuler</button>
@@ -99,12 +99,16 @@ function esc(s){
 }
 
 async function callVisitApi(payload){
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/handle-visit-response`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
-    body: JSON.stringify({ visit_id: visitId, token, ...payload }),
-  });
-  return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/handle-visit-response`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({ visit_id: visitId, token, ...payload }),
+    });
+    return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  } catch (e) {
+    return { ok: false, status: 0, data: { error: "Impossible de contacter le serveur — vérifie ta connexion et réessaie." } };
+  }
 }
 
 function showPanel(name){

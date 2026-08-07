@@ -2325,6 +2325,25 @@ alter table invoices add column if not exists collected_at timestamptz;
 alter table invoices add column if not exists collection_error text;
 
 -- ============================================================
+-- CORRECTIFS — audit fonctionnel complet des 4 portails
+-- ============================================================
+-- 1. Un locataire ne pouvait, via un appel direct à l'API REST (clé
+--    anon publique), créer une demande de service rattachée à
+--    l'unité de quelqu'un d'autre — la policy ne vérifiait que
+--    tenant_id, jamais unit_id.
+drop policy if exists "own service_requests as tenant insert" on service_requests;
+create policy "own service_requests as tenant insert" on service_requests for insert
+  with check (tenant_id = auth_tenant_id() and unit_id in (select tenant_unit_ids()));
+
+-- 2. "propose_other_time" (confirmer-visite.html) ne changeait jamais
+--    visits.status, laissant le lien à usage unique réutilisable
+--    indéfiniment pour cette action une fois le bug de champ manquant
+--    corrigé côté HTML.
+alter table visits drop constraint if exists visits_status_check;
+alter table visits add constraint visits_status_check
+  check (status in ('proposed','confirmed','declined','completed','no_show','cancelled','other_time_proposed'));
+
+-- ============================================================
 -- NOTE (résolue) — architecture des accès admin
 -- ============================================================
 -- Cette note datait d'avant la mise en place de l'architecture actuelle

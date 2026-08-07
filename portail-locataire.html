@@ -288,6 +288,9 @@ async function loadTenantDashboard(userId){
   await loadRequests();
 }
 
+const leaseStatusLabel = { active: 'Actif', renewed: 'Renouvelé', ended: 'Terminé' };
+const leaseStatusClass = { active: 'ok', renewed: 'ok', ended: 'neutral' };
+
 function renderOverview(lease){
   const sub = document.getElementById('tenant-subtitle');
   const details = document.getElementById('lease-details');
@@ -307,7 +310,7 @@ function renderOverview(lease){
     <div class="kv"><span>Loyer mensuel</span><span>${Number(lease.monthly_rent).toLocaleString('fr-CA')} $</span></div>
     <div class="kv"><span>Début du bail</span><span>${esc(lease.start_date) || '—'}</span></div>
     <div class="kv"><span>Fin du bail</span><span>${esc(lease.end_date) || '—'}</span></div>
-    <div class="kv"><span>Statut</span><span><span class="tag ok">${esc(lease.status)}</span></span></div>
+    <div class="kv"><span>Statut</span><span><span class="tag ${leaseStatusClass[lease.status] || 'neutral'}">${leaseStatusLabel[lease.status] || esc(lease.status)}</span></span></div>
   `;
 }
 

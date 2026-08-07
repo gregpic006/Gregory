@@ -119,12 +119,16 @@ function esc(s){
 }
 
 async function callResponseApi(payload){
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/handle-worker-response`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
-    body: JSON.stringify({ work_order_id: workOrderId, token, ...payload }),
-  });
-  return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/handle-worker-response`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({ work_order_id: workOrderId, token, ...payload }),
+    });
+    return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  } catch (e) {
+    return { ok: false, status: 0, data: { error: "Impossible de contacter le serveur — vérifie ta connexion et réessaie." } };
+  }
 }
 
 function showPanel(name){
@@ -222,7 +226,7 @@ async function init(){
     return;
   }
 
-  document.getElementById('worker-name').textContent = esc(data.worker_name || '');
+  document.getElementById('worker-name').textContent = data.worker_name || '';
   document.getElementById('wo-description').textContent = data.description || '';
   document.getElementById('wo-address').textContent = `${data.address || ''} — Unité ${data.unit_number || ''}`;
   document.getElementById('wo-pay').textContent = `Paie prévue : ${data.worker_pay != null ? Number(data.worker_pay).toLocaleString('fr-CA') + ' $' : 'à confirmer'}`;

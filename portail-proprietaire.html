@@ -452,7 +452,7 @@ function renderOverview(buildings){
 function renderBuildingsTab(buildings){
   const body = document.getElementById('buildings-body');
   if(!buildings.length){ body.innerHTML = '<tr class="empty-row"><td colspan="3">Aucun immeuble.</td></tr>'; return; }
-  body.innerHTML = buildings.map(b => `<tr><td>${esc(b.address)}</td><td>${esc(b.unit_count)}</td><td>${esc(b.year_built) ?? '—'}</td></tr>`).join('');
+  body.innerHTML = buildings.map(b => `<tr><td>${esc(b.address)}</td><td>${esc(b.unit_count)}</td><td>${b.year_built != null ? esc(b.year_built) : '—'}</td></tr>`).join('');
 }
 
 function renderUnitsTab(buildings){
@@ -624,7 +624,7 @@ async function loadWorkOrders(){
     <tr>
       <td>Unité ${esc(wo.units?.unit_number) ?? ''}</td>
       <td>${esc(wo.description)}</td>
-      <td>${esc(wo.workers?.name) ?? '—'}</td>
+      <td>${wo.workers?.name != null ? esc(wo.workers.name) : '—'}</td>
       <td>${wo.estimated_cost != null ? Number(wo.estimated_cost).toLocaleString('fr-CA') + ' $' : '—'}</td>
       <td><span class="tag neutral">${statusLabel[wo.status] || wo.status}</span></td>
     </tr>`).join('');

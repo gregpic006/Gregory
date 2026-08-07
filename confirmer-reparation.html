@@ -88,12 +88,16 @@ function esc(s){
 }
 
 async function callConfirmApi(payload){
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/handle-tenant-confirmation`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
-    body: JSON.stringify({ work_order_id: workOrderId, token, ...payload }),
-  });
-  return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/handle-tenant-confirmation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({ work_order_id: workOrderId, token, ...payload }),
+    });
+    return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  } catch (e) {
+    return { ok: false, status: 0, data: { error: "Impossible de contacter le serveur — vérifie ta connexion et réessaie." } };
+  }
 }
 
 function showPanel(name){

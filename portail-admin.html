@@ -446,7 +446,12 @@ async function loadAdminDashboard(){
 
 async function callPrivacyApi(payload){
   const { data, error } = await supabaseClient.functions.invoke('privacy-api', { body: payload });
-  if(error){ alert('Erreur : ' + error.message); return null; }
+  if(error){
+    let detail = error.message;
+    try { const body = await error.context?.json(); if(body?.error) detail = body.error; } catch(e){}
+    alert('Erreur : ' + detail);
+    return null;
+  }
   return data;
 }
 
@@ -642,7 +647,11 @@ function renderCommandCenter(cc){
 
 async function callOnboardingApi(payload){
   const { data, error } = await supabaseClient.functions.invoke('onboarding-api', { body: payload });
-  if(error){ return { error: error.message }; }
+  if(error){
+    let detail = error.message;
+    try { const body = await error.context?.json(); if(body?.error) detail = body.error; } catch(e){}
+    return { error: detail };
+  }
   return data;
 }
 
@@ -736,17 +745,42 @@ async function obCreateTenant(){
   document.getElementById('ob-tenant-email').value = '';
   document.getElementById('ob-tenant-phone').value = '';
   document.getElementById('ob-tenant-rent').value = '';
+  const building_id = document.getElementById('ob-unit-building').value;
+  if(building_id) await obLoadUnitsForTenant(building_id);
 }
 
 const auditActionLabel = {
   'approval.approved': 'Approbation acceptée', 'approval.rejected': 'Approbation refusée',
   'work_order.create': 'Travail créé', 'work_order.reassign': 'Travail réassigné', 'work_order.complete': 'Travail complété',
   'prospect.stage_change': 'Statut prospect modifié', 'anomaly.update': 'Anomalie mise à jour',
+  'worker.create': 'Travailleur ajouté', 'worker.verification_updated': 'Vérification travailleur mise à jour',
+  'marketplace.marked_posted': 'Annonce marquée publiée', 'marketplace.unmarked_posted': 'Annonce démarquée',
+  'visit.proposed': 'Visite proposée', 'visit.outcome_recorded': 'Résultat de visite consigné',
+  'visit.confirmed': 'Visite confirmée', 'visit.declined': 'Visite refusée', 'visit.counter_proposed': 'Autre moment proposé pour la visite',
+  'company_settings.updated': "Paramètres de l'entreprise mis à jour",
+  'invoice.reopened': 'Facture réouverte', 'invoice.marked_paid': 'Facture marquée payée',
+  'invoice.marked_collected': 'Facture prélevée', 'invoice.marked_failed': 'Prélèvement échoué',
+  'pad_authorization.updated': 'Autorisation de prélèvement mise à jour',
+  'payment_reminder.paused': 'Rappels de paiement mis en pause', 'payment_reminder.resumed': 'Rappels de paiement repris',
+  'owner.update_login': 'Identifiants propriétaire modifiés', 'owner.delete_cascade': 'Propriétaire supprimé (cascade)', 'owner.create': 'Propriétaire créé',
+  'building.create': 'Immeuble créé', 'unit.create': 'Unité créée', 'tenant.create': 'Locataire créé',
+  'privacy_incident.logged': 'Incident de confidentialité consigné', 'privacy_incident.updated': 'Incident de confidentialité mis à jour',
+  'data_request.logged': "Demande d'accès/rectification consignée", 'data_request.updated': "Demande d'accès/rectification mise à jour",
+  'data_request.fulfilled': "Demande d'accès/rectification traitée",
+  'bank_connection.linked': 'Connexion bancaire liée', 'bank_connection.manual_sync': 'Synchronisation bancaire manuelle', 'bank_connection.disconnected': 'Connexion bancaire déconnectée',
+  'bank_reconciliation.import': 'Import de transactions bancaires', 'bank_reconciliation.manual_match': 'Rapprochement bancaire manuel', 'bank_reconciliation.ignore': 'Transaction bancaire ignorée',
+  'lease_renewal.notice_sent': 'Avis de renouvellement envoyé', 'lease_renewal.response_recorded': 'Réponse au renouvellement consignée',
+  'work_order.worker_reported_done': 'Travailleur : travail signalé terminé', 'work_order.worker_accepted': 'Travailleur : assignation acceptée',
+  'work_order.worker_declined': 'Travailleur : assignation refusée', 'work_order.worker_propose_time': 'Travailleur : autre heure proposée',
+  'work_order.worker_request_info': 'Travailleur : informations demandées',
 };
 const auditEntityLabel = {
   owners: 'Propriétaires', buildings: 'Immeubles', units: 'Unités', tenants: 'Locataires',
   work_orders: 'Travaux', service_requests: 'Demandes de service', approvals: 'Approbations',
   prospects: 'Prospects', leases: 'Baux', payments: 'Paiements', workers: 'Travailleurs (répertoire)',
+  bank_connections: 'Connexions bancaires', bank_transactions: 'Transactions bancaires', visits: 'Visites',
+  company_settings: "Paramètres de l'entreprise", invoices: 'Factures', pad_authorizations: 'Autorisations de prélèvement',
+  privacy_incidents: 'Incidents de confidentialité', personal_data_requests: "Demandes d'accès/rectification",
   autre: 'Autre',
 };
 
@@ -812,7 +846,12 @@ let workersDirectory = [];
 
 async function callOpsApi(payload){
   const { data, error } = await supabaseClient.functions.invoke('ops-api', { body: payload });
-  if(error){ alert('Erreur : ' + error.message); return null; }
+  if(error){
+    let detail = error.message;
+    try { const body = await error.context?.json(); if(body?.error) detail = body.error; } catch(e){}
+    alert('Erreur : ' + detail);
+    return null;
+  }
   return data;
 }
 
@@ -976,8 +1015,8 @@ async function loadVisitsAdmin(){
     container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune visite planifiée.</p>';
     return;
   }
-  const statusLabel = { proposed: 'En attente de réponse', confirmed: 'Confirmée', declined: 'Refusée', completed: 'Complétée', no_show: 'Absence' };
-  const statusColor = { proposed: '#e6a817', confirmed: '#4c7a4c', declined: '#8a8a8a', completed: '#4c7a4c', no_show: '#c0392b' };
+  const statusLabel = { proposed: 'En attente de réponse', confirmed: 'Confirmée', declined: 'Refusée', completed: 'Complétée', no_show: 'Absence', other_time_proposed: 'Autre moment proposé — à reprogrammer' };
+  const statusColor = { proposed: '#e6a817', confirmed: '#4c7a4c', declined: '#8a8a8a', completed: '#4c7a4c', no_show: '#c0392b', other_time_proposed: '#8a5fb0' };
   container.innerHTML = visits.map(v => `
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
       <b style="display:block;margin-bottom:4px;">${esc(v.prospect_name)} — ${esc(v.units?.buildings?.address) || ''}, unité ${esc(v.units?.unit_number) || ''}</b>
@@ -1110,6 +1149,8 @@ async function createWorker(){
   document.getElementById('wk-rbq').value = '';
   document.getElementById('wk-requires-rbq').checked = false;
   await loadWorkersAdmin();
+  if(document.getElementById('service-requests-body')) await loadServiceRequestsAdmin();
+  if(document.getElementById('work-orders-body')) await loadWorkOrdersAdmin();
 }
 
 async function saveWorkerVerification(worker_id){
@@ -1257,7 +1298,7 @@ async function loadWorkOrdersAdmin(){
   container.innerHTML = orders.map(wo => `
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
       <b style="display:block;margin-bottom:4px;">${esc(wo.units?.buildings?.address) ?? ''}, unité ${esc(wo.units?.unit_number) ?? ''} — ${esc(wo.description)}</b>
-      <span style="font-size:12.5px;color:var(--muted);">Travailleur : ${esc(wo.workers?.name) ?? '—'} (${esc(wo.workers?.phone) ?? '—'}) — Paie : ${wo.worker_pay != null ? Number(wo.worker_pay).toLocaleString('fr-CA') + ' $' : '—'} + 10% coordination — Statut : ${statusLabel[wo.status] || esc(wo.status)}</span>
+      <span style="font-size:12.5px;color:var(--muted);">Travailleur : ${wo.workers?.name != null ? esc(wo.workers.name) : '—'} (${wo.workers?.phone != null ? esc(wo.workers.phone) : '—'}) — Paie : ${wo.worker_pay != null ? Number(wo.worker_pay).toLocaleString('fr-CA') + ' $' : '—'} + 10% coordination — Statut : ${statusLabel[wo.status] || esc(wo.status)}</span>
       ${wo.worker_reported_done_at ? `<div style="background:#e8f0e6;border-left:2px solid var(--sage);padding:8px 10px;margin-top:8px;font-size:12.5px;">✓ Travailleur : travail signalé terminé le ${new Date(wo.worker_reported_done_at).toLocaleString('fr-CA')}${wo.worker_completion_note ? '<br><b>Note :</b> ' + esc(wo.worker_completion_note) : ''}</div>` : ''}
       ${photoLinksHtml('service-request-photos', wo.photo_before_urls, 'Photos avant')}
       ${photoLinksHtml('service-request-photos', wo.photo_after_urls, 'Photos après')}
@@ -1312,7 +1353,12 @@ const stageOptions = Object.keys(stageLabel).map(s => `<option value="${s}">${st
 
 async function callCrmApi(payload){
   const { data, error } = await supabaseClient.functions.invoke('crm-api', { body: payload });
-  if(error){ alert('Erreur CRM : ' + error.message); return null; }
+  if(error){
+    let detail = error.message;
+    try { const body = await error.context?.json(); if(body?.error) detail = body.error; } catch(e){}
+    alert('Erreur CRM : ' + detail);
+    return null;
+  }
   return data;
 }
 
@@ -1483,7 +1529,12 @@ async function disconnectFlinks(connection_id){
 
 async function callReconApi(payload){
   const { data, error } = await supabaseClient.functions.invoke('reconcile-bank-transactions', { body: payload });
-  if(error){ alert('Erreur rapprochement bancaire : ' + error.message); return null; }
+  if(error){
+    let detail = error.message;
+    try { const body = await error.context?.json(); if(body?.error) detail = body.error; } catch(e){}
+    alert('Erreur rapprochement bancaire : ' + detail);
+    return null;
+  }
   return data;
 }
 
@@ -1559,6 +1610,11 @@ async function loadBankTransactions(){
       ${t.match_status === 'reversed' && !t.matched_payment_id ? `
       <div style="margin-top:6px;">
         <button onclick="promptConfirmMatch('${t.id}')" style="border:1px solid var(--ink);background:none;padding:5px 10px;font-size:11.5px;cursor:pointer;">Associer manuellement</button>
+      </div>` : ''}
+      ${t.match_status === 'duplicate' ? `
+      <div style="margin-top:6px;">
+        <button onclick="promptConfirmMatch('${t.id}')" style="border:1px solid var(--ink);background:none;padding:5px 10px;font-size:11.5px;cursor:pointer;">Associer quand même</button>
+        <button onclick="ignoreBankTransaction('${t.id}')" style="border:1px solid var(--line);background:none;padding:5px 10px;font-size:11.5px;cursor:pointer;">Confirmer le doublon (ignorer)</button>
       </div>` : ''}
     </div>`).join('');
 }

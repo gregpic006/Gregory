@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: "Précise le moment que tu proposes." }), { status: 400, headers: corsHeaders });
       }
       await fetch(`${supabaseUrl}/rest/v1/visits?id=eq.${visit_id}`, {
-        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ response_note: `Le candidat propose plutôt : ${note}` }),
+        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "other_time_proposed", response_note: `Le candidat propose plutôt : ${note}` }),
       });
       await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
         method: "POST", headers: adminHeaders,
