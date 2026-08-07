@@ -507,8 +507,11 @@ async function startOwnerBankConnect(){
   document.getElementById('bank-connect-widget-wrap').style.display = 'block';
   msg.textContent = 'Connecte-toi à ta banque dans la fenêtre ci-dessous.';
 
+  const expectedOrigin = new URL(res.iframe_base_url).origin;
+
   if(ownerFlinksMessageHandler) window.removeEventListener('message', ownerFlinksMessageHandler);
   ownerFlinksMessageHandler = async (e) => {
+    if(e.origin !== expectedOrigin) return;
     const data = e.data;
     if(!data || typeof data !== 'object') return;
     console.log('Message Flinks Connect reçu :', data);
@@ -724,10 +727,14 @@ async function loadDocuments(){
       <td>${typeLabel[d.doc_type] || esc(d.doc_type) || '—'}</td>
       <td style="font-size:12.5px;">${analysis}</td>
       <td>${link}</td>
-      <td><button class="btn-small" onclick="deleteDocument('${d.id}', '${d.file_url || ''}')">Supprimer</button></td>
+      <td><button class="btn-small" data-doc-id="${esc(d.id)}" data-doc-file="${esc(d.file_url || '')}" onclick="deleteDocumentFromButton(this)">Supprimer</button></td>
     </tr>`;
   }));
   body.innerHTML = rows.join('');
+}
+
+function deleteDocumentFromButton(btn){
+  deleteDocument(btn.dataset.docId, btn.dataset.docFile);
 }
 
 async function askDocuments(){

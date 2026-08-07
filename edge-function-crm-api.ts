@@ -142,6 +142,10 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
       const followupDate = parsed.next_followup_days
         ? new Date(Date.now() + parsed.next_followup_days * 86400000).toISOString().slice(0, 10)
         : prospect.next_followup_date;
+      // interest_level est affiché tel quel dans l'admin — on le limite à
+      // une whitelist stricte, jamais le texte libre renvoyé par l'IA.
+      const allowedInterestLevels = ["chaud", "tiede", "froid"];
+      const interestLevel = allowedInterestLevels.includes(parsed.interest_level) ? parsed.interest_level : null;
       const callHistory = Array.isArray(prospect.call_history) ? prospect.call_history : [];
       // Note : cette fonction ne touche JAMAIS "stage" — l'IA ne peut pas
       // classer un prospect "perdu" ni bloquer une relance ; seule
@@ -154,7 +158,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         objections: parsed.objections ?? null,
         commitment: parsed.commitment ?? null,
         next_step: parsed.next_step ?? null,
-        interest_level: parsed.interest_level ?? null,
+        interest_level: interestLevel,
         confidence: typeof parsed.confidence === "number" ? parsed.confidence : null,
         corrected: false,
       });
@@ -164,7 +168,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         headers: adminHeaders,
         body: JSON.stringify({
           call_history: callHistory,
-          interest_level: parsed.interest_level ?? prospect.interest_level,
+          interest_level: interestLevel ?? prospect.interest_level,
           next_followup_date: followupDate,
         }),
       });

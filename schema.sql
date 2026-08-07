@@ -731,7 +731,7 @@ create policy "own building as tenant" on buildings for select
 create policy "own service_requests as tenant select" on service_requests for select
   using (tenant_id = auth_tenant_id());
 create policy "own service_requests as tenant insert" on service_requests for insert
-  with check (tenant_id = auth_tenant_id());
+  with check (tenant_id = auth_tenant_id() and unit_id in (select tenant_unit_ids()));
 
 create policy "own reports" on reports for select
   using (owner_id = auth_owner_id());
