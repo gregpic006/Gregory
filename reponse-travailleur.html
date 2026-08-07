@@ -79,6 +79,23 @@
       </div>
     </div>
 
+    <div id="panel-completion" class="panel">
+      <p class="muted" style="margin-bottom:8px;">Prends au moins une photo avant et une photo après le travail (jusqu'à 5 par catégorie).</p>
+      <label style="display:block;font-size:12.5px;margin-bottom:4px;">Photos avant</label>
+      <input type="file" id="completion-before" accept="image/*" multiple style="margin-bottom:10px;">
+      <label style="display:block;font-size:12.5px;margin-bottom:4px;">Photos après</label>
+      <input type="file" id="completion-after" accept="image/*" multiple style="margin-bottom:10px;">
+      <label style="display:block;font-size:12.5px;margin-bottom:4px;">Note (optionnel)</label>
+      <textarea id="completion-message" placeholder="Ex: Pièce remplacée, tout fonctionne normalement."></textarea>
+      <div class="actions">
+        <button class="primary" id="completion-submit-btn" onclick="submitCompletion()">Signaler le travail terminé</button>
+      </div>
+    </div>
+
+    <div id="panel-already-done" class="panel">
+      <p class="muted">Merci ! Tu as déjà signalé ce travail comme terminé. L'équipe Portail va confirmer la fermeture du dossier.</p>
+    </div>
+
     <div id="result" class="result"></div>
   </div>
 
@@ -115,6 +132,50 @@ function showPanel(name){
   document.getElementById('panel-' + name).classList.add('active');
 }
 
+function fileToBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function filesToPayload(fileList){
+  const files = Array.from(fileList || []).slice(0, 5);
+  return Promise.all(files.map(async f => ({
+    base64: await fileToBase64(f),
+    filename: f.name,
+    content_type: f.type,
+  })));
+}
+
+async function submitCompletion(){
+  const beforeFiles = document.getElementById('completion-before').files;
+  const afterFiles = document.getElementById('completion-after').files;
+  const message = document.getElementById('completion-message').value.trim();
+  if(!beforeFiles.length && !afterFiles.length){
+    alert('Ajoute au moins une photo (avant ou après).');
+    return;
+  }
+  const btn = document.getElementById('completion-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Envoi en cours...';
+
+  const [before_photos, after_photos] = await Promise.all([filesToPayload(beforeFiles), filesToPayload(afterFiles)]);
+  const { ok, data } = await callResponseApi({ action: 'submit_completion', message, before_photos, after_photos });
+
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const result = document.getElementById('result');
+  if(!ok){
+    result.className = 'result error active';
+    result.textContent = data?.error || "Une erreur est survenue. Merci de contacter l'équipe Portail.";
+    return;
+  }
+  result.className = 'result active';
+  result.textContent = "Merci ! Le travail a été signalé comme terminé avec tes photos. L'équipe Portail va confirmer la fermeture du dossier.";
+}
+
 async function respond(action){
   const messageEl = document.getElementById(action + '-message');
   const message = messageEl ? messageEl.value.trim() : undefined;
@@ -149,7 +210,11 @@ async function init(){
   const { ok, data } = await callResponseApi({ action: 'get' });
   document.getElementById('loading').style.display = 'none';
 
-  if(!ok || data.worker_response !== 'pending'){
+  const canRespond = ok && data.worker_response === 'pending';
+  const canReportDone = ok && data.worker_response === 'accepted' && !data.worker_reported_done_at;
+  const alreadyReportedDone = ok && data.worker_response === 'accepted' && !!data.worker_reported_done_at;
+
+  if(!ok || (!canRespond && !canReportDone && !alreadyReportedDone)){
     document.getElementById('not-found').style.display = 'block';
     if(ok && data.worker_response && data.worker_response !== 'pending'){
       document.querySelector('#not-found .subtitle').textContent = "Une réponse a déjà été enregistrée pour ce travail. Contacte l'équipe Portail si tu as des questions.";
@@ -168,6 +233,15 @@ async function init(){
   if(data.due_by) extra.push('Échéance : ' + data.due_by);
   if(data.billing_terms) extra.push('Conditions de facturation : ' + data.billing_terms);
   document.getElementById('wo-extra').innerHTML = extra.map(esc).join('<br>');
+
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  if(canRespond){
+    document.getElementById('panel-choices').classList.add('active');
+  } else if(canReportDone){
+    document.getElementById('panel-completion').classList.add('active');
+  } else {
+    document.getElementById('panel-already-done').classList.add('active');
+  }
 
   document.getElementById('main').style.display = 'block';
 }

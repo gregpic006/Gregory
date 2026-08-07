@@ -384,6 +384,24 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ payments: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    if (action === "get_signed_url") {
+      const { bucket, path } = body;
+      const allowedBuckets = ["service-request-photos", "documents"];
+      if (!bucket || !path || !allowedBuckets.includes(bucket)) {
+        return new Response(JSON.stringify({ error: "Paramètres invalides" }), { status: 400, headers: corsHeaders });
+      }
+      const signRes = await fetch(`${supabaseUrl}/storage/v1/object/sign/${bucket}/${path}`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ expiresIn: 300 }),
+      });
+      if (!signRes.ok) {
+        return new Response(JSON.stringify({ error: "Impossible de générer le lien" }), { status: 502, headers: corsHeaders });
+      }
+      const signed = await signRes.json();
+      return new Response(JSON.stringify({ signed_url: `${supabaseUrl}/storage/v1${signed.signedURL}` }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (action === "toggle_payment_reminder_pause") {
       const { payment_id, paused } = body;
       if (!payment_id) {

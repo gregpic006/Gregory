@@ -41,25 +41,6 @@ Deno.serve(async (req) => {
     const unit = wo.units;
     const address = unit?.buildings?.address;
 
-    if (action === "get") {
-      return new Response(JSON.stringify({
-        description: wo.description,
-        address,
-        unit_number: unit?.unit_number,
-        worker_pay: wo.worker_pay,
-        appointment_at: wo.appointment_at,
-        entry_permission: wo.entry_permission,
-        due_by: wo.due_by,
-        billing_terms: wo.billing_terms,
-        worker_response: wo.worker_response,
-        worker_name: wo.workers?.name,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-
-    if (wo.worker_response !== "pending") {
-      return new Response(JSON.stringify({ error: "Une réponse a déjà été enregistrée pour ce travail." }), { status: 409, headers: corsHeaders });
-    }
-
     const logAudit = (action2: string, details: Record<string, unknown>) =>
       fetch(`${supabaseUrl}/rest/v1/audit_log`, {
         method: "POST",
@@ -79,6 +60,82 @@ Deno.serve(async (req) => {
         });
       }
     };
+
+    if (action === "get") {
+      return new Response(JSON.stringify({
+        description: wo.description,
+        address,
+        unit_number: unit?.unit_number,
+        worker_pay: wo.worker_pay,
+        appointment_at: wo.appointment_at,
+        entry_permission: wo.entry_permission,
+        due_by: wo.due_by,
+        billing_terms: wo.billing_terms,
+        worker_response: wo.worker_response,
+        worker_name: wo.workers?.name,
+        status: wo.status,
+        worker_reported_done_at: wo.worker_reported_done_at,
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "submit_completion") {
+      if (wo.worker_response !== "accepted") {
+        return new Response(JSON.stringify({ error: "Ce travail n'a pas encore été accepté." }), { status: 409, headers: corsHeaders });
+      }
+      if (wo.worker_reported_done_at) {
+        return new Response(JSON.stringify({ error: "La fin des travaux a déjà été signalée pour ce travail." }), { status: 409, headers: corsHeaders });
+      }
+
+      const { before_photos, after_photos } = body;
+      const uploadPhotos = async (photos: Array<{ base64: string; filename?: string; content_type?: string }> | undefined, subfolder: string) => {
+        const paths: string[] = [];
+        for (const p of (Array.isArray(photos) ? photos : []).slice(0, 5)) {
+          if (!p?.base64) continue;
+          const path = `work-orders/${work_order_id}/${subfolder}/${Date.now()}-${(p.filename || "photo.jpg").replace(/[^a-zA-Z0-9_.-]/g, "_")}`;
+          const bytes = Uint8Array.from(atob(p.base64), (c) => c.charCodeAt(0));
+          const uploadRes = await fetch(`${supabaseUrl}/storage/v1/object/service-request-photos/${path}`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${serviceRoleKey}`,
+              apikey: serviceRoleKey ?? "",
+              "Content-Type": p.content_type || "application/octet-stream",
+            },
+            body: bytes,
+          });
+          if (uploadRes.ok) paths.push(path);
+        }
+        return paths;
+      };
+
+      const beforeUrls = await uploadPhotos(before_photos, "avant");
+      const afterUrls = await uploadPhotos(after_photos, "apres");
+      if (!beforeUrls.length && !afterUrls.length) {
+        return new Response(JSON.stringify({ error: "Au moins une photo est requise." }), { status: 400, headers: corsHeaders });
+      }
+
+      await fetch(`${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({
+          photo_before_urls: beforeUrls,
+          photo_after_urls: afterUrls,
+          worker_reported_done_at: new Date().toISOString(),
+          worker_completion_note: message || null,
+        }),
+      });
+
+      await logAudit("work_order.worker_reported_done", { photos_before: beforeUrls.length, photos_after: afterUrls.length, note: message || null });
+      await notifyAdmins(
+        `Travail terminé (signalé par le travailleur) — ${address || ""}`,
+        `${wo.workers?.name || "Le travailleur"} a signalé avoir terminé : ${wo.description}\n${message ? "Note : " + message + "\n" : ""}Photos avant : ${beforeUrls.length}, après : ${afterUrls.length}\n\nEntre le coût final dans le portail admin pour clore le dossier et aviser le locataire.`,
+      );
+
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (wo.worker_response !== "pending") {
+      return new Response(JSON.stringify({ error: "Une réponse a déjà été enregistrée pour ce travail." }), { status: 409, headers: corsHeaders });
+    }
 
     if (action === "accept") {
       await fetch(`${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}`, {

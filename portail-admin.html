@@ -739,6 +739,19 @@ async function callOpsApi(payload){
   return data;
 }
 
+async function viewPhoto(bucket, path){
+  const res = await callOpsApi({ action: 'get_signed_url', bucket, path });
+  if(res?.signed_url){ window.open(res.signed_url, '_blank'); }
+  else { alert("Impossible d'ouvrir cette photo."); }
+}
+
+function photoLinksHtml(bucket, paths, label){
+  const list = Array.isArray(paths) ? paths : [];
+  if(!list.length) return '';
+  const links = list.map((p, i) => `<a href="#" onclick="viewPhoto('${bucket}', '${esc(p).replace(/'/g, "\\'")}'); return false;" style="margin-right:8px;">Photo ${i + 1}</a>`).join('');
+  return `<div style="font-size:12.5px;margin-top:4px;"><b>${esc(label)} :</b> ${links}</div>`;
+}
+
 async function loadOps(){
   await loadMarketplaceListings();
   await loadWorkersAdmin();
@@ -1003,6 +1016,7 @@ async function loadServiceRequestsAdmin(){
       ${(!sr.safety_override && sr.ai_needs_review) ? `<div style="background:#e6a817;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;display:inline-block;margin-bottom:8px;">🔎 À VALIDER PAR UN HUMAIN${sr.ai_confidence != null ? ' — confiance IA ' + Math.round(sr.ai_confidence) + '%' : ''}</div>` : ''}
       <b style="display:block;margin-bottom:4px;">${esc(sr.tenants?.full_name) ?? ''} — ${esc(sr.units?.buildings?.address) ?? ''}, unité ${esc(sr.units?.unit_number) ?? ''}</b>
       <span style="font-size:12.5px;color:var(--muted);display:block;">${esc(sr.description)}</span>
+      ${photoLinksHtml('service-request-photos', sr.photo_urls, 'Photos du locataire')}
       ${sr.ai_category ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.6;">
         <b>IA :</b> ${esc(sr.ai_category)}${sr.ai_subcategory ? ' — ' + esc(sr.ai_subcategory) : ''} · urgence ${esc(sr.ai_urgency || '—')} · ${costRange}${sr.ai_confidence != null ? ' · confiance ' + Math.round(sr.ai_confidence) + '%' : ''}<br>
         ${sr.ai_recommended_trade ? '<b>Métier recommandé :</b> ' + esc(sr.ai_recommended_trade) + '<br>' : ''}
@@ -1073,6 +1087,9 @@ async function loadWorkOrdersAdmin(){
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
       <b style="display:block;margin-bottom:4px;">${esc(wo.units?.buildings?.address) ?? ''}, unité ${esc(wo.units?.unit_number) ?? ''} — ${esc(wo.description)}</b>
       <span style="font-size:12.5px;color:var(--muted);">Travailleur : ${esc(wo.workers?.name) ?? '—'} (${esc(wo.workers?.phone) ?? '—'}) — Paie : ${wo.worker_pay != null ? Number(wo.worker_pay).toLocaleString('fr-CA') + ' $' : '—'} + 10% coordination — Statut : ${statusLabel[wo.status] || esc(wo.status)}</span>
+      ${wo.worker_reported_done_at ? `<div style="background:#e8f0e6;border-left:2px solid var(--sage);padding:8px 10px;margin-top:8px;font-size:12.5px;">✓ Travailleur : travail signalé terminé le ${new Date(wo.worker_reported_done_at).toLocaleString('fr-CA')}${wo.worker_completion_note ? '<br><b>Note :</b> ' + esc(wo.worker_completion_note) : ''}</div>` : ''}
+      ${photoLinksHtml('service-request-photos', wo.photo_before_urls, 'Photos avant')}
+      ${photoLinksHtml('service-request-photos', wo.photo_after_urls, 'Photos après')}
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-top:10px;">
         <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Réassigner</label>
           <select onchange="reassignWorkOrder('${wo.id}', this.value)" style="padding:8px;border:1px solid var(--line);"><option value="">—</option>${workerOptionsHtml(wo.worker_id)}</select>

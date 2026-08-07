@@ -2158,6 +2158,12 @@ create policy "owner delete own documents" on storage.objects for delete
 alter table service_requests add column if not exists photo_urls jsonb default '[]'::jsonb;
 alter table work_orders add column if not exists photo_before_urls jsonb default '[]'::jsonb;
 alter table work_orders add column if not exists photo_after_urls jsonb default '[]'::jsonb;
+-- Le travailleur signale lui-même la fin du travail (avec photos) via son
+-- lien à usage unique ; ceci ne ferme PAS le dossier — l'admin doit
+-- toujours entrer le coût final (complete_work_order) pour déclencher la
+-- confirmation locataire. Voir handle-worker-response.ts (submit_completion).
+alter table work_orders add column if not exists worker_reported_done_at timestamptz;
+alter table work_orders add column if not exists worker_completion_note text;
 
 create or replace function can_access_tenant_files(target_tenant_id uuid)
 returns boolean language sql stable security definer set search_path = public set row_security = off
