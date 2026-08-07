@@ -2289,6 +2289,42 @@ create policy "owner views own invoices" on invoices for select
   using (owner_id = auth_owner_id());
 
 -- ============================================================
+-- PRÉLÈVEMENT AUTOMATIQUE (PAD) — squelette seulement
+-- ============================================================
+-- Aucun processeur n'est branché : Flinks Connect (déjà en place) est en
+-- lecture seule et ne peut pas bouger d'argent. Le prélèvement réel
+-- demande un produit distinct (Flinks Pay, Stripe ACSS, etc.), qui
+-- suppose Portail incorporé (15 août 2026) et une entente signée avec ce
+-- fournisseur — aucun des deux n'existe encore. Ces tables ne font que
+-- consigner le consentement contractuel et l'état de perception par
+-- facture, prêtes à être alimentées automatiquement une fois le
+-- fournisseur choisi et branché ; en attendant, tout se fait/se coche
+-- manuellement dans l'admin.
+create table if not exists pad_authorizations (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid references owners(id) on delete cascade,
+  status text default 'pending' check (status in ('pending','active','revoked')),
+  consented_at timestamptz,
+  consent_method text,
+  processor text,
+  processor_reference text,
+  revoked_at timestamptz,
+  notes text,
+  created_at timestamptz default now(),
+  unique (owner_id)
+);
+alter table pad_authorizations enable row level security;
+create policy "admin manages pad authorizations" on pad_authorizations for all
+  using (auth_is_admin()) with check (auth_is_admin());
+create policy "owner views own pad authorization" on pad_authorizations for select
+  using (owner_id = auth_owner_id());
+
+alter table invoices add column if not exists collection_status text default 'pending'
+  check (collection_status in ('pending','scheduled','collected','failed'));
+alter table invoices add column if not exists collected_at timestamptz;
+alter table invoices add column if not exists collection_error text;
+
+-- ============================================================
 -- NOTE (résolue) — architecture des accès admin
 -- ============================================================
 -- Cette note datait d'avant la mise en place de l'architecture actuelle

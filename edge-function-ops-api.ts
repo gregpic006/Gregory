@@ -441,6 +441,54 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
+    if (action === "list_pad_authorizations") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/pad_authorizations?select=*,owners(full_name)&order=created_at.desc`, { headers: adminHeaders });
+      return new Response(JSON.stringify({ authorizations: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "update_pad_authorization") {
+      const { owner_id, status, consent_method, processor, processor_reference, notes } = body;
+      if (!owner_id || !status) {
+        return new Response(JSON.stringify({ error: "owner_id et status requis" }), { status: 400, headers: corsHeaders });
+      }
+      const patch: Record<string, unknown> = { status, consent_method: consent_method || null, processor: processor || null, processor_reference: processor_reference || null, notes: notes || null };
+      if (status === "active") patch.consented_at = new Date().toISOString();
+      if (status === "revoked") patch.revoked_at = new Date().toISOString();
+      await fetch(`${supabaseUrl}/rest/v1/pad_authorizations?on_conflict=owner_id`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify({ owner_id, ...patch }),
+      });
+      await logAudit("pad_authorization.updated", "pad_authorizations", null, { owner_id, status });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "mark_invoice_collected") {
+      const { invoice_id } = body;
+      if (!invoice_id) {
+        return new Response(JSON.stringify({ error: "invoice_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/invoices?id=eq.${invoice_id}`, {
+        method: "PATCH", headers: adminHeaders,
+        body: JSON.stringify({ collection_status: "collected", collected_at: new Date().toISOString(), collection_error: null, status: "paid" }),
+      });
+      await logAudit("invoice.marked_collected", "invoices", invoice_id, {});
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "mark_invoice_failed") {
+      const { invoice_id, error_message } = body;
+      if (!invoice_id) {
+        return new Response(JSON.stringify({ error: "invoice_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/invoices?id=eq.${invoice_id}`, {
+        method: "PATCH", headers: adminHeaders,
+        body: JSON.stringify({ collection_status: "failed", collection_error: error_message || "Échec du prélèvement" }),
+      });
+      await logAudit("invoice.marked_failed", "invoices", invoice_id, { error_message });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     if (action === "toggle_payment_reminder_pause") {
       const { payment_id, paused } = body;
       if (!payment_id) {

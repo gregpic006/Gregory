@@ -895,10 +895,11 @@ async function loadOwnerInvoices(){
     return;
   }
   const invoiceStatusLabel = { issued: 'Émise', paid: 'Payée' };
+  const collectionStatusLabel = { pending: 'En attente de prélèvement', scheduled: 'Prélèvement planifié', collected: 'Prélevée', failed: 'Échec du prélèvement' };
   body.innerHTML = data.map(inv => `
     <div class="approve-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
       <b>${esc(inv.invoice_number)}</b>
-      <span style="color:var(--muted);font-size:12.5px;">${esc(inv.period_start)} au ${esc(inv.period_end)} — ${invoiceStatusLabel[inv.status] || esc(inv.status)}</span>
+      <span style="color:var(--muted);font-size:12.5px;">${esc(inv.period_start)} au ${esc(inv.period_end)} — ${invoiceStatusLabel[inv.status] || esc(inv.status)} · ${collectionStatusLabel[inv.collection_status] || esc(inv.collection_status)}</span>
       <div style="font-size:12.5px;">
         Frais de gestion : ${Number(inv.management_fee_amount).toLocaleString('fr-CA')} $<br>
         Frais de coordination des travaux : ${Number(inv.coordination_fees_amount).toLocaleString('fr-CA')} $<br>
