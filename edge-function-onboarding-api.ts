@@ -593,6 +593,40 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, email: caller.email, temp_password: password }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Supprime complètement un cold caller (dossier + compte Auth), sur le
+    // modèle de delete_owner_completely. Les prospects qui lui étaient
+    // assignés ne sont pas supprimés — juste désassignés (ils redeviennent
+    // visibles pour l'admin, à réassigner à quelqu'un d'autre au besoin).
+    if (action === "delete_cold_caller") {
+      const { caller_id } = body;
+      if (!caller_id) {
+        return new Response(JSON.stringify({ error: "caller_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      const callerRes = await fetch(`${supabaseUrl}/rest/v1/cold_callers?id=eq.${caller_id}&select=id,user_id,full_name`, { headers: adminHeaders });
+      const [caller] = await callerRes.json().catch(() => [null]);
+      if (!caller) {
+        return new Response(JSON.stringify({ error: "Cold caller introuvable" }), { status: 404, headers: corsHeaders });
+      }
+
+      await fetch(`${supabaseUrl}/rest/v1/prospects?assigned_caller_id=eq.${caller_id}`, {
+        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ assigned_caller_id: null }),
+      });
+
+      const deleteRes = await fetch(`${supabaseUrl}/rest/v1/cold_callers?id=eq.${caller_id}`, {
+        method: "DELETE", headers: { ...adminHeaders, Prefer: "return=representation" },
+      });
+      const deletedRows = await deleteRes.json().catch(() => []);
+      if (!deleteRes.ok) {
+        return new Response(JSON.stringify({ error: "Impossible de supprimer le dossier cold caller" }), { status: 500, headers: corsHeaders });
+      }
+      if (caller.user_id) {
+        await fetch(`${supabaseUrl}/auth/v1/admin/users/${caller.user_id}`, { method: "DELETE", headers: adminHeaders }).catch(() => null);
+      }
+
+      await logAudit("cold_caller.delete", "cold_callers", caller_id, { full_name: caller.full_name });
+      return new Response(JSON.stringify({ ok: true, deleted: Array.isArray(deletedRows) ? deletedRows.length : 0 }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });

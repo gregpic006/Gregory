@@ -1459,6 +1459,7 @@ async function loadCallers(){
       <td>
         <button onclick="toggleCallerActive('${c.id}', ${!c.active})" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">${c.active ? 'Désactiver' : 'Réactiver'}</button>
         <button onclick="resetCallerLogin('${c.id}')" style="border:1px solid var(--line);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;margin-top:4px;">Réinitialiser le mot de passe</button>
+        <button data-caller-id="${esc(c.id)}" data-caller-name="${esc(c.full_name)}" onclick="deleteColdCallerFromButton(this)" style="border:1px solid var(--rust);background:none;color:var(--rust);padding:6px 10px;font-size:11.5px;cursor:pointer;margin-top:4px;">Supprimer</button>
       </td>
     </tr>`;
   }).join('');
@@ -1491,6 +1492,18 @@ async function resetCallerLogin(caller_id){
   const res = await callOnboardingApi({ action: 'reset_cold_caller_login', caller_id });
   if(res?.error){ alert('Erreur : ' + res.error); return; }
   alert(`Nouveau mot de passe temporaire pour ${res.email} :\n\n${res.temp_password}\n\nCommunique-le manuellement au cold caller (le courriel de bienvenue n'est pas renvoyé automatiquement ici).`);
+}
+
+function deleteColdCallerFromButton(btn){
+  deleteColdCaller(btn.dataset.callerId, btn.dataset.callerName);
+}
+
+async function deleteColdCaller(caller_id, full_name){
+  if(!confirm(`Supprimer définitivement le compte de ${full_name} ? Ses prospects assignés seront désassignés (pas supprimés) et redeviendront disponibles à réassigner.`)) return;
+  const res = await callOnboardingApi({ action: 'delete_cold_caller', caller_id });
+  if(res?.error){ alert('Erreur : ' + res.error); return; }
+  await loadCallers();
+  await loadProspects();
 }
 
 async function toggleCallerActive(caller_id, active){
