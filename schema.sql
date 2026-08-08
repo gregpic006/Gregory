@@ -2384,6 +2384,11 @@ as $$ select id from cold_callers where user_id = auth.uid() $$;
 -- d'aucun cold caller (l'admin peut toujours le voir/appeler lui-même).
 alter table prospects add column if not exists assigned_caller_id uuid references cold_callers(id);
 
+-- Un cold caller peut convertir lui-même un prospect qui lui est assigné
+-- en client (voir caller-api.ts, action "create_client") — traçabilité du
+-- nouveau compte propriétaire créé à partir de ce prospect.
+alter table prospects add column if not exists converted_owner_id uuid references owners(id);
+
 -- ============================================================
 -- PROSPECTION IA — recherche web de propriétaires auto-gestionnaires
 -- ============================================================

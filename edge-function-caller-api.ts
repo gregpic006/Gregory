@@ -7,16 +7,23 @@
 // comme crm-api.ts le fait pour l'admin — la même donnée sensible, gardée
 // par la même discipline, juste un périmètre plus étroit.
 //
-// Un cold caller ne peut PAS fermer un dossier (stage 'signed'/'lost') ni
-// modifier le coût d'acquisition — ces décisions restent à l'admin via
-// crm-api.ts. Il peut seulement faire progresser un prospect de 'new' à
-// 'contacted' ou 'interested'.
+// Un cold caller ne peut PAS marquer un dossier "lost", ni modifier le coût
+// d'acquisition — ces décisions restent à l'admin via crm-api.ts. Via
+// update_my_stage, il peut seulement faire progresser un prospect de 'new'
+// à 'contacted' ou 'interested'. La seule façon d'atteindre 'signed' est
+// l'action create_client (conversion réelle en client), qui crée le compte
+// propriétaire lui-même — pas une simple mise à jour de statut.
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
 const CALLER_ALLOWED_STAGES = ["contacted", "interested"];
+const OWNER_PORTAL_URL = "https://portailgestion.ca/portail-proprietaire.html";
+
+function randomPassword() {
+  return crypto.randomUUID().replace(/-/g, "").slice(0, 14);
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -35,6 +42,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
+    const resendKey = Deno.env.get("RESEND_API_KEY");
     const adminHeaders = {
       apikey: serviceRoleKey ?? "",
       Authorization: `Bearer ${serviceRoleKey}`,
@@ -48,11 +56,18 @@ Deno.serve(async (req) => {
     }
     const callerId = caller.id;
 
-    const logAudit = (action: string, entityId: string | null, details: Record<string, unknown>) =>
+    const logAudit = (action: string, entityType: string, entityId: string | null, details: Record<string, unknown>) =>
       fetch(`${supabaseUrl}/rest/v1/audit_log`, {
         method: "POST",
         headers: adminHeaders,
-        body: JSON.stringify({ actor_type: "caller", actor_id: userId, action, entity_type: "prospects", entity_id: entityId, details }),
+        body: JSON.stringify({ actor_type: "caller", actor_id: userId, action, entity_type: entityType, entity_id: entityId, details }),
+      });
+
+    const sendEmail = (to: string, subject: string, text: string) =>
+      fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ from: "Portail <onboarding@mail.portailgestion.ca>", to: [to], subject, text }),
       });
 
     const body = await req.json().catch(() => ({}));
@@ -181,7 +196,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
           next_followup_date: followupDate,
         }),
       });
-      await logAudit("prospect.call_logged_by_caller", prospect_id, { caller_name: caller.full_name });
+      await logAudit("prospect.call_logged_by_caller", "prospects", prospect_id, { caller_name: caller.full_name });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
@@ -198,8 +213,78 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
       await fetch(`${supabaseUrl}/rest/v1/prospects?id=eq.${prospect_id}`, {
         method: "PATCH", headers: adminHeaders, body: JSON.stringify({ stage }),
       });
-      await logAudit("prospect.stage_change_by_caller", prospect_id, { new_stage: stage, caller_name: caller.full_name });
+      await logAudit("prospect.stage_change_by_caller", "prospects", prospect_id, { new_stage: stage, caller_name: caller.full_name });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    // Un cold caller crée lui-même le compte propriétaire quand un
+    // prospect accepte de devenir client au téléphone — pas besoin
+    // d'attendre l'admin. Si prospect_id est fourni, il doit être assigné
+    // à cet appelant ; le prospect passe alors à l'étape "signed" et
+    // garde une référence vers le nouveau compte (converted_owner_id).
+    if (action === "create_client") {
+      const { prospect_id, full_name, email, phone, company_name, management_rate, spending_cap } = body;
+      if (!full_name || !email) {
+        return new Response(JSON.stringify({ error: "Nom et courriel requis" }), { status: 400, headers: corsHeaders });
+      }
+
+      let prospect: any = null;
+      if (prospect_id) {
+        const prospRes = await fetch(`${supabaseUrl}/rest/v1/prospects?id=eq.${prospect_id}&select=id,assigned_caller_id`, { headers: adminHeaders });
+        [prospect] = await prospRes.json();
+        if (!prospect) {
+          return new Response(JSON.stringify({ error: "Prospect introuvable" }), { status: 404, headers: corsHeaders });
+        }
+        if (prospect.assigned_caller_id !== callerId) {
+          return new Response(JSON.stringify({ error: "Ce prospect ne t'est pas assigné" }), { status: 403, headers: corsHeaders });
+        }
+      }
+
+      const password = randomPassword();
+      const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ email, password, email_confirm: true }),
+      });
+      const authData = await authRes.json();
+      if (!authRes.ok || !authData.id) {
+        return new Response(JSON.stringify({ error: authData.msg || authData.error_description || "Impossible de créer le compte" }), { status: 400, headers: corsHeaders });
+      }
+
+      const ownerRes = await fetch(`${supabaseUrl}/rest/v1/owners`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({
+          user_id: authData.id, full_name, phone: phone || null, company_name: company_name || null,
+          management_rate: management_rate || 6.0, spending_cap: spending_cap || 300,
+        }),
+      });
+      const [owner] = await ownerRes.json();
+
+      let emailSent = true;
+      let emailError: string | null = null;
+      try {
+        const emailRes = await sendEmail(email, "Bienvenue sur Portail — ton accès propriétaire",
+          `Bonjour ${full_name},\n\nTon compte propriétaire Portail est prêt.\n\nPortail : ${OWNER_PORTAL_URL}\nCourriel : ${email}\nMot de passe temporaire : ${password}\n\nConnecte-toi puis change ton mot de passe si tu le souhaites (lien "Mot de passe oublié" sur la page de connexion).\n\nL'équipe Portail`);
+        const emailData = await emailRes.json().catch(() => ({}));
+        if (!emailRes.ok) { emailSent = false; emailError = emailData?.message || "Échec de l'envoi du courriel"; }
+      } catch (e) {
+        emailSent = false;
+        emailError = String(e);
+      }
+
+      if (prospect_id) {
+        await fetch(`${supabaseUrl}/rest/v1/prospects?id=eq.${prospect_id}`, {
+          method: "PATCH",
+          headers: adminHeaders,
+          body: JSON.stringify({ stage: "signed", converted_owner_id: owner?.id ?? null }),
+        });
+      }
+
+      await logAudit("owner.create_by_caller", "owners", owner?.id ?? null, { email, prospect_id: prospect_id ?? null, caller_name: caller.full_name });
+      return new Response(JSON.stringify({
+        ok: true, owner_id: owner?.id, temp_password: password, email_sent: emailSent, email_error: emailError,
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });

@@ -313,7 +313,7 @@ async function init(){
     document.getElementById('config-warning').style.display = 'block';
     return;
   }
-  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { storageKey: 'sb-portail-owner-auth' } });
   supabaseClient.auth.onAuthStateChange((event) => {
     if(event === 'PASSWORD_RECOVERY'){
       document.getElementById('login-screen').style.display = 'flex';

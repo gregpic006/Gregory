@@ -61,6 +61,11 @@
   .call-form{display:none;margin-top:12px;}
   .call-form.active{display:block;}
   .call-form textarea{width:100%;padding:10px 12px;border:1px solid var(--line);background:var(--paper);font-size:13px;font-family:'Inter',sans-serif;min-height:80px;resize:vertical;margin-bottom:8px;}
+  .convert-form{display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);}
+  .convert-form.active{display:block;}
+  .convert-form .row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;}
+  .convert-form input{padding:8px 10px;border:1px solid var(--line);background:var(--paper);font-size:12.5px;font-family:'Inter',sans-serif;}
+  .convert-form .msg{font-size:12.5px;margin-top:6px;}
   .call-history{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;display:none;}
   .call-history.active{display:block;}
   .call-history .entry{border-bottom:1px solid var(--line);padding:8px 0;}
@@ -151,7 +156,7 @@
 const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
 
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { storageKey: 'sb-portail-caller-auth' } });
 
 function esc(str){
   return (str == null ? '' : String(str)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -306,11 +311,27 @@ async function loadQueue(){
         <button class="primary" onclick="toggleCallForm(this)" data-prospect="${esc(p.id)}">+ Logger un appel</button>
         ${nextStages.map(s => `<button onclick="setStage('${esc(p.id)}','${s}')">Marquer ${stageLabel[s].toLowerCase()}</button>`).join('')}
         ${history.length ? `<button onclick="toggleHistory(this)" data-prospect="${esc(p.id)}">Historique (${history.length})</button>` : ''}
+        ${p.stage !== 'signed' ? `<button onclick="toggleConvertForm(this)" data-prospect="${esc(p.id)}">Convertir en client</button>` : ''}
       </div>
       <div class="call-form" data-prospect="${esc(p.id)}">
         <textarea placeholder="Résumé ou transcription de l'appel..."></textarea>
         <button class="primary" onclick="submitCall(this)" data-prospect="${esc(p.id)}">Envoyer</button>
       </div>
+      ${p.stage !== 'signed' ? `
+      <div class="convert-form" data-prospect="${esc(p.id)}">
+        <div class="row">
+          <input type="text" class="cv-name" placeholder="Nom complet" value="${esc(p.full_name)}">
+          <input type="email" class="cv-email" placeholder="Courriel" value="${esc(p.email) || ''}">
+          <input type="text" class="cv-phone" placeholder="Téléphone" value="${esc(p.phone) || ''}">
+        </div>
+        <div class="row">
+          <input type="text" class="cv-company" placeholder="Entreprise (optionnel)" value="${esc(p.company_name) || ''}">
+          <input type="number" class="cv-rate" placeholder="Taux de gestion %" value="6" step="0.1" style="width:130px;">
+          <input type="number" class="cv-cap" placeholder="Plafond de dépenses $" value="300" style="width:150px;">
+        </div>
+        <button class="primary" onclick="submitConvert(this)" data-prospect="${esc(p.id)}">Créer le compte client</button>
+        <p class="msg"></p>
+      </div>` : ''}
       ${history.length ? `
       <div class="call-history" data-prospect="${esc(p.id)}">
         ${history.slice().reverse().map(c => `
@@ -334,6 +355,42 @@ function toggleHistory(btn){
   const id = btn.dataset.prospect;
   const hist = document.querySelector(`.call-history[data-prospect="${CSS.escape(id)}"]`);
   if(hist) hist.classList.toggle('active');
+}
+
+function toggleConvertForm(btn){
+  const id = btn.dataset.prospect;
+  const form = document.querySelector(`.convert-form[data-prospect="${CSS.escape(id)}"]`);
+  if(form) form.classList.toggle('active');
+}
+
+async function submitConvert(btn){
+  const prospect_id = btn.dataset.prospect;
+  const form = btn.closest('.convert-form');
+  const full_name = form.querySelector('.cv-name').value.trim();
+  const email = form.querySelector('.cv-email').value.trim();
+  const phone = form.querySelector('.cv-phone').value.trim();
+  const company_name = form.querySelector('.cv-company').value.trim();
+  const management_rate = Number(form.querySelector('.cv-rate').value) || 6;
+  const spending_cap = Number(form.querySelector('.cv-cap').value) || 300;
+  const msgEl = form.querySelector('.msg');
+  if(!full_name || !email){ msgEl.textContent = 'Nom et courriel requis.'; msgEl.style.color = 'var(--rust)'; return; }
+  btn.disabled = true;
+  btn.textContent = 'Création...';
+  msgEl.textContent = '';
+  const res = await callCallerApi({ action: 'create_client', prospect_id, full_name, email, phone, company_name, management_rate, spending_cap });
+  btn.disabled = false;
+  btn.textContent = 'Créer le compte client';
+  if(res?.error){ msgEl.textContent = 'Erreur : ' + res.error; msgEl.style.color = 'var(--rust)'; return; }
+  // alert() ici plutôt qu'un message dans la carte : loadQueue() ci-dessous
+  // retire aussitôt le formulaire de conversion (le prospect passe à
+  // "signed"), donc un message affiché dans la carte disparaîtrait avant
+  // d'avoir pu être lu — critique si le courriel a échoué et que le mot de
+  // passe temporaire n'apparaît nulle part ailleurs.
+  alert(res.email_sent
+    ? `Compte créé et identifiants envoyés à ${email}.`
+    : `Compte créé, mais le courriel n'a pas pu être envoyé (${res.email_error || 'erreur inconnue'}).\n\nTransmets-lui toi-même :\nCourriel : ${email}\nMot de passe temporaire : ${res.temp_password}`);
+  await loadStats();
+  await loadQueue();
 }
 
 async function submitCall(btn){

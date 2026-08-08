@@ -627,6 +627,64 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, deleted: Array.isArray(deletedRows) ? deletedRows.length : 0 }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    if (action === "list_tenants") {
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/tenants?select=id,full_name,email,phone,user_id,leases(status,units(unit_number,buildings(address)))&order=full_name.asc`,
+        { headers: adminHeaders },
+      );
+      const tenants = await res.json();
+      return new Response(JSON.stringify({ tenants }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Permet à l'admin d'ouvrir, en un clic depuis son propre tableau de
+    // bord, le portail exact d'un propriétaire/locataire/cold caller —
+    // sans connaître son mot de passe. Génère un lien magique Supabase à
+    // usage unique (redirige vers le bon portail avec une session déjà
+    // ouverte pour ce compte) plutôt qu'une vraie connexion : le mot de
+    // passe du client n'est jamais consulté ni modifié. Chaque génération
+    // est consignée à l'audit, avant même que le lien soit utilisé.
+    if (action === "impersonate_user") {
+      const { target_role, target_id } = body;
+      const roleConfig: Record<string, { table: string; portalUrl: string }> = {
+        owner: { table: "owners", portalUrl: OWNER_PORTAL_URL },
+        tenant: { table: "tenants", portalUrl: TENANT_PORTAL_URL },
+        caller: { table: "cold_callers", portalUrl: CALLER_PORTAL_URL },
+      };
+      const config = roleConfig[target_role];
+      if (!config || !target_id) {
+        return new Response(JSON.stringify({ error: "target_role ou target_id invalide" }), { status: 400, headers: corsHeaders });
+      }
+
+      const targetRes = await fetch(`${supabaseUrl}/rest/v1/${config.table}?id=eq.${target_id}&select=id,user_id,full_name`, { headers: adminHeaders });
+      const [target] = await targetRes.json().catch(() => [null]);
+      if (!target) {
+        return new Response(JSON.stringify({ error: "Compte introuvable" }), { status: 404, headers: corsHeaders });
+      }
+      if (!target.user_id) {
+        return new Response(JSON.stringify({ error: "Ce compte n'a pas encore d'accès portail créé" }), { status: 400, headers: corsHeaders });
+      }
+
+      const userRowRes = await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${target.user_id}&select=email`, { headers: adminHeaders });
+      const [userRow] = await userRowRes.json().catch(() => [null]);
+      if (!userRow?.email) {
+        return new Response(JSON.stringify({ error: "Courriel introuvable pour ce compte" }), { status: 404, headers: corsHeaders });
+      }
+
+      const linkRes = await fetch(`${supabaseUrl}/auth/v1/admin/generate_link`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ type: "magiclink", email: userRow.email, options: { redirect_to: config.portalUrl } }),
+      });
+      const linkData = await linkRes.json();
+      const actionLink = linkData?.action_link || linkData?.properties?.action_link;
+      if (!linkRes.ok || !actionLink) {
+        return new Response(JSON.stringify({ error: linkData?.msg || linkData?.error_description || "Impossible de générer le lien d'accès" }), { status: 400, headers: corsHeaders });
+      }
+
+      await logAudit("admin.impersonate", config.table, target_id, { target_role, target_email: userRow.email, target_name: target.full_name });
+      return new Response(JSON.stringify({ ok: true, action_link: actionLink }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });
