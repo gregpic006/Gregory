@@ -132,6 +132,7 @@
       <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
       <span class="brand-sub">Espace cold caller</span>
       <button class="tab-btn active" data-tab="queue" onclick="showTab('queue')">Ma file d'appels</button>
+      <button class="tab-btn" data-tab="new-client" onclick="showTab('new-client')">+ Nouveau client</button>
       <div class="signout">
         <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
       </div>
@@ -147,6 +148,32 @@
         </div>
 
         <div id="prospects-list"><p class="empty-note">Chargement...</p></div>
+      </section>
+
+      <section id="new-client" class="section">
+        <h1>Nouveau client</h1>
+        <p class="subtitle">Crée directement un compte propriétaire quand un client accepte au téléphone — pas besoin d'un prospect existant</p>
+
+        <div class="prospect-card" style="max-width:480px;">
+          <div class="convert-form active" style="margin-top:0;padding-top:0;border-top:none;">
+            <div class="row">
+              <input type="text" id="nc-name" placeholder="Nom complet" style="flex:1;min-width:200px;">
+            </div>
+            <div class="row">
+              <input type="email" id="nc-email" placeholder="Courriel" style="flex:1;min-width:200px;">
+              <input type="text" id="nc-phone" placeholder="Téléphone">
+            </div>
+            <div class="row">
+              <input type="text" id="nc-company" placeholder="Entreprise (optionnel)" style="flex:1;min-width:200px;">
+            </div>
+            <div class="row">
+              <input type="number" id="nc-rate" placeholder="Taux de gestion %" value="6" step="0.1" style="width:150px;">
+              <input type="number" id="nc-cap" placeholder="Plafond de dépenses $" value="300" style="width:170px;">
+            </div>
+            <button class="primary" onclick="submitNewClient()">Créer le compte client</button>
+            <p class="msg" id="nc-msg"></p>
+          </div>
+        </div>
       </section>
     </main>
   </div>
@@ -417,6 +444,31 @@ async function setStage(prospect_id, stage){
   if(res?.error){ alert('Erreur : ' + res.error); return; }
   await loadStats();
   await loadQueue();
+}
+
+async function submitNewClient(){
+  const full_name = document.getElementById('nc-name').value.trim();
+  const email = document.getElementById('nc-email').value.trim();
+  const phone = document.getElementById('nc-phone').value.trim();
+  const company_name = document.getElementById('nc-company').value.trim();
+  const management_rate = Number(document.getElementById('nc-rate').value) || 6;
+  const spending_cap = Number(document.getElementById('nc-cap').value) || 300;
+  const msgEl = document.getElementById('nc-msg');
+  if(!full_name || !email){ msgEl.style.color = 'var(--rust)'; msgEl.textContent = 'Nom et courriel requis.'; return; }
+  msgEl.style.color = '';
+  msgEl.textContent = 'Création...';
+  const res = await callCallerApi({ action: 'create_client', full_name, email, phone, company_name, management_rate, spending_cap });
+  if(res?.error){ msgEl.style.color = 'var(--rust)'; msgEl.textContent = 'Erreur : ' + res.error; return; }
+  msgEl.style.color = 'var(--sage)';
+  msgEl.textContent = res.email_sent
+    ? `Compte créé et identifiants envoyés à ${email}.`
+    : `Compte créé, mais le courriel n'a pas pu être envoyé (${res.email_error || 'erreur inconnue'}). Transmets-lui toi-même : courriel ${email}, mot de passe temporaire ${res.temp_password}`;
+  document.getElementById('nc-name').value = '';
+  document.getElementById('nc-email').value = '';
+  document.getElementById('nc-phone').value = '';
+  document.getElementById('nc-company').value = '';
+  document.getElementById('nc-rate').value = '6';
+  document.getElementById('nc-cap').value = '300';
 }
 
 function showTab(id){
