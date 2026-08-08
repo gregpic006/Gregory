@@ -2488,14 +2488,15 @@ create trigger restrict_inquiries_owner_update_trigger
 -- 3. documents — l'interface propriétaire n'envoie que owner_id/title/
 -- doc_type/file_url à la création ; les champs ai_* sont calculés plus
 -- tard par handle-document-upload.ts (service_role). Sans ce
--- garde-fou, un propriétaire pouvait insérer directement un résumé IA,
--- un montant clé ou un doc_type='facture' fabriqués. doc_type est en
--- plus limité à l'ensemble réellement proposé par le formulaire —
--- 'facture' n'a jamais été un type valide côté document (les factures
--- vivent dans la table "invoices" depuis la tâche #47).
+-- garde-fou, un propriétaire pouvait insérer directement un résumé IA
+-- ou un montant clé fabriqués. doc_type est limité à l'ensemble
+-- réellement utilisé dans le code : les 4 valeurs du formulaire
+-- propriétaire, plus "facture" et "assurance_travailleur" que
+-- ops-api.ts crée lui-même côté admin (reçu de dépense, preuve
+-- d'assurance travailleur).
 alter table documents drop constraint if exists documents_doc_type_check;
 alter table documents add constraint documents_doc_type_check
-  check (doc_type is null or doc_type in ('bail','mandat','reglement','rapport'));
+  check (doc_type is null or doc_type in ('bail','mandat','reglement','rapport','facture','assurance_travailleur'));
 
 create or replace function restrict_documents_owner_insert()
 returns trigger language plpgsql as $$
