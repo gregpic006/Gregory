@@ -2423,3 +2423,107 @@ select cron.schedule('daily-find-prospects-ai', '30 15 * * *', $$select trigger_
 -- n'utilise service_role qu'à l'intérieur de la fonction (côté serveur)
 -- pour contourner RLS une fois l'admin confirmé. Conservée ici comme
 -- rappel du principe, pas comme tâche en attente.
+
+-- ============================================================
+-- AUDIT RLS 2026-08-08 — garde-fous au niveau des colonnes
+-- ============================================================
+-- Constat : Postgres RLS ne filtre que les LIGNES, jamais les COLONNES.
+-- Trois policies UPDATE/INSERT laissaient un propriétaire (compte
+-- authentifié normal, pas service_role) écrire dans des colonnes que
+-- l'interface ne propose jamais, en construisant lui-même l'appel REST
+-- (ex. dans la console du navigateur) au lieu de passer par le
+-- formulaire. Le rôle possédé (owner_id/tenant_id) était toujours
+-- correctement vérifié — ce n'était pas une fuite entre clients — mais
+-- rien n'empêchait de falsifier un montant historique ou les
+-- coordonnées d'un tiers sur SA PROPRE ligne. Les fonctions Edge
+-- (service_role) et les comptes admin restent exemptés de ces
+-- garde-fous : auth.role() vaut 'service_role' pour elles, jamais
+-- 'authenticated'.
+
+-- 1. approvals — l'interface propriétaire (portail-proprietaire.html)
+-- ne modifie que status/decided_at/rejection_note. Sans ce garde-fou,
+-- un propriétaire pouvait aussi réécrire requested_amount ou
+-- spending_cap_at_request après coup (falsification de l'historique
+-- comptable) via un appel REST direct.
+create or replace function restrict_approvals_owner_update()
+returns trigger language plpgsql as $$
+begin
+  if auth.role() = 'authenticated' and not auth_is_admin() then
+    if (to_jsonb(new) - array['status','decided_at','rejection_note'])
+       is distinct from (to_jsonb(old) - array['status','decided_at','rejection_note']) then
+      raise exception 'Modification non autorisée sur cette approbation';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists restrict_approvals_owner_update_trigger on approvals;
+create trigger restrict_approvals_owner_update_trigger
+  before update on approvals
+  for each row execute function restrict_approvals_owner_update();
+
+-- 2. inquiries — l'interface propriétaire ne modifie que "status" sur
+-- une demande de visite qui concerne son unité. Sans ce garde-fou, un
+-- propriétaire pouvait aussi réécrire les coordonnées (nom/courriel/
+-- téléphone/message) de la personne qui a soumis la demande — un tiers
+-- dont les renseignements personnels ne devraient jamais être
+-- modifiables par lui (enjeu Loi 25).
+create or replace function restrict_inquiries_owner_update()
+returns trigger language plpgsql as $$
+begin
+  if auth.role() = 'authenticated' and not auth_is_admin() then
+    if (to_jsonb(new) - array['status'])
+       is distinct from (to_jsonb(old) - array['status']) then
+      raise exception 'Modification non autorisée sur cette demande';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists restrict_inquiries_owner_update_trigger on inquiries;
+create trigger restrict_inquiries_owner_update_trigger
+  before update on inquiries
+  for each row execute function restrict_inquiries_owner_update();
+
+-- 3. documents — l'interface propriétaire n'envoie que owner_id/title/
+-- doc_type/file_url à la création ; les champs ai_* sont calculés plus
+-- tard par handle-document-upload.ts (service_role). Sans ce
+-- garde-fou, un propriétaire pouvait insérer directement un résumé IA,
+-- un montant clé ou un doc_type='facture' fabriqués. doc_type est en
+-- plus limité à l'ensemble réellement proposé par le formulaire —
+-- 'facture' n'a jamais été un type valide côté document (les factures
+-- vivent dans la table "invoices" depuis la tâche #47).
+alter table documents drop constraint if exists documents_doc_type_check;
+alter table documents add constraint documents_doc_type_check
+  check (doc_type is null or doc_type in ('bail','mandat','reglement','rapport'));
+
+create or replace function restrict_documents_owner_insert()
+returns trigger language plpgsql as $$
+begin
+  if auth.role() = 'authenticated' and not auth_is_admin() then
+    new.ai_processed := false;
+    new.ai_summary := null;
+    new.ai_parties := null;
+    new.ai_key_amount := null;
+    new.ai_expiry_date := null;
+    new.ai_extracted := null;
+    new.ai_confidence := null;
+    new.ai_source_page := null;
+    new.ai_source_excerpt := null;
+    new.ai_model_version := null;
+    new.ai_extracted_at := null;
+    new.ai_readable := null;
+    new.ai_signature_present := null;
+    new.ai_doc_type_detected := null;
+    new.ai_needs_human_validation := false;
+    new.file_hash := null;
+    new.is_duplicate_of := null;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists restrict_documents_owner_insert_trigger on documents;
+create trigger restrict_documents_owner_insert_trigger
+  before insert on documents
+  for each row execute function restrict_documents_owner_insert();
+
