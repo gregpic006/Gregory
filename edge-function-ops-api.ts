@@ -20,6 +20,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const resendKey = Deno.env.get("RESEND_API_KEY");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
     const adminHeaders = {
       apikey: serviceRoleKey ?? "",
       Authorization: `Bearer ${serviceRoleKey}`,
@@ -169,6 +170,61 @@ Deno.serve(async (req) => {
       }
       await logAudit("work_order.create", "work_orders", newWorkOrder?.id ?? null, { worker_id, worker_pay: Number(worker_pay), coordination_fee: coordinationFee, estimated_cost: estimatedCost });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    // Portail Pro — au lieu de choisir un travailleur soi-même (comme
+    // create_work_order ci-dessus), on laisse le moteur de dispatch
+    // (dispatch-work-order.ts) trouver et solliciter les travailleurs
+    // admissibles par paliers de score. Aucun worker_id ici : le work
+    // order reste "open" jusqu'à ce qu'un travailleur accepte une offre.
+    if (action === "dispatch_work_order_auto") {
+      const { service_request_id, unit_id, description, service_catalog_id, worker_pay } = body;
+      if (!unit_id || !description) {
+        return new Response(JSON.stringify({ error: "Champs manquants" }), { status: 400, headers: corsHeaders });
+      }
+
+      let resolvedPay = worker_pay != null ? Number(worker_pay) : null;
+      if (service_catalog_id && resolvedPay === null) {
+        const catRes = await fetch(`${supabaseUrl}/rest/v1/service_catalog?id=eq.${service_catalog_id}&select=fixed_worker_pay`, { headers: adminHeaders });
+        const [cat] = await catRes.json().catch(() => [null]);
+        resolvedPay = cat?.fixed_worker_pay ?? null;
+      }
+      const coordinationFee = resolvedPay !== null ? Math.round(resolvedPay * 0.10 * 100) / 100 : null;
+      const estimatedCost = resolvedPay !== null && coordinationFee !== null ? Math.round((resolvedPay + coordinationFee) * 100) / 100 : null;
+
+      const woInsertRes = await fetch(`${supabaseUrl}/rest/v1/work_orders`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({
+          service_request_id: service_request_id || null,
+          unit_id, description,
+          worker_pay: resolvedPay,
+          coordination_fee: coordinationFee,
+          estimated_cost: estimatedCost,
+          service_catalog_id: service_catalog_id || null,
+          dispatch_mode: "auto",
+          status: "open",
+        }),
+      });
+      const [newWorkOrder] = await woInsertRes.json();
+      if (!newWorkOrder?.id) {
+        return new Response(JSON.stringify({ error: "Impossible de créer le work order" }), { status: 500, headers: corsHeaders });
+      }
+      if (service_request_id) {
+        await fetch(`${supabaseUrl}/rest/v1/service_requests?id=eq.${service_request_id}`, {
+          method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "in_progress", pending_reassessment: false, reassessment_due: null }),
+        });
+      }
+
+      const dispatchRes = await fetch(`${supabaseUrl}/functions/v1/dispatch-work-order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+        body: JSON.stringify({ action: "dispatch", work_order_id: newWorkOrder.id }),
+      });
+      const dispatchData = await dispatchRes.json().catch(() => ({}));
+
+      await logAudit("work_order.auto_dispatch_started", "work_orders", newWorkOrder.id, { dispatch_result: dispatchData });
+      return new Response(JSON.stringify({ ok: true, work_order_id: newWorkOrder.id, dispatch: dispatchData }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "reassign_work_order") {

@@ -1778,6 +1778,10 @@ select
   coalesce((select count(*) from work_orders wo where wo.worker_id = w.id and wo.status = 'completed'), 0) as completed_jobs_count,
   coalesce((select count(*) from work_orders wo where wo.worker_id = w.id and wo.worker_response = 'declined'), 0) as declined_jobs_count
 from workers w;
+-- Note : redéfinie plus bas (section PORTAIL PRO) pour ajouter les
+-- statistiques de job_offers, une fois cette table créée — "create or
+-- replace view" tel quel ici doit rester valide si ce fichier est rejoué
+-- au complet sur une base vide (job_offers n'existe pas encore à ce point).
 
 create or replace function flag_worker_credential_issues()
 returns void language plpgsql security definer set search_path = public as $$
@@ -2558,9 +2562,14 @@ alter table workers add column if not exists zones text[] default '{}';
 alter table workers add column if not exists hourly_rate numeric(10,2);
 alter table workers add column if not exists travel_fee numeric(10,2);
 alter table workers add column if not exists handles_urgent boolean default false;
-alter table workers add column if not exists insurance_verified boolean default false;
-alter table workers add column if not exists insurance_expiry date;
-alter table workers add column if not exists rbq_license_verified boolean default false;
+-- PAS de nouveau champ d'assurance/RBQ ici : "requires_rbq",
+-- "rbq_license_expiry", "insurance_expiry" et "insurance_document_id"
+-- existent déjà (voir plus haut, tâche #39 "Vérification des
+-- travailleurs") et sont déjà utilisés par create_work_order pour bloquer
+-- une assignation si la licence/l'assurance manque ou est expirée — le
+-- moteur de dispatch réutilise cette même vue (worker_verification_status)
+-- plutôt que de dupliquer la logique avec des booléens "vérifié" séparés
+-- qui pourraient se désynchroniser.
 -- Paiement : volontairement PAS de coordonnées bancaires brutes (numéro de
 -- compte/transit) — aucune partie de Portail ne stocke de données bancaires
 -- en clair aujourd'hui (le PAD lui-même reste un squelette sans fournisseur
@@ -2578,11 +2587,13 @@ alter table workers add column if not exists rejection_reason text;
 alter table workers add column if not exists availability_status text default 'semaine'
   check (availability_status in ('maintenant','aujourdhui','semaine','indisponible'));
 alter table workers add column if not exists availability_schedule jsonb default '{}'::jsonb;
+-- La note (rating) n'a pas encore de mécanisme de collecte (aucune
+-- évaluation locataire/propriétaire n'existe dans le produit) donc reste
+-- une colonne stockée en attendant. Les compteurs de jobs, eux, sont
+-- calculés en direct par worker_verification_status (comme
+-- completed_jobs_count/declined_jobs_count le sont déjà) — pas de
+-- compteur à garder synchronisé, jamais de désynchronisation possible.
 alter table workers add column if not exists rating numeric(3,2);
-alter table workers add column if not exists jobs_offered_count int default 0;
-alter table workers add column if not exists jobs_accepted_count int default 0;
-alter table workers add column if not exists jobs_completed_count int default 0;
-alter table workers add column if not exists jobs_cancelled_count int default 0;
 alter table workers add column if not exists active boolean default true;
 
 -- Backfill ponctuel : copie l'ancien champ singulier dans le nouveau tableau,
@@ -2660,6 +2671,26 @@ alter table job_offers enable row level security;
 create index if not exists idx_job_offers_work_order on job_offers(work_order_id);
 create index if not exists idx_job_offers_worker on job_offers(worker_id);
 
+-- Redéfinition de worker_verification_status (voir sa première définition
+-- plus haut, tâche #39) : identique, avec 3 colonnes calculées en direct
+-- ajoutées à la fin pour le Portail Score — offres reçues/acceptées et
+-- annulations après acceptation. Aucun compteur stocké à synchroniser.
+create or replace view worker_verification_status as
+select
+  w.*,
+  (w.requires_rbq and (w.rbq_license is null or w.rbq_license = '')) as missing_rbq_license,
+  (w.rbq_license_expiry is not null and w.rbq_license_expiry < current_date) as rbq_expired,
+  (w.insurance_document_id is null) as missing_insurance_doc,
+  (w.insurance_expiry is not null and w.insurance_expiry < current_date) as insurance_expired,
+  (w.rbq_license_expiry is not null and w.rbq_license_expiry >= current_date and w.rbq_license_expiry <= current_date + interval '15 days') as rbq_expiring_soon,
+  (w.insurance_expiry is not null and w.insurance_expiry >= current_date and w.insurance_expiry <= current_date + interval '15 days') as insurance_expiring_soon,
+  coalesce((select count(*) from work_orders wo where wo.worker_id = w.id and wo.status = 'completed'), 0) as completed_jobs_count,
+  coalesce((select count(*) from work_orders wo where wo.worker_id = w.id and wo.worker_response = 'declined'), 0) as declined_jobs_count,
+  coalesce((select count(*) from job_offers jo where jo.worker_id = w.id), 0) as jobs_offered_count,
+  coalesce((select count(*) from job_offers jo where jo.worker_id = w.id and jo.status = 'accepted'), 0) as jobs_accepted_count,
+  coalesce((select count(*) from work_orders wo2 where wo2.worker_id = w.id and wo2.status = 'cancelled'), 0) as jobs_cancelled_count
+from workers w;
+
 -- Colonnes de dispatch sur work_orders : distinct du cycle transactionnel
 -- classique (assignation manuelle par l'admin) — un work_order "en
 -- dispatch" n'a pas encore de worker_id, seulement des job_offers actives.
@@ -2707,10 +2738,26 @@ begin
     status = case when status = 'open' then 'assigned' else status end
   where id = v_offer.work_order_id;
 
-  update workers set jobs_accepted_count = jobs_accepted_count + 1 where id = p_worker_id;
-
   return jsonb_build_object('ok', true, 'work_order_id', v_offer.work_order_id);
 end;
 $$;
+
+-- ---- 4. Automatisation cron : fait avancer les paliers de dispatch ----
+create or replace function trigger_dispatch_advance()
+returns void language plpgsql as $$
+begin
+  perform net.http_post(
+    url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/dispatch-work-order',
+    body := jsonb_build_object('action', 'advance'),
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+      'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+    )
+  );
+end;
+$$;
+
+select cron.schedule('dispatch-advance-tiers', '*/5 * * * *', $$select trigger_dispatch_advance()$$);
 
 
