@@ -2533,3 +2533,184 @@ create trigger restrict_documents_owner_insert_trigger
   before insert on documents
   for each row execute function restrict_documents_owner_insert();
 
+-- ============================================================
+-- PORTAIL PRO — travailleurs autonomes, catalogue de services,
+-- dispatch automatique par score et par paliers
+-- ============================================================
+-- Remplace le mécanisme de cascade séquentiel de process_worker_response_timeouts()
+-- (un seul travailleur choisi au hasard à la fois) par un moteur de score qui
+-- diffuse simultanément à un GROUPE de travailleurs éligibles (le meilleur
+-- palier d'abord), et ne passe au palier suivant que si personne n'accepte
+-- dans le délai. Le squelette transactionnel existant sur work_orders
+-- (worker_response, tokens, notified_at, escalated) reste inchangé — seule la
+-- façon de choisir QUI est notifié change (voir job_offers plus bas).
+-- notify_worker_new_job() continue de gérer le cas où l'admin assigne
+-- manuellement un travailleur précis (contournement toujours possible).
+
+-- ---- 1. Profil travailleur enrichi ("Portail Pro") ----
+alter table workers add column if not exists company_name text;
+alter table workers add column if not exists neq text;
+-- specialties[] remplace progressivement specialty (conservé pour compat
+-- avec le code existant qui l'utilise déjà) — un travailleur peut couvrir
+-- plusieurs métiers.
+alter table workers add column if not exists specialties text[] default '{}';
+alter table workers add column if not exists zones text[] default '{}';
+alter table workers add column if not exists hourly_rate numeric(10,2);
+alter table workers add column if not exists travel_fee numeric(10,2);
+alter table workers add column if not exists handles_urgent boolean default false;
+alter table workers add column if not exists insurance_verified boolean default false;
+alter table workers add column if not exists insurance_expiry date;
+alter table workers add column if not exists rbq_license_verified boolean default false;
+-- Paiement : volontairement PAS de coordonnées bancaires brutes (numéro de
+-- compte/transit) — aucune partie de Portail ne stocke de données bancaires
+-- en clair aujourd'hui (le PAD lui-même reste un squelette sans fournisseur
+-- branché). Un simple courriel Interac suffit pour l'instant ; un vrai
+-- processeur de paiement sera nécessaire avant d'automatiser les versements.
+alter table workers add column if not exists payout_email text;
+alter table workers add column if not exists verification_status text default 'pending'
+  check (verification_status in ('pending','verified','rejected'));
+alter table workers add column if not exists verified_at timestamptz;
+alter table workers add column if not exists verified_by uuid references users(id);
+alter table workers add column if not exists rejection_reason text;
+-- Disponibilité rapide (affichée/modifiable en un clic par le travailleur)
+-- ET horaire hebdomadaire détaillé pour les demandes non urgentes.
+-- Format availability_schedule : {"lundi":{"start":"08:00","end":"17:00"},"mardi":null,...}
+alter table workers add column if not exists availability_status text default 'semaine'
+  check (availability_status in ('maintenant','aujourdhui','semaine','indisponible'));
+alter table workers add column if not exists availability_schedule jsonb default '{}'::jsonb;
+alter table workers add column if not exists rating numeric(3,2);
+alter table workers add column if not exists jobs_offered_count int default 0;
+alter table workers add column if not exists jobs_accepted_count int default 0;
+alter table workers add column if not exists jobs_completed_count int default 0;
+alter table workers add column if not exists jobs_cancelled_count int default 0;
+alter table workers add column if not exists active boolean default true;
+
+-- Backfill ponctuel : copie l'ancien champ singulier dans le nouveau tableau,
+-- pour que les travailleurs déjà créés restent éligibles au matching.
+update workers set specialties = array[specialty]
+  where specialty is not null and coalesce(array_length(specialties, 1), 0) = 0;
+
+-- Zone approximative d'un immeuble (ex. "Limoilou", "Plateau-Mont-Royal") —
+-- texte libre saisi par l'admin, pas de géocodage réel pour cette version.
+-- Sert uniquement à filtrer "ce travailleur dessert-il ce secteur ?".
+alter table buildings add column if not exists zone text;
+
+-- Photos/références d'un travailleur : réutilise la table "documents"
+-- existante (déjà le garde-manger commun pour tout fichier lié à un
+-- dossier) plutôt que d'en créer une nouvelle rien que pour ça.
+alter table documents add column if not exists worker_id uuid references workers(id);
+alter table documents drop constraint if exists documents_doc_type_check;
+alter table documents add constraint documents_doc_type_check
+  check (doc_type is null or doc_type in ('bail','mandat','reglement','rapport','facture','assurance_travailleur','reference_travailleur'));
+
+-- ---- 2. Catalogue de services (tarification par type de tâche) ----
+-- Les tâches standardisées ont un prix fixe connu d'avance (forfait) ;
+-- les autres sont facturées au taux horaire du travailleur, ou nécessitent
+-- un diagnostic sur place avant de soumettre un devis — jamais de prix
+-- fixe généré par l'IA seule pour un problème non standardisé (ex. une
+-- infiltration d'eau au plafond reste "diagnostic requis").
+create table if not exists service_catalog (
+  id uuid primary key default gen_random_uuid(),
+  category text not null,
+  task_type text not null unique,
+  label text not null,
+  pricing_model text not null default 'diagnostic' check (pricing_model in ('forfait','horaire','diagnostic')),
+  requires_rbq boolean default false,
+  fixed_owner_price numeric(10,2),
+  fixed_worker_pay numeric(10,2),
+  estimated_duration_minutes int,
+  urgent_eligible boolean default true,
+  active boolean default true,
+  created_at timestamptz default now()
+);
+alter table service_catalog enable row level security;
+drop policy if exists "admin manages service catalog" on service_catalog;
+create policy "admin manages service catalog" on service_catalog for all
+  using (auth_is_admin()) with check (auth_is_admin());
+
+insert into service_catalog (category, task_type, label, pricing_model, requires_rbq, fixed_owner_price, fixed_worker_pay, estimated_duration_minutes, urgent_eligible) values
+  ('serrurerie', 'poignee_porte', 'Remplacement de poignée de porte', 'forfait', false, 95.00, 70.00, 30, false),
+  ('plomberie', 'toilette_debouchee', 'Débouchage de toilette simple', 'forfait', false, 120.00, 90.00, 45, true),
+  ('electricite', 'detecteur_fumee', 'Remplacement de détecteur de fumée', 'forfait', false, 65.00, 45.00, 20, false),
+  ('plomberie', 'robinet_fuite', 'Réparation de robinet qui fuit', 'horaire', false, null, null, 60, true),
+  ('plomberie', 'infiltration_eau', 'Infiltration d''eau — diagnostic requis', 'diagnostic', true, null, null, null, true),
+  ('electricite', 'panne_generale', 'Panne électrique — diagnostic requis', 'diagnostic', true, null, null, null, true),
+  ('cvac', 'chauffage_panne', 'Panne de chauffage — diagnostic requis', 'diagnostic', false, null, null, null, true)
+on conflict (task_type) do nothing;
+
+-- ---- 3. Diffusion des mandats par paliers (job_offers) ----
+-- Comme "prospects" : verrouillé au service_role, aucune policy RLS
+-- ouverte. Le travailleur n'y touche jamais directement — tout passe par
+-- worker-api.ts, qui vérifie que l'offre lui appartient avant d'agir.
+-- tier = groupe de diffusion (1 = meilleur score, envoyé en premier) ;
+-- 'queued' = pas encore envoyé (attend son tour) ; 'sent' = envoyé, en
+-- attente de réponse ; 'accepted'/'declined'/'expired' = résolu.
+create table if not exists job_offers (
+  id uuid primary key default gen_random_uuid(),
+  work_order_id uuid references work_orders(id) on delete cascade,
+  worker_id uuid references workers(id),
+  tier int not null default 1,
+  score numeric(6,2),
+  status text not null default 'queued' check (status in ('queued','sent','accepted','declined','expired')),
+  sent_at timestamptz,
+  responded_at timestamptz,
+  created_at timestamptz default now()
+);
+alter table job_offers enable row level security;
+create index if not exists idx_job_offers_work_order on job_offers(work_order_id);
+create index if not exists idx_job_offers_worker on job_offers(worker_id);
+
+-- Colonnes de dispatch sur work_orders : distinct du cycle transactionnel
+-- classique (assignation manuelle par l'admin) — un work_order "en
+-- dispatch" n'a pas encore de worker_id, seulement des job_offers actives.
+alter table work_orders add column if not exists dispatch_mode text default 'manual' check (dispatch_mode in ('manual','auto'));
+alter table work_orders add column if not exists dispatch_started_at timestamptz;
+alter table work_orders add column if not exists dispatch_escalated boolean default false;
+alter table work_orders add column if not exists is_urgent boolean default false;
+alter table work_orders add column if not exists safety_instructions text;
+alter table work_orders add column if not exists service_catalog_id uuid references service_catalog(id);
+
+-- Acceptation atomique : verrouille l'offre ET le work_order avant d'écrire,
+-- pour garantir que "premier arrivé, premier servi" tient même si deux
+-- travailleurs cliquent "Accepter" à la même seconde. Les autres offres du
+-- même work_order (tous paliers confondus) passent à 'expired'.
+create or replace function accept_job_offer(p_offer_id uuid, p_worker_id uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_offer record;
+  v_wo record;
+begin
+  select * into v_offer from job_offers where id = p_offer_id and worker_id = p_worker_id for update;
+  if v_offer is null then
+    return jsonb_build_object('ok', false, 'error', 'Offre introuvable');
+  end if;
+  if v_offer.status <> 'sent' then
+    return jsonb_build_object('ok', false, 'error', 'Cette offre n''est plus disponible');
+  end if;
+
+  select * into v_wo from work_orders where id = v_offer.work_order_id for update;
+  if v_wo.worker_id is not null and v_wo.worker_response = 'accepted' then
+    update job_offers set status = 'expired', responded_at = now() where id = p_offer_id;
+    return jsonb_build_object('ok', false, 'error', 'Ce mandat a déjà été accepté par quelqu''un d''autre');
+  end if;
+
+  update job_offers set status = 'accepted', responded_at = now() where id = p_offer_id;
+  update job_offers set status = 'expired', responded_at = now()
+    where work_order_id = v_offer.work_order_id and id <> p_offer_id and status in ('sent', 'queued');
+
+  update work_orders set
+    worker_id = p_worker_id,
+    worker_notified = true,
+    worker_notified_at = coalesce(worker_notified_at, now()),
+    worker_response = 'accepted',
+    worker_response_at = now(),
+    status = case when status = 'open' then 'assigned' else status end
+  where id = v_offer.work_order_id;
+
+  update workers set jobs_accepted_count = jobs_accepted_count + 1 where id = p_worker_id;
+
+  return jsonb_build_object('ok', true, 'work_order_id', v_offer.work_order_id);
+end;
+$$;
+
+
