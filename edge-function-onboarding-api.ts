@@ -6,6 +6,7 @@ const corsHeaders = {
 const OWNER_PORTAL_URL = "https://portailgestion.ca/portail-proprietaire.html";
 const TENANT_PORTAL_URL = "https://portailgestion.ca/portail-locataire.html";
 const CALLER_PORTAL_URL = "https://portailgestion.ca/portail-cold-caller.html";
+const WORKER_PORTAL_URL = "https://portailgestion.ca/portail-travailleur.html";
 
 function randomPassword() {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 14);
@@ -645,17 +646,21 @@ Deno.serve(async (req) => {
     // est consignée à l'audit, avant même que le lien soit utilisé.
     if (action === "impersonate_user") {
       const { target_role, target_id } = body;
-      const roleConfig: Record<string, { table: string; portalUrl: string }> = {
-        owner: { table: "owners", portalUrl: OWNER_PORTAL_URL },
-        tenant: { table: "tenants", portalUrl: TENANT_PORTAL_URL },
-        caller: { table: "cold_callers", portalUrl: CALLER_PORTAL_URL },
+      // nameColumn : "workers" utilise "name", pas "full_name" comme les
+      // autres tables — sans ça, PostgREST renvoie une erreur 400 en
+      // sélectionnant une colonne qui n'existe pas sur "workers".
+      const roleConfig: Record<string, { table: string; portalUrl: string; nameColumn: string }> = {
+        owner: { table: "owners", portalUrl: OWNER_PORTAL_URL, nameColumn: "full_name" },
+        tenant: { table: "tenants", portalUrl: TENANT_PORTAL_URL, nameColumn: "full_name" },
+        caller: { table: "cold_callers", portalUrl: CALLER_PORTAL_URL, nameColumn: "full_name" },
+        worker: { table: "workers", portalUrl: WORKER_PORTAL_URL, nameColumn: "name" },
       };
       const config = roleConfig[target_role];
       if (!config || !target_id) {
         return new Response(JSON.stringify({ error: "target_role ou target_id invalide" }), { status: 400, headers: corsHeaders });
       }
 
-      const targetRes = await fetch(`${supabaseUrl}/rest/v1/${config.table}?id=eq.${target_id}&select=id,user_id,full_name`, { headers: adminHeaders });
+      const targetRes = await fetch(`${supabaseUrl}/rest/v1/${config.table}?id=eq.${target_id}&select=id,user_id,${config.nameColumn}`, { headers: adminHeaders });
       const [target] = await targetRes.json().catch(() => [null]);
       if (!target) {
         return new Response(JSON.stringify({ error: "Compte introuvable" }), { status: 404, headers: corsHeaders });
@@ -681,7 +686,7 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: linkData?.msg || linkData?.error_description || "Impossible de générer le lien d'accès" }), { status: 400, headers: corsHeaders });
       }
 
-      await logAudit("admin.impersonate", config.table, target_id, { target_role, target_email: userRow.email, target_name: target.full_name });
+      await logAudit("admin.impersonate", config.table, target_id, { target_role, target_email: userRow.email, target_name: target[config.nameColumn] });
       return new Response(JSON.stringify({ ok: true, action_link: actionLink }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
