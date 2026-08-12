@@ -126,6 +126,70 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
+    // Portail Pro — approuve ou refuse le dossier d'un travailleur
+    // auto-inscrit (voir handle-worker-registration.ts). Distinct de
+    // update_worker_verification ci-dessus : ceci est la porte d'entrée
+    // "peut-il recevoir des mandats du tout", pas le suivi continu de
+    // l'expiration RBQ/assurance. Le moteur de dispatch n'admet que
+    // verification_status = 'verified'.
+    if (action === "verify_worker_pro") {
+      const { worker_id, decision, rejection_reason } = body;
+      if (!worker_id || !["verified", "rejected"].includes(decision)) {
+        return new Response(JSON.stringify({ error: "worker_id et decision (verified|rejected) requis" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/workers?id=eq.${worker_id}`, {
+        method: "PATCH", headers: adminHeaders,
+        body: JSON.stringify({
+          verification_status: decision,
+          verified_at: new Date().toISOString(),
+          verified_by: userId,
+          rejection_reason: decision === "rejected" ? (rejection_reason || null) : null,
+        }),
+      });
+      await logAudit(decision === "verified" ? "worker.pro_verified" : "worker.pro_rejected", "workers", worker_id, { rejection_reason: rejection_reason || null });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "list_service_catalog") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/service_catalog?select=*&order=category.asc,label.asc`, { headers: adminHeaders });
+      return new Response(JSON.stringify({ catalog: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "create_service_catalog_entry") {
+      const { category, task_type, label, pricing_model, requires_rbq, fixed_owner_price, fixed_worker_pay, estimated_duration_minutes, urgent_eligible } = body;
+      if (!category || !task_type || !label || !["forfait", "horaire", "diagnostic"].includes(pricing_model)) {
+        return new Response(JSON.stringify({ error: "Champs manquants ou pricing_model invalide" }), { status: 400, headers: corsHeaders });
+      }
+      const res = await fetch(`${supabaseUrl}/rest/v1/service_catalog`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({
+          category, task_type, label, pricing_model,
+          requires_rbq: !!requires_rbq,
+          fixed_owner_price: fixed_owner_price === "" || fixed_owner_price == null ? null : Number(fixed_owner_price),
+          fixed_worker_pay: fixed_worker_pay === "" || fixed_worker_pay == null ? null : Number(fixed_worker_pay),
+          estimated_duration_minutes: estimated_duration_minutes === "" || estimated_duration_minutes == null ? null : Math.round(Number(estimated_duration_minutes)),
+          urgent_eligible: urgent_eligible !== false,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return new Response(JSON.stringify({ error: err?.message || "task_type déjà existant ou champs invalides" }), { status: 400, headers: corsHeaders });
+      }
+      const [entry] = await res.json();
+      await logAudit("service_catalog.create", "service_catalog", entry?.id ?? null, { task_type, label });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "toggle_service_catalog_active") {
+      const { catalog_id, active } = body;
+      if (!catalog_id) {
+        return new Response(JSON.stringify({ error: "catalog_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/service_catalog?id=eq.${catalog_id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ active: !!active }) });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     if (action === "create_work_order") {
       const { service_request_id, unit_id, worker_id, description, worker_pay, appointment_at, entry_permission, billing_terms, due_by } = body;
       if (!unit_id || !worker_id || !description || !worker_pay) {

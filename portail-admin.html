@@ -179,6 +179,29 @@
   <p id="wk-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
   <div id="workers-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 
+  <h1 style="margin-top:40px;font-size:22px;">Catalogue de services (Portail Pro)</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Tâches standardisées à prix fixe, ou au taux horaire du travailleur, ou nécessitant un diagnostic — utilisé par le moteur de dispatch automatique</p>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Catégorie</label><input type="text" id="sc-category" placeholder="plomberie" style="padding:8px;border:1px solid var(--line);width:120px;"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Code (unique)</label><input type="text" id="sc-task-type" placeholder="toilette_debouchee" style="padding:8px;border:1px solid var(--line);width:150px;"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Étiquette</label><input type="text" id="sc-label" placeholder="Débouchage de toilette simple" style="padding:8px;border:1px solid var(--line);width:200px;"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Tarification</label>
+      <select id="sc-pricing-model" style="padding:8px;border:1px solid var(--line);">
+        <option value="forfait">Forfait fixe</option>
+        <option value="horaire">Taux horaire</option>
+        <option value="diagnostic">Diagnostic requis</option>
+      </select>
+    </div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Prix propriétaire ($)</label><input type="number" id="sc-owner-price" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Paie travailleur ($)</label><input type="number" id="sc-worker-pay" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);"><input type="checkbox" id="sc-requires-rbq"> Licence RBQ requise</label></div>
+    <button onclick="createServiceCatalogEntry()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter</button>
+  </div>
+  <p id="sc-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
+  <table><thead><tr><th>Catégorie</th><th>Tâche</th><th>Tarification</th><th>RBQ</th><th class="num">Prix propriétaire</th><th class="num">Paie travailleur</th><th>Statut</th><th></th></tr></thead>
+    <tbody id="service-catalog-body"><tr class="empty-row"><td colspan="8">Chargement...</td></tr></tbody>
+  </table>
+
   <h1 style="margin-top:40px;font-size:22px;">Annonces à publier (Facebook Marketplace)</h1>
   <p class="subtitle" style="margin-bottom:16px;">Préparées automatiquement dès qu'un logement devient vacant — Facebook ne permet pas la publication automatique, il ne reste qu'à copier-coller</p>
   <div id="marketplace-listings-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
@@ -810,6 +833,12 @@ const auditActionLabel = {
   'prospect.ai_found_and_assigned': 'Prospect trouvé par l\'IA et assigné',
   'cold_caller.delete': 'Cold caller supprimé', 'admin.impersonate': 'Accès à un portail client généré (admin)',
   'owner.create_by_caller': 'Propriétaire créé par un cold caller',
+  'worker.pro_verified': 'Dossier Portail Pro approuvé', 'worker.pro_rejected': 'Dossier Portail Pro refusé',
+  'worker.self_registered': "Travailleur inscrit lui-même (Portail Pro)",
+  'service_catalog.create': 'Entrée de catalogue de services créée',
+  'work_order.dispatched': 'Travail diffusé aux travailleurs admissibles', 'work_order.dispatch_escalated_to_admin': 'Dispatch escaladé à l\'admin',
+  'work_order.dispatch_no_eligible_workers': 'Aucun travailleur admissible pour la diffusion', 'work_order.auto_dispatch_started': 'Dispatch automatique démarré',
+  'work_order.worker_accepted_offer': 'Travailleur : offre acceptée',
 };
 const auditEntityLabel = {
   owners: 'Propriétaires', buildings: 'Immeubles', units: 'Unités', tenants: 'Locataires',
@@ -909,6 +938,7 @@ function photoLinksHtml(bucket, paths, label){
 async function loadOps(){
   await loadMarketplaceListings();
   await loadWorkersAdmin();
+  await loadServiceCatalog();
   await loadVisitInquiries();
   await loadVisitsAdmin();
   await loadServiceRequestsAdmin();
@@ -1138,10 +1168,26 @@ async function loadWorkersAdmin(){
       : `<span style="background:#4c7a4c;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">CONFORME</span>`;
     const soonBadge = (w.rbq_expiring_soon || w.insurance_expiring_soon)
       ? ` <span style="background:#e6a817;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">EXPIRE BIENTÔT</span>` : '';
+    const proBadge = w.verification_status === 'pending'
+      ? ` <span style="background:var(--amber);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">PORTAIL PRO — EN ATTENTE</span>`
+      : w.verification_status === 'rejected'
+      ? ` <span style="background:var(--rust);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">DOSSIER REFUSÉ</span>`
+      : w.verification_status === 'verified' ? ` <span style="background:var(--sage);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">PORTAIL PRO — VÉRIFIÉ ✓</span>` : '';
+    const proDetails = (w.company_name || (w.specialties && w.specialties.length) || (w.zones && w.zones.length))
+      ? `<span style="font-size:12px;color:var(--muted);display:block;margin-bottom:8px;">${w.company_name ? esc(w.company_name) + ' · ' : ''}${(w.specialties||[]).join(', ')}${(w.zones||[]).length ? ' · zones : ' + w.zones.join(', ') : ''}${w.hourly_rate != null ? ' · ' + Number(w.hourly_rate).toLocaleString('fr-CA') + ' $/h' : ''}</span>`
+      : '';
     return `
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
       <b style="display:block;margin-bottom:4px;">${esc(w.name)} — ${esc(w.specialty) || 'spécialité non précisée'}</b>
-      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">${esc(w.phone) || '—'} · ${esc(w.email) || '—'} · ${w.completed_jobs_count} travail(aux) complété(s), ${w.declined_jobs_count} refusé(s) — ${statusBadge}${soonBadge}</span>
+      ${proDetails}
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">${esc(w.phone) || '—'} · ${esc(w.email) || '—'} · ${w.completed_jobs_count} travail(aux) complété(s), ${w.declined_jobs_count} refusé(s) — ${statusBadge}${soonBadge}${proBadge}</span>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+        ${w.verification_status === 'pending' ? `
+          <button onclick="verifyWorkerPro('${w.id}','verified')" style="border:1px solid var(--sage);background:none;color:var(--sage);padding:7px 12px;font-size:11.5px;cursor:pointer;">Approuver le dossier Portail Pro</button>
+          <button onclick="verifyWorkerPro('${w.id}','rejected')" style="border:1px solid var(--rust);background:none;color:var(--rust);padding:7px 12px;font-size:11.5px;cursor:pointer;">Refuser</button>
+        ` : ''}
+        ${w.user_id ? `<button data-role="worker" data-target-id="${esc(w.id)}" onclick="impersonateFromButton(this)" style="border:1px solid var(--ink);background:none;padding:7px 12px;font-size:11.5px;cursor:pointer;">Voir son portail</button>` : ''}
+      </div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
         <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Requiert RBQ</label>
           <input type="checkbox" id="wk-req-${w.id}" ${w.requires_rbq ? 'checked' : ''}>
@@ -1165,6 +1211,67 @@ async function loadWorkersAdmin(){
       </div>
     </div>`;
   }).join('');
+}
+
+async function verifyWorkerPro(worker_id, decision){
+  let rejection_reason = null;
+  if(decision === 'rejected'){
+    rejection_reason = prompt('Raison du refus (visible par le travailleur, optionnel) :') || null;
+  }
+  const res = await callOpsApi({ action: 'verify_worker_pro', worker_id, decision, rejection_reason });
+  if(res?.error){ alert('Erreur : ' + res.error); return; }
+  await loadWorkersAdmin();
+}
+
+const pricingModelLabel = { forfait: 'Forfait fixe', horaire: 'Taux horaire', diagnostic: 'Diagnostic requis' };
+
+async function loadServiceCatalog(){
+  const data = await callOpsApi({ action: 'list_service_catalog' });
+  const body = document.getElementById('service-catalog-body');
+  const catalog = data?.catalog || [];
+  if(!catalog.length){
+    body.innerHTML = '<tr class="empty-row"><td colspan="8">Aucune entrée.</td></tr>';
+    return;
+  }
+  body.innerHTML = catalog.map(c => `
+    <tr>
+      <td>${esc(c.category)}</td>
+      <td>${esc(c.label)}</td>
+      <td>${pricingModelLabel[c.pricing_model] || esc(c.pricing_model)}</td>
+      <td>${c.requires_rbq ? 'Oui' : '—'}</td>
+      <td class="num">${c.fixed_owner_price != null ? Number(c.fixed_owner_price).toLocaleString('fr-CA') + ' $' : '—'}</td>
+      <td class="num">${c.fixed_worker_pay != null ? Number(c.fixed_worker_pay).toLocaleString('fr-CA') + ' $' : '—'}</td>
+      <td>${c.active ? 'Actif' : 'Inactif'}</td>
+      <td><button onclick="toggleServiceCatalog('${c.id}', ${!c.active})" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">${c.active ? 'Désactiver' : 'Réactiver'}</button></td>
+    </tr>`).join('');
+}
+
+async function createServiceCatalogEntry(){
+  const category = document.getElementById('sc-category').value.trim();
+  const task_type = document.getElementById('sc-task-type').value.trim();
+  const label = document.getElementById('sc-label').value.trim();
+  const pricing_model = document.getElementById('sc-pricing-model').value;
+  const fixed_owner_price = document.getElementById('sc-owner-price').value;
+  const fixed_worker_pay = document.getElementById('sc-worker-pay').value;
+  const requires_rbq = document.getElementById('sc-requires-rbq').checked;
+  const msg = document.getElementById('sc-msg');
+  if(!category || !task_type || !label){ msg.textContent = 'Catégorie, code et étiquette requis.'; return; }
+  msg.textContent = 'Ajout en cours...';
+  const res = await callOpsApi({ action: 'create_service_catalog_entry', category, task_type, label, pricing_model, requires_rbq, fixed_owner_price, fixed_worker_pay });
+  if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
+  msg.textContent = 'Ajouté !';
+  document.getElementById('sc-category').value = '';
+  document.getElementById('sc-task-type').value = '';
+  document.getElementById('sc-label').value = '';
+  document.getElementById('sc-owner-price').value = '';
+  document.getElementById('sc-worker-pay').value = '';
+  document.getElementById('sc-requires-rbq').checked = false;
+  await loadServiceCatalog();
+}
+
+async function toggleServiceCatalog(catalog_id, active){
+  await callOpsApi({ action: 'toggle_service_catalog_active', catalog_id, active });
+  await loadServiceCatalog();
 }
 
 async function createWorker(){
