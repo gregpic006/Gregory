@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portail Pro — travailleur</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png">
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
+    --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E; --amber:#B98A2E;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;}
+
+  #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;}
+  .login-box{width:100%;max-width:340px;padding:36px;background:var(--paper-2);border:1px solid var(--line);}
+  .login-box .brand{font-family:'Fraunces',serif;font-weight:600;font-size:22px;margin-bottom:4px;}
+  .login-box .sub{font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:24px;}
+  .login-box label{display:block;font-size:12.5px;font-weight:500;margin-bottom:6px;}
+  .login-box .f{margin-bottom:14px;}
+  .login-box input{width:100%;padding:10px 12px;border:1px solid var(--line);background:var(--paper);font-size:13.5px;font-family:'Inter',sans-serif;}
+  .login-box input:focus{outline:none;border-color:var(--brass);}
+  .login-box button{width:100%;background:var(--ink);color:var(--paper);border:none;padding:12px;font-size:13.5px;font-weight:500;cursor:pointer;margin-top:6px;}
+  .login-box button:hover{background:var(--brass-dark);}
+  .login-error{color:var(--rust);font-size:12.5px;margin-top:10px;display:none;}
+
+  #app-shell{display:none;min-height:100vh;}
+  .shell{display:flex;min-height:100vh;}
+  aside{width:230px;border-right:1px solid var(--ink);padding:24px 0;flex-shrink:0;}
+  .brand{font-family:'Fraunces',serif;font-weight:600;font-size:18px;padding:0 22px 6px;}
+  .brand-sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;padding:0 22px 20px;border-bottom:1px solid var(--line);margin-bottom:16px;display:block;}
+  .tab-btn{display:block;width:100%;text-align:left;background:none;border:none;padding:10px 22px;font-size:13.5px;color:var(--ink);cursor:pointer;border-left:2px solid transparent;font-family:'Inter',sans-serif;}
+  .tab-btn:hover{background:var(--paper-2);}
+  .tab-btn.active{border-left-color:var(--brass);background:var(--paper-2);font-weight:500;}
+  .signout{margin-top:20px;padding-top:16px;border-top:1px solid var(--line);}
+
+  main{flex:1;padding:32px 40px;max-width:900px;}
+  h1{font-family:'Fraunces',serif;font-weight:600;font-size:26px;margin-bottom:6px;}
+  h2{font-family:'Fraunces',serif;font-weight:600;font-size:18px;margin:22px 0 10px;}
+  .subtitle{color:var(--muted);font-size:13.5px;margin-bottom:24px;}
+
+  .avail-banner{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:24px;}
+  .avail-banner .label{font-size:12.5px;color:var(--muted);margin-right:6px;}
+  .avail-btn{border:1px solid var(--line);background:var(--paper);padding:7px 13px;font-size:12.5px;cursor:pointer;font-family:'Inter',sans-serif;}
+  .avail-btn.active{background:var(--ink);color:var(--paper);border-color:var(--ink);}
+  .avail-btn.active.dispo{background:var(--sage);border-color:var(--sage);}
+  .avail-btn.active.indispo{background:var(--rust);border-color:var(--rust);}
+
+  .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:8px;}
+  .stat-box{background:var(--paper-2);border:1px solid var(--line);padding:14px;}
+  .stat-box .num{font-family:'Fraunces',serif;font-size:22px;font-weight:600;}
+  .stat-box .label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.04em;margin-top:4px;}
+
+  .job-card{background:var(--paper-2);border:1px solid var(--line);padding:18px 20px;margin-bottom:14px;}
+  .job-card.urgent{border-color:var(--rust);}
+  .job-card .desc{font-family:'Fraunces',serif;font-size:16px;font-weight:600;}
+  .job-card .meta{color:var(--muted);font-size:12.5px;margin-top:6px;}
+  .job-card .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+  .job-card button{font-size:12px;padding:8px 14px;border:1px solid var(--ink);background:none;color:var(--ink);cursor:pointer;font-family:'Inter',sans-serif;}
+  .job-card button.primary{background:var(--sage);color:#fff;border-color:var(--sage);}
+  .job-card button.secondary{border-color:var(--line);color:var(--muted);}
+  .tag{font-size:11px;padding:3px 9px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:0.04em;display:inline-block;}
+  .tag.urgent{background:var(--rust);color:#fff;}
+  .tag.ok{background:var(--sage);color:#fff;}
+  .tag.warn{background:var(--amber);color:#fff;}
+  .tag.neutral{background:var(--line);color:var(--ink);}
+
+  .completion-form{display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);}
+  .completion-form.active{display:block;}
+  .completion-form textarea{width:100%;padding:10px 12px;border:1px solid var(--line);background:var(--paper);font-size:13px;font-family:'Inter',sans-serif;min-height:60px;resize:vertical;margin-bottom:8px;}
+  .completion-form .row{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px;}
+  .completion-form .f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);}
+
+  .profile-form .f{margin-bottom:14px;}
+  .profile-form label{display:block;font-size:12.5px;font-weight:500;margin-bottom:6px;}
+  .profile-form input{width:100%;padding:10px 12px;border:1px solid var(--line);background:var(--paper-2);font-size:13.5px;font-family:'Inter',sans-serif;}
+  .profile-form .hint{color:var(--muted);font-size:11.5px;margin-top:4px;}
+  .profile-form .row{display:flex;flex-wrap:wrap;gap:14px;}
+  .profile-form .row .f{flex:1;min-width:180px;}
+  .checkbox-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;}
+  button.submit{background:var(--ink);color:var(--paper);border:none;padding:11px 22px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:'Inter',sans-serif;}
+  .msg{font-size:12.5px;margin-top:10px;}
+
+  .schedule-grid{display:grid;grid-template-columns:100px 1fr 1fr;gap:8px 10px;align-items:center;margin-bottom:16px;}
+  .schedule-grid .day{font-size:12.5px;font-weight:500;}
+  .schedule-grid input{padding:7px 9px;font-size:12.5px;border:1px solid var(--line);background:var(--paper-2);}
+
+  .section{display:none;}
+  .section.active{display:block;}
+  .empty-note{color:var(--muted);font-style:italic;font-size:13.5px;}
+
+  @media (max-width:760px){
+    .shell{flex-direction:column;}
+    aside{width:100%;border-right:none;border-bottom:1px solid var(--ink);padding:10px 0;display:flex;align-items:center;overflow-x:auto;white-space:nowrap;}
+    aside .brand, aside .brand-sub{display:none;}
+    .tab-btn{display:inline-block;width:auto;border-left:none;border-bottom:2px solid transparent;padding:10px 14px;flex-shrink:0;}
+    .tab-btn.active{border-left:none;border-bottom-color:var(--brass);}
+    .signout{margin-top:0;padding-top:0;border-top:none;display:inline-block;flex-shrink:0;}
+    main{padding:20px 16px;max-width:100%;}
+  }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box">
+    <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
+    <div class="sub">Portail Pro — Espace travailleur</div>
+    <div class="f"><label>Courriel</label><input type="email" id="login-email"></div>
+    <div class="f"><label>Mot de passe</label><input type="password" id="login-password"></div>
+    <button onclick="handleLogin()">Se connecter</button>
+    <p class="login-error" id="login-error"></p>
+    <p style="text-align:center;margin-top:12px;"><a href="#" onclick="showResetForm();return false;" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Mot de passe oublié ?</a></p>
+    <p style="text-align:center;margin-top:8px;"><a href="pro.html" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Pas encore inscrit ? Rejoindre Portail Pro</a></p>
+  </div>
+
+  <div class="login-box" id="reset-box" style="display:none;">
+    <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
+    <div class="sub">Réinitialiser le mot de passe</div>
+    <div class="f"><label>Courriel</label><input type="email" id="reset-email"></div>
+    <button onclick="sendResetLink()">Envoyer le lien</button>
+    <p class="login-error" id="reset-error"></p>
+    <p class="login-error" id="reset-success" style="color:var(--sage);"></p>
+    <p style="text-align:center;margin-top:12px;"><a href="#" onclick="showLoginForm();return false;" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Retour à la connexion</a></p>
+  </div>
+
+  <div class="login-box" id="newpw-box" style="display:none;">
+    <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
+    <div class="sub">Choisir un nouveau mot de passe</div>
+    <div class="f"><label>Nouveau mot de passe</label><input type="password" id="newpw-value"></div>
+    <button onclick="confirmNewPassword()">Confirmer</button>
+    <p class="login-error" id="newpw-error"></p>
+  </div>
+</div>
+
+<div id="app-shell">
+  <div class="shell">
+    <aside>
+      <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
+      <span class="brand-sub">Portail Pro</span>
+      <button class="tab-btn active" data-tab="offers" onclick="showTab('offers')">Jobs disponibles</button>
+      <button class="tab-btn" data-tab="jobs" onclick="showTab('jobs')">Mes jobs</button>
+      <button class="tab-btn" data-tab="profile" onclick="showTab('profile')">Mon profil</button>
+      <div class="signout">
+        <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
+      </div>
+    </aside>
+
+    <main>
+      <section id="offers" class="section active">
+        <h1 id="worker-greeting">Bonjour</h1>
+        <p class="subtitle" id="verification-note">Voici les mandats disponibles pour ton profil</p>
+
+        <div class="avail-banner">
+          <span class="label">Disponibilité :</span>
+          <button class="avail-btn" data-status="maintenant" onclick="setAvailability('maintenant')">🟢 Maintenant</button>
+          <button class="avail-btn" data-status="aujourdhui" onclick="setAvailability('aujourdhui')">Aujourd'hui</button>
+          <button class="avail-btn" data-status="semaine" onclick="setAvailability('semaine')">Cette semaine</button>
+          <button class="avail-btn" data-status="indisponible" onclick="setAvailability('indisponible')">🔴 Indisponible</button>
+        </div>
+
+        <div class="stats-grid" id="stats-grid">
+          <div class="stat-box"><div class="num">—</div><div class="label">Chargement</div></div>
+        </div>
+
+        <h2 style="margin-top:28px;">Jobs disponibles</h2>
+        <div id="offers-list"><p class="empty-note">Chargement...</p></div>
+      </section>
+
+      <section id="jobs" class="section">
+        <h1>Mes jobs</h1>
+        <p class="subtitle">Tes mandats acceptés, en cours et complétés</p>
+        <div id="jobs-list"><p class="empty-note">Chargement...</p></div>
+      </section>
+
+      <section id="profile" class="section">
+        <h1>Mon profil</h1>
+        <p class="subtitle" id="profile-status-note">—</p>
+
+        <div class="profile-form">
+          <div class="row">
+            <div class="f"><label>Nom / entreprise</label><input type="text" id="pf-company" placeholder="Optionnel si tu travailles à ton nom"></div>
+            <div class="f"><label>NEQ</label><input type="text" id="pf-neq" placeholder="Si applicable"></div>
+          </div>
+          <div class="f">
+            <label>Métiers (séparés par des virgules)</label>
+            <input type="text" id="pf-specialties" placeholder="ex. plomberie, electricite">
+            <p class="hint">Utilise les catégories exactes que Portail utilise : plomberie, electricite, cvac, serrurerie, structure.</p>
+          </div>
+          <div class="f">
+            <label>Zones desservies (séparées par des virgules)</label>
+            <input type="text" id="pf-zones" placeholder="ex. Limoilou, Vieux-Québec">
+          </div>
+          <div class="row">
+            <div class="f"><label>Taux horaire ($)</label><input type="number" id="pf-hourly-rate" step="0.01"></div>
+            <div class="f"><label>Frais de déplacement ($)</label><input type="number" id="pf-travel-fee" step="0.01"></div>
+          </div>
+          <div class="checkbox-row"><input type="checkbox" id="pf-urgent"><label for="pf-urgent" style="margin:0;">Je prends des mandats urgents</label></div>
+          <div class="f"><label>Courriel de versement (Interac)</label><input type="email" id="pf-payout-email"></div>
+
+          <h2>Disponibilité hebdomadaire</h2>
+          <p class="hint" style="margin-bottom:10px;">Laisse vide un jour où tu n'es pas disponible.</p>
+          <div class="schedule-grid" id="schedule-grid"></div>
+
+          <button class="submit" onclick="saveProfile()">Enregistrer le profil</button>
+          <p class="msg" id="profile-msg"></p>
+
+          <h2>Documents</h2>
+          <div class="f"><label>Preuve d'assurance responsabilité</label><input type="file" id="pf-insurance-file" accept="image/*,application/pdf"></div>
+          <button class="submit" onclick="uploadInsurance()">Téléverser</button>
+          <p class="msg" id="doc-msg"></p>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { storageKey: 'sb-portail-worker-auth' } });
+
+function esc(str){
+  return (str == null ? '' : String(str)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+let workerRecord = null;
+const DAYS = [['lundi','Lundi'],['mardi','Mardi'],['mercredi','Mercredi'],['jeudi','Jeudi'],['vendredi','Vendredi'],['samedi','Samedi'],['dimanche','Dimanche']];
+
+supabaseClient.auth.onAuthStateChange((event) => {
+  if(event === 'PASSWORD_RECOVERY'){
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('app-shell').style.display = 'none';
+    showNewPasswordForm();
+  }
+});
+
+function showResetForm(){
+  document.querySelector('#login-screen .login-box').style.display = 'none';
+  document.getElementById('reset-box').style.display = 'block';
+}
+function showLoginForm(){
+  document.getElementById('reset-box').style.display = 'none';
+  document.getElementById('newpw-box').style.display = 'none';
+  document.querySelector('#login-screen .login-box').style.display = 'block';
+}
+function showNewPasswordForm(){
+  document.querySelector('#login-screen .login-box').style.display = 'none';
+  document.getElementById('reset-box').style.display = 'none';
+  document.getElementById('newpw-box').style.display = 'block';
+}
+
+async function sendResetLink(){
+  const email = document.getElementById('reset-email').value;
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: window.location.href.split('#')[0].split('?')[0] });
+  const errEl = document.getElementById('reset-error');
+  const okEl = document.getElementById('reset-success');
+  if(error){ errEl.textContent = error.message; errEl.style.display = 'block'; okEl.style.display = 'none'; return; }
+  errEl.style.display = 'none';
+  okEl.textContent = 'Lien envoyé ! Vérifie ta boîte courriel.';
+  okEl.style.display = 'block';
+}
+
+async function confirmNewPassword(){
+  const newPassword = document.getElementById('newpw-value').value;
+  const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+  const errEl = document.getElementById('newpw-error');
+  if(error){ errEl.textContent = error.message; errEl.style.display = 'block'; return; }
+  await supabaseClient.auth.signOut();
+  showLoginForm();
+  showLoginError('Mot de passe mis à jour — reconnecte-toi.');
+}
+
+async function init(){
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(session) await loadWorkerDashboard(session.user.id);
+}
+
+async function handleLogin(){
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if(error){ showLoginError(error.message); return; }
+  await loadWorkerDashboard(data.user.id);
+}
+
+async function handleSignOut(){
+  await supabaseClient.auth.signOut();
+  document.getElementById('app-shell').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+}
+
+function showLoginError(msg){
+  const el = document.getElementById('login-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function callWorkerApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('worker-api', { body: payload });
+  if(error){
+    let detail = error.message;
+    try { const body = await error.context?.json(); if(body?.error) detail = body.error; } catch(e){}
+    return { error: detail };
+  }
+  return data;
+}
+
+async function loadWorkerDashboard(userId){
+  const data = await callWorkerApi({ action: 'get_my_profile' });
+  if(data?.error || !data?.worker){
+    showLoginError(data?.error || "Aucun profil travailleur associé à ce compte.");
+    return;
+  }
+  workerRecord = data.worker;
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-shell').style.display = 'block';
+  document.getElementById('worker-greeting').textContent = 'Bonjour, ' + (workerRecord.name || '').split(' ')[0];
+
+  buildScheduleGrid();
+  renderProfileForm();
+  updateAvailabilityButtons();
+  await loadStats();
+  await loadOffers();
+  await loadJobs();
+}
+
+function statusNote(){
+  const el = document.getElementById('verification-note');
+  const statusEl = document.getElementById('profile-status-note');
+  if(workerRecord.verification_status === 'pending'){
+    el.textContent = "Ton dossier est en cours de vérification — tu recevras des mandats une fois vérifié.";
+    statusEl.textContent = "Statut : en attente de vérification";
+  } else if(workerRecord.verification_status === 'rejected'){
+    el.textContent = "Ton dossier n'a pas été approuvé. Contacte l'équipe Portail.";
+    statusEl.textContent = "Statut : dossier refusé" + (workerRecord.rejection_reason ? ' — ' + workerRecord.rejection_reason : '');
+  } else {
+    el.textContent = "Voici les mandats disponibles pour ton profil";
+    statusEl.textContent = "Statut : Vérifié ✓";
+  }
+}
+
+function updateAvailabilityButtons(){
+  document.querySelectorAll('.avail-btn').forEach(b => {
+    const on = b.dataset.status === workerRecord.availability_status;
+    b.classList.toggle('active', on);
+    b.classList.toggle('dispo', on && b.dataset.status !== 'indisponible');
+    b.classList.toggle('indispo', on && b.dataset.status === 'indisponible');
+  });
+  statusNote();
+}
+
+async function setAvailability(status){
+  const res = await callWorkerApi({ action: 'set_availability_status', availability_status: status });
+  if(res?.error){ alert('Erreur : ' + res.error); return; }
+  workerRecord.availability_status = status;
+  updateAvailabilityButtons();
+}
+
+async function loadStats(){
+  const data = await callWorkerApi({ action: 'get_my_stats' });
+  const grid = document.getElementById('stats-grid');
+  const s = data?.stats || {};
+  const acceptancePct = s.jobs_offered_count > 0 ? Math.round((s.jobs_accepted_count / s.jobs_offered_count) * 100) : null;
+  grid.innerHTML = `
+    <div class="stat-box"><div class="num">${s.completed_jobs_count ?? 0}</div><div class="label">Travaux complétés</div></div>
+    <div class="stat-box"><div class="num">${acceptancePct != null ? acceptancePct + '%' : '—'}</div><div class="label">Taux d'acceptation</div></div>
+    <div class="stat-box"><div class="num">${s.rating != null ? Number(s.rating).toFixed(1) : '—'}</div><div class="label">Note</div></div>
+    <div class="stat-box"><div class="num">${s.jobs_cancelled_count ?? 0}</div><div class="label">Annulations</div></div>
+  `;
+}
+
+function jobAddress(j){
+  const b = j.units?.buildings;
+  return b ? `${esc(b.address)} — unité ${esc(j.units.unit_number)}` : '';
+}
+
+async function loadOffers(){
+  const data = await callWorkerApi({ action: 'list_my_offers' });
+  const container = document.getElementById('offers-list');
+  const offers = data?.offers || [];
+  if(!offers.length){
+    container.innerHTML = '<p class="empty-note">Aucun mandat disponible pour le moment.</p>';
+    return;
+  }
+  container.innerHTML = offers.map(o => {
+    const wo = o.work_orders || {};
+    return `
+    <div class="job-card ${wo.is_urgent ? 'urgent' : ''}">
+      ${wo.is_urgent ? '<span class="tag urgent">Urgent</span>' : ''}
+      <div class="desc">${esc(wo.description)}</div>
+      <div class="meta">${jobAddress(wo)}<br>Rémunération : ${wo.worker_pay != null ? Number(wo.worker_pay).toLocaleString('fr-CA') + ' $' : 'à discuter (diagnostic requis)'}</div>
+      <div class="actions">
+        <button class="primary" onclick="acceptOffer('${o.id}', this)">Accepter</button>
+        <button class="secondary" onclick="declineOffer('${o.id}', this)">Refuser</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function acceptOffer(offerId, btn){
+  btn.disabled = true;
+  const res = await callWorkerApi({ action: 'accept_offer', offer_id: offerId });
+  if(res?.error){ alert('Erreur : ' + res.error); btn.disabled = false; return; }
+  if(!res?.ok){ alert(res?.error || "Ce mandat n'est plus disponible."); }
+  await loadOffers();
+  await loadJobs();
+  await loadStats();
+}
+
+async function declineOffer(offerId, btn){
+  btn.disabled = true;
+  const res = await callWorkerApi({ action: 'decline_offer', offer_id: offerId });
+  if(res?.error){ alert('Erreur : ' + res.error); }
+  await loadOffers();
+}
+
+const jobStatusLabel = { open:'En attente', assigned:'Assigné', in_progress:'En cours', completed:'Complété', cancelled:'Annulé' };
+const jobStatusTag = { open:'neutral', assigned:'warn', in_progress:'warn', completed:'ok', cancelled:'neutral' };
+
+async function loadJobs(){
+  const data = await callWorkerApi({ action: 'list_my_jobs' });
+  const container = document.getElementById('jobs-list');
+  const jobs = data?.jobs || [];
+  if(!jobs.length){
+    container.innerHTML = '<p class="empty-note">Aucun job pour le moment.</p>';
+    return;
+  }
+  container.innerHTML = jobs.map(j => `
+    <div class="job-card" data-job-id="${esc(j.id)}">
+      <div class="desc">${esc(j.description)}</div>
+      <div class="meta">${jobAddress(j)}<br><span class="tag ${jobStatusTag[j.status] || 'neutral'}">${jobStatusLabel[j.status] || esc(j.status)}</span> ${j.worker_pay != null ? '· ' + Number(j.worker_pay).toLocaleString('fr-CA') + ' $' : ''}</div>
+      ${(!j.worker_reported_done_at && j.status !== 'completed' && j.status !== 'cancelled') ? `
+      <div class="actions">
+        <button class="primary" onclick="toggleCompletionForm('${esc(j.id)}')">Signaler la fin des travaux</button>
+      </div>
+      <div class="completion-form" id="completion-${esc(j.id)}">
+        <div class="row">
+          <div class="f"><label>Photo(s) avant</label><input type="file" accept="image/*" multiple id="before-${esc(j.id)}"></div>
+          <div class="f"><label>Photo(s) après</label><input type="file" accept="image/*" multiple id="after-${esc(j.id)}"></div>
+        </div>
+        <textarea id="note-${esc(j.id)}" placeholder="Note pour l'admin (optionnel)"></textarea>
+        <button class="primary" onclick="submitCompletion('${esc(j.id)}', this)">Envoyer</button>
+      </div>` : (j.worker_reported_done_at ? '<p class="empty-note" style="margin-top:8px;">Fin des travaux déjà signalée — en attente de confirmation.</p>' : '')}
+    </div>
+  `).join('');
+}
+
+function toggleCompletionForm(jobId){
+  document.getElementById('completion-' + jobId)?.classList.toggle('active');
+}
+
+function filesToPayload(fileList){
+  const files = Array.from(fileList || []).slice(0, 5);
+  return Promise.all(files.map(f => new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ base64: reader.result.split(',')[1], filename: f.name, content_type: f.type });
+    reader.readAsDataURL(f);
+  })));
+}
+
+async function submitCompletion(jobId, btn){
+  btn.disabled = true;
+  btn.textContent = 'Envoi...';
+  const beforeFiles = document.getElementById('before-' + jobId).files;
+  const afterFiles = document.getElementById('after-' + jobId).files;
+  const message = document.getElementById('note-' + jobId).value.trim();
+  if(!beforeFiles.length && !afterFiles.length){
+    alert('Ajoute au moins une photo (avant ou après).');
+    btn.disabled = false;
+    btn.textContent = 'Envoyer';
+    return;
+  }
+  const [before_photos, after_photos] = await Promise.all([filesToPayload(beforeFiles), filesToPayload(afterFiles)]);
+  const res = await callWorkerApi({ action: 'submit_completion', work_order_id: jobId, message, before_photos, after_photos });
+  if(res?.error){
+    alert('Erreur : ' + res.error);
+    btn.disabled = false;
+    btn.textContent = 'Envoyer';
+    return;
+  }
+  await loadJobs();
+}
+
+function buildScheduleGrid(){
+  const grid = document.getElementById('schedule-grid');
+  const schedule = workerRecord.availability_schedule || {};
+  grid.innerHTML = DAYS.map(([key, label]) => {
+    const slot = schedule[key];
+    return `
+      <div class="day">${label}</div>
+      <input type="time" id="sched-${key}-start" value="${slot?.start || ''}">
+      <input type="time" id="sched-${key}-end" value="${slot?.end || ''}">
+    `;
+  }).join('');
+}
+
+function renderProfileForm(){
+  document.getElementById('pf-company').value = workerRecord.company_name || '';
+  document.getElementById('pf-neq').value = workerRecord.neq || '';
+  document.getElementById('pf-specialties').value = (workerRecord.specialties || []).join(', ');
+  document.getElementById('pf-zones').value = (workerRecord.zones || []).join(', ');
+  document.getElementById('pf-hourly-rate').value = workerRecord.hourly_rate ?? '';
+  document.getElementById('pf-travel-fee').value = workerRecord.travel_fee ?? '';
+  document.getElementById('pf-urgent').checked = !!workerRecord.handles_urgent;
+  document.getElementById('pf-payout-email').value = workerRecord.payout_email || '';
+}
+
+async function saveProfile(){
+  const specialties = document.getElementById('pf-specialties').value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  const zones = document.getElementById('pf-zones').value.split(',').map(s => s.trim()).filter(Boolean);
+  const availability_schedule = {};
+  for(const [key] of DAYS){
+    const start = document.getElementById(`sched-${key}-start`).value;
+    const end = document.getElementById(`sched-${key}-end`).value;
+    availability_schedule[key] = (start && end) ? { start, end } : null;
+  }
+  const payload = {
+    action: 'update_my_profile',
+    company_name: document.getElementById('pf-company').value.trim(),
+    neq: document.getElementById('pf-neq').value.trim(),
+    specialties, zones,
+    hourly_rate: document.getElementById('pf-hourly-rate').value,
+    travel_fee: document.getElementById('pf-travel-fee').value,
+    handles_urgent: document.getElementById('pf-urgent').checked,
+    payout_email: document.getElementById('pf-payout-email').value.trim(),
+    availability_schedule,
+  };
+  const msgEl = document.getElementById('profile-msg');
+  const res = await callWorkerApi(payload);
+  if(res?.error){ msgEl.style.color = 'var(--rust)'; msgEl.textContent = 'Erreur : ' + res.error; return; }
+  msgEl.style.color = 'var(--sage)';
+  msgEl.textContent = 'Profil enregistré.';
+  Object.assign(workerRecord, { specialties, zones, availability_schedule });
+}
+
+async function uploadInsurance(){
+  const fileInput = document.getElementById('pf-insurance-file');
+  const file = fileInput.files[0];
+  const msgEl = document.getElementById('doc-msg');
+  if(!file){ msgEl.style.color = 'var(--rust)'; msgEl.textContent = 'Choisis un fichier.'; return; }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const res = await callWorkerApi({
+      action: 'upload_credential_document', doc_type: 'assurance_travailleur',
+      file_base64: reader.result.split(',')[1], filename: file.name, content_type: file.type,
+    });
+    if(res?.error){ msgEl.style.color = 'var(--rust)'; msgEl.textContent = 'Erreur : ' + res.error; return; }
+    msgEl.style.color = 'var(--sage)';
+    msgEl.textContent = "Document envoyé — l'équipe Portail va le vérifier.";
+    fileInput.value = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+function showTab(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelector(`.tab-btn[data-tab="${id}"]`)?.classList.add('active');
+}
+
+init();
+</script>
+</body>
+</html>
