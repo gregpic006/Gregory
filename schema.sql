@@ -2675,7 +2675,12 @@ create index if not exists idx_job_offers_worker on job_offers(worker_id);
 -- plus haut, tâche #39) : identique, avec 3 colonnes calculées en direct
 -- ajoutées à la fin pour le Portail Score — offres reçues/acceptées et
 -- annulations après acceptation. Aucun compteur stocké à synchroniser.
-create or replace view worker_verification_status as
+-- DROP + CREATE (pas "or replace") : les colonnes ajoutées à workers plus
+-- haut dans ce fichier (company_name, neq, etc.) allongent w.*, ce qui
+-- déplace la position des colonnes calculées — Postgres refuse un
+-- "or replace" qui changerait le nom/l'ordre d'une colonne existante.
+drop view if exists worker_verification_status;
+create view worker_verification_status as
 select
   w.*,
   (w.requires_rbq and (w.rbq_license is null or w.rbq_license = '')) as missing_rbq_license,
