@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portail Pro — Recevez des contrats immobiliers près de chez vous</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
+    --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;line-height:1.6;}
+  a{color:var(--brass-dark);}
+  .wrap{max-width:640px;margin:0 auto;padding:48px 24px 80px;}
+  .brand{font-family:'Fraunces',serif;font-weight:600;font-size:20px;margin-bottom:40px;}
+  .brand a{text-decoration:none;color:inherit;}
+
+  .hero h1{font-family:'Fraunces',serif;font-weight:600;font-size:32px;line-height:1.25;margin-bottom:14px;}
+  .hero p.lead{color:var(--muted);font-size:15.5px;margin-bottom:32px;}
+
+  .benefits{list-style:none;margin-bottom:40px;}
+  .benefits li{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;}
+  .benefits li:last-child{border-bottom:none;}
+  .benefits li .icon{color:var(--sage);font-weight:600;flex-shrink:0;}
+
+  .card{background:var(--paper-2);border:1px solid var(--line);padding:28px 24px;}
+  .card h2{font-family:'Fraunces',serif;font-weight:600;font-size:20px;margin-bottom:6px;}
+  .card .sub{color:var(--muted);font-size:13px;margin-bottom:22px;}
+
+  .f{margin-bottom:16px;}
+  .row{display:flex;gap:12px;flex-wrap:wrap;}
+  .row .f{flex:1;min-width:200px;}
+  label{display:block;font-size:12.5px;font-weight:500;margin-bottom:6px;}
+  input[type=text], input[type=email], input[type=tel], input[type=number]{
+    width:100%;padding:11px 12px;border:1px solid var(--line);background:var(--paper);font-size:13.5px;font-family:'Inter',sans-serif;
+  }
+  input:focus{outline:none;border-color:var(--brass);}
+  .hint{color:var(--muted);font-size:11.5px;margin-top:5px;}
+
+  .chip-group{display:flex;flex-wrap:wrap;gap:8px;}
+  .chip{border:1px solid var(--line);background:var(--paper);padding:8px 14px;font-size:13px;cursor:pointer;user-select:none;}
+  .chip.selected{background:var(--ink);color:var(--paper);border-color:var(--ink);}
+
+  .checkbox-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:16px;}
+  .checkbox-row input{width:auto;margin-top:3px;}
+  .checkbox-row label{font-weight:400;font-size:13px;}
+
+  button.submit{width:100%;background:var(--ink);color:var(--paper);border:none;padding:13px;font-size:14px;font-weight:500;cursor:pointer;margin-top:6px;}
+  button.submit:hover{background:var(--brass-dark);}
+  button.submit:disabled{opacity:0.6;cursor:default;}
+
+  .form-msg{font-size:13px;margin-top:14px;padding:12px;display:none;}
+  .form-msg.ok{background:#eef3ec;color:var(--sage);border:1px solid var(--sage);display:block;}
+  .form-msg.error{background:#fdeeee;color:var(--rust);border:1px solid var(--rust);display:block;}
+
+  .login-link{text-align:center;margin-top:20px;font-size:13px;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><a href="index.html"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:26px;width:auto;display:inline-block;vertical-align:middle;"></a></div>
+
+  <div class="hero">
+    <h1>Recevez des contrats immobiliers près de chez vous.</h1>
+    <p class="lead">Portail Pro connecte les propriétaires qui ont besoin d'un entretien ou d'une réparation aux travailleurs autonomes de leur secteur — automatiquement, dès qu'un mandat correspondant à ton profil devient disponible.</p>
+  </div>
+
+  <ul class="benefits">
+    <li><span class="icon">✓</span> Des mandats qui correspondent à ton métier, ta zone et ta disponibilité — pas de démarchage.</li>
+    <li><span class="icon">✓</span> Premier arrivé, premier servi : accepte directement depuis ton portail.</li>
+    <li><span class="icon">✓</span> Paiement suivi et historique de tes travaux dans un seul endroit.</li>
+    <li><span class="icon">✓</span> Tu choisis ta disponibilité — même à la dernière minute.</li>
+  </ul>
+
+  <div class="card">
+    <h2>Créer mon profil</h2>
+    <p class="sub">Prend deux minutes. Ton dossier sera vérifié avant de recevoir des mandats.</p>
+
+    <form id="pro-form">
+      <div class="row">
+        <div class="f"><label>Nom complet</label><input type="text" name="full_name" required></div>
+        <div class="f"><label>Entreprise (optionnel)</label><input type="text" name="company_name"></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>Courriel</label><input type="email" name="email" required></div>
+        <div class="f"><label>Téléphone</label><input type="tel" name="phone"></div>
+      </div>
+      <div class="f"><label>NEQ (si applicable)</label><input type="text" name="neq"></div>
+
+      <div class="f">
+        <label>Tes métiers</label>
+        <div class="chip-group" id="specialty-chips">
+          <span class="chip" data-value="plomberie">Plomberie</span>
+          <span class="chip" data-value="electricite">Électricité</span>
+          <span class="chip" data-value="cvac">CVAC</span>
+          <span class="chip" data-value="serrurerie">Serrurerie</span>
+          <span class="chip" data-value="structure">Structure / menuiserie</span>
+          <span class="chip" data-value="peinture">Peinture</span>
+          <span class="chip" data-value="menage">Ménage</span>
+          <span class="chip" data-value="autre">Autre</span>
+        </div>
+      </div>
+
+      <div class="f">
+        <label>Zones desservies</label>
+        <input type="text" name="zones" placeholder="ex. Limoilou, Vieux-Québec, Sainte-Foy">
+        <p class="hint">Sépare par des virgules.</p>
+      </div>
+
+      <div class="row">
+        <div class="f"><label>Taux horaire ($, optionnel)</label><input type="number" name="hourly_rate" step="0.01"></div>
+        <div class="f"><label>Licence RBQ (si applicable)</label><input type="text" name="rbq_license"></div>
+      </div>
+
+      <div class="checkbox-row">
+        <input type="checkbox" name="handles_urgent" id="handles-urgent">
+        <label for="handles-urgent">Je suis disponible pour des interventions urgentes.</label>
+      </div>
+
+      <div style="position:absolute;left:-9999px;" aria-hidden="true">
+        <label>Site web</label><input type="text" name="website" tabindex="-1" autocomplete="off">
+      </div>
+
+      <div class="checkbox-row">
+        <input type="checkbox" name="consent" id="consent" required>
+        <label for="consent">J'accepte que mes informations soient utilisées par Portail pour évaluer mon profil et me proposer des mandats. Voir notre <a href="politique-de-confidentialite.html" target="_blank">politique de confidentialité</a>.</label>
+      </div>
+
+      <button type="submit" class="submit" id="submit-btn">Créer mon profil</button>
+      <p class="form-msg" id="form-msg"></p>
+    </form>
+    <p class="login-link">Déjà inscrit ? <a href="portail-travailleur.html">Connecte-toi à ton portail</a></p>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
+
+const selectedSpecialties = new Set();
+document.querySelectorAll('#specialty-chips .chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const v = chip.dataset.value;
+    if(selectedSpecialties.has(v)){ selectedSpecialties.delete(v); chip.classList.remove('selected'); }
+    else { selectedSpecialties.add(v); chip.classList.add('selected'); }
+  });
+});
+
+document.getElementById('pro-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const msgEl = document.getElementById('form-msg');
+  const btn = document.getElementById('submit-btn');
+  msgEl.className = 'form-msg';
+  msgEl.textContent = '';
+
+  if(!selectedSpecialties.size){
+    msgEl.className = 'form-msg error';
+    msgEl.textContent = 'Choisis au moins un métier.';
+    return;
+  }
+  const zones = (form.zones.value || '').split(',').map(z => z.trim()).filter(Boolean);
+  if(!zones.length){
+    msgEl.className = 'form-msg error';
+    msgEl.textContent = 'Indique au moins une zone desservie.';
+    return;
+  }
+
+  const payload = {
+    full_name: form.full_name.value.trim(),
+    company_name: form.company_name.value.trim() || null,
+    email: form.email.value.trim(),
+    phone: form.phone.value.trim() || null,
+    neq: form.neq.value.trim() || null,
+    specialties: Array.from(selectedSpecialties),
+    zones,
+    hourly_rate: form.hourly_rate.value || null,
+    rbq_license: form.rbq_license.value.trim() || null,
+    handles_urgent: form.handles_urgent.checked,
+    website: form.website.value || '',
+    consent: form.consent.checked,
+  };
+
+  btn.disabled = true;
+  btn.textContent = 'Envoi...';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/handle-worker-registration`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || data.error){
+      msgEl.className = 'form-msg error';
+      msgEl.textContent = data.error || "Une erreur est survenue, réessaie dans un instant.";
+      btn.disabled = false;
+      btn.textContent = 'Créer mon profil';
+      return;
+    }
+    msgEl.className = 'form-msg ok';
+    msgEl.textContent = data.email_sent
+      ? "Ton profil est créé — vérifie ta boîte courriel pour tes identifiants."
+      : "Ton profil est créé, mais le courriel de bienvenue n'a pas pu être envoyé. Contacte l'équipe Portail pour obtenir tes identifiants.";
+    form.reset();
+    selectedSpecialties.clear();
+    document.querySelectorAll('#specialty-chips .chip').forEach(c => c.classList.remove('selected'));
+    btn.textContent = 'Profil créé';
+  } catch (err) {
+    msgEl.className = 'form-msg error';
+    msgEl.textContent = "Impossible de contacter le serveur — vérifie ta connexion et réessaie.";
+    btn.disabled = false;
+    btn.textContent = 'Créer mon profil';
+  }
+});
+</script>
+</body>
+</html>
