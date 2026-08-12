@@ -161,6 +161,14 @@
     <p id="ob-tenant-msg" style="font-size:12.5px;margin-top:8px;"></p>
   </div>
 
+  <h1 style="margin-top:40px;font-size:22px;">Comptes de démonstration</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Un accès de connexion permanent à chacun des 4 portails (propriétaire, locataire, cold caller, travailleur) sur un immeuble/unité fictifs partagés — pour tester sans repasser par les formulaires ci-dessus à chaque fois. Le travailleur démo est auto-vérifié et couvre la même zone que l'immeuble démo, pour que le dispatch automatique trouve un candidat tout de suite.</p>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:32px;">
+    <button onclick="seedDemoAccounts()" id="seed-demo-btn" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Créer / régénérer mes 4 accès de démo</button>
+    <p style="font-size:11.5px;color:var(--muted);margin-top:8px;">Ré-appuyer sur ce bouton ne crée pas de doublons — ça régénère simplement le mot de passe des comptes démo existants.</p>
+    <div id="seed-demo-body" style="margin-top:14px;"></div>
+  </div>
+
   <h1 style="margin-top:40px;font-size:22px;">Journal d'audit</h1>
   <p class="subtitle" style="margin-bottom:16px;">Dernières décisions et actions sensibles — 100 plus récentes, classées par catégorie</p>
   <div id="audit-log-groups"><p class="subtitle">Chargement...</p></div>
@@ -1634,6 +1642,37 @@ async function loadTenants(){
       <td>${t.user_id ? `<button data-role="tenant" data-target-id="${esc(t.id)}" onclick="impersonateFromButton(this)" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Voir son portail</button>` : '<span style="color:var(--muted);font-size:11.5px;">Aucun accès portail</span>'}</td>
     </tr>`;
   }).join('');
+}
+
+async function seedDemoAccounts(){
+  const btn = document.getElementById('seed-demo-btn');
+  const body = document.getElementById('seed-demo-body');
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = 'Création en cours...';
+  try {
+    const res = await callOnboardingApi({ action: 'seed_demo_accounts' });
+    if(res?.error){ body.innerHTML = `<p style="color:var(--rust);font-size:12.5px;">Erreur : ${esc(res.error)}</p>`; return; }
+    body.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+        <thead><tr style="text-align:left;border-bottom:1px solid var(--line);">
+          <th style="padding:6px 8px;">Portail</th><th style="padding:6px 8px;">Courriel</th><th style="padding:6px 8px;">Mot de passe</th><th style="padding:6px 8px;"></th>
+        </tr></thead>
+        <tbody>
+          ${res.accounts.map(a => `
+            <tr style="border-bottom:1px solid var(--line);">
+              <td style="padding:6px 8px;"><b>${esc(a.role)}</b></td>
+              <td style="padding:6px 8px;">${esc(a.email)}</td>
+              <td style="padding:6px 8px;"><code>${esc(a.temp_password)}</code></td>
+              <td style="padding:6px 8px;"><a href="${esc(a.portal_url)}" target="_blank">Ouvrir le portail →</a></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <p style="font-size:11.5px;color:var(--muted);margin-top:10px;">Note ces mots de passe maintenant — ils ne sont pas ré-affichés tant que tu ne cliques pas de nouveau sur le bouton (ce qui les régénère).</p>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
 }
 
 async function impersonateFromButton(btn){

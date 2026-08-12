@@ -644,6 +644,142 @@ Deno.serve(async (req) => {
     // ouverte pour ce compte) plutôt qu'une vraie connexion : le mot de
     // passe du client n'est jamais consulté ni modifié. Chaque génération
     // est consignée à l'audit, avant même que le lien soit utilisé.
+    // Crée en un clic un compte de démonstration pour chacun des 4 rôles
+    // (propriétaire, locataire, cold caller, travailleur) sur un immeuble/
+    // unité fictifs partagés — pour accéder à chaque portail directement
+    // avec un vrai mot de passe permanent, sans repasser par tous les
+    // formulaires d'onboarding un par un à chaque fois. Idempotent : repéré
+    // par courriel fixe (demo-*@portailgestion.ca) — si le compte existe
+    // déjà, son mot de passe est simplement régénéré plutôt que d'en créer
+    // un doublon.
+    if (action === "seed_demo_accounts") {
+      const upsertAuthUser = async (email: string, roleOverride?: string) => {
+        const password = randomPassword();
+        const existingRes = await fetch(`${supabaseUrl}/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=id`, { headers: adminHeaders });
+        const [existingUser] = await existingRes.json().catch(() => [null]);
+        if (existingUser) {
+          await fetch(`${supabaseUrl}/auth/v1/admin/users/${existingUser.id}`, {
+            method: "PUT", headers: adminHeaders, body: JSON.stringify({ password, email_confirm: true }),
+          });
+          return { id: existingUser.id, password };
+        }
+        const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+          method: "POST", headers: adminHeaders,
+          body: JSON.stringify({ email, password, email_confirm: true }),
+        });
+        const authData = await authRes.json();
+        if (!authRes.ok || !authData.id) {
+          throw new Error(authData.msg || authData.error_description || `Impossible de créer ${email}`);
+        }
+        if (roleOverride) {
+          await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${authData.id}`, {
+            method: "PATCH", headers: adminHeaders, body: JSON.stringify({ role: roleOverride }),
+          });
+        }
+        return { id: authData.id, password };
+      };
+
+      try {
+        const DEMO_ZONE = "Démo";
+
+        const ownerAuth = await upsertAuthUser("demo-proprietaire@portailgestion.ca");
+        const ownerRowRes = await fetch(`${supabaseUrl}/rest/v1/owners?user_id=eq.${ownerAuth.id}&select=id`, { headers: adminHeaders });
+        let [owner] = await ownerRowRes.json().catch(() => [null]);
+        if (!owner) {
+          const insertRes = await fetch(`${supabaseUrl}/rest/v1/owners`, {
+            method: "POST", headers: { ...adminHeaders, Prefer: "return=representation" },
+            body: JSON.stringify({ user_id: ownerAuth.id, full_name: "Propriétaire Démo", company_name: "Démo Immobilier", management_rate: 6.0, spending_cap: 300 }),
+          });
+          [owner] = await insertRes.json();
+        }
+
+        const buildingRowRes = await fetch(`${supabaseUrl}/rest/v1/buildings?owner_id=eq.${owner.id}&select=id`, { headers: adminHeaders });
+        let [building] = await buildingRowRes.json().catch(() => [null]);
+        if (!building) {
+          const insertRes = await fetch(`${supabaseUrl}/rest/v1/buildings`, {
+            method: "POST", headers: { ...adminHeaders, Prefer: "return=representation" },
+            body: JSON.stringify({ owner_id: owner.id, address: "123 Rue Démo, Québec", unit_count: 1, zone: DEMO_ZONE }),
+          });
+          [building] = await insertRes.json();
+        } else {
+          await fetch(`${supabaseUrl}/rest/v1/buildings?id=eq.${building.id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ zone: DEMO_ZONE }) });
+        }
+
+        const unitRowRes = await fetch(`${supabaseUrl}/rest/v1/units?building_id=eq.${building.id}&select=id`, { headers: adminHeaders });
+        let [unit] = await unitRowRes.json().catch(() => [null]);
+        if (!unit) {
+          const insertRes = await fetch(`${supabaseUrl}/rest/v1/units`, {
+            method: "POST", headers: { ...adminHeaders, Prefer: "return=representation" },
+            body: JSON.stringify({ building_id: building.id, unit_number: "1", unit_type: "4 1/2", rent: 900, status: "occupied" }),
+          });
+          [unit] = await insertRes.json();
+        }
+
+        const tenantAuth = await upsertAuthUser("demo-locataire@portailgestion.ca", "tenant");
+        const tenantRowRes = await fetch(`${supabaseUrl}/rest/v1/tenants?user_id=eq.${tenantAuth.id}&select=id`, { headers: adminHeaders });
+        const [existingTenant] = await tenantRowRes.json().catch(() => [null]);
+        if (!existingTenant) {
+          const insertRes = await fetch(`${supabaseUrl}/rest/v1/tenants`, {
+            method: "POST", headers: { ...adminHeaders, Prefer: "return=representation" },
+            body: JSON.stringify({ user_id: tenantAuth.id, full_name: "Locataire Démo", email: "demo-locataire@portailgestion.ca" }),
+          });
+          const [newTenant] = await insertRes.json();
+          await fetch(`${supabaseUrl}/rest/v1/leases`, {
+            method: "POST", headers: adminHeaders,
+            body: JSON.stringify({ unit_id: unit.id, tenant_id: newTenant.id, start_date: new Date().toISOString().slice(0, 10), monthly_rent: 900, status: "active" }),
+          });
+        }
+
+        const callerAuth = await upsertAuthUser("demo-cold-caller@portailgestion.ca", "caller");
+        const callerRowRes = await fetch(`${supabaseUrl}/rest/v1/cold_callers?user_id=eq.${callerAuth.id}&select=id`, { headers: adminHeaders });
+        const [existingCaller] = await callerRowRes.json().catch(() => [null]);
+        if (!existingCaller) {
+          await fetch(`${supabaseUrl}/rest/v1/cold_callers`, {
+            method: "POST", headers: adminHeaders,
+            body: JSON.stringify({ user_id: callerAuth.id, full_name: "Cold Caller Démo", email: "demo-cold-caller@portailgestion.ca" }),
+          });
+        }
+
+        // Créé directement par un admin (pas une auto-inscription publique
+        // via pro.html) donc auto-vérifié — sinon aucun mandat ne lui
+        // serait jamais envoyé par le moteur de dispatch.
+        const workerAuth = await upsertAuthUser("demo-travailleur@portailgestion.ca", "worker");
+        const workerRowRes = await fetch(`${supabaseUrl}/rest/v1/workers?user_id=eq.${workerAuth.id}&select=id`, { headers: adminHeaders });
+        const [existingWorker] = await workerRowRes.json().catch(() => [null]);
+        if (!existingWorker) {
+          await fetch(`${supabaseUrl}/rest/v1/workers`, {
+            method: "POST", headers: adminHeaders,
+            body: JSON.stringify({
+              user_id: workerAuth.id, name: "Travailleur Démo", email: "demo-travailleur@portailgestion.ca",
+              specialties: ["plomberie", "electricite", "serrurerie", "cvac"], zones: [DEMO_ZONE],
+              hourly_rate: 65, handles_urgent: true, verification_status: "verified",
+              verified_at: new Date().toISOString(), verified_by: userId, availability_status: "maintenant",
+            }),
+          });
+        } else {
+          await fetch(`${supabaseUrl}/rest/v1/workers?id=eq.${existingWorker.id}`, {
+            method: "PATCH", headers: adminHeaders, body: JSON.stringify({ zones: [DEMO_ZONE], verification_status: "verified" }),
+          });
+        }
+
+        await logAudit("admin.seed_demo_accounts", "users", null, {
+          emails: ["demo-proprietaire@portailgestion.ca", "demo-locataire@portailgestion.ca", "demo-cold-caller@portailgestion.ca", "demo-travailleur@portailgestion.ca"],
+        });
+
+        return new Response(JSON.stringify({
+          ok: true,
+          accounts: [
+            { role: "Propriétaire", email: "demo-proprietaire@portailgestion.ca", temp_password: ownerAuth.password, portal_url: OWNER_PORTAL_URL },
+            { role: "Locataire", email: "demo-locataire@portailgestion.ca", temp_password: tenantAuth.password, portal_url: TENANT_PORTAL_URL },
+            { role: "Cold caller", email: "demo-cold-caller@portailgestion.ca", temp_password: callerAuth.password, portal_url: CALLER_PORTAL_URL },
+            { role: "Travailleur", email: "demo-travailleur@portailgestion.ca", temp_password: workerAuth.password, portal_url: WORKER_PORTAL_URL },
+          ],
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: corsHeaders });
+      }
+    }
+
     if (action === "impersonate_user") {
       const { target_role, target_id } = body;
       // nameColumn : "workers" utilise "name", pas "full_name" comme les
