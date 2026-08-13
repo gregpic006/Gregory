@@ -2812,4 +2812,18 @@ select
   coalesce((select count(*) from worker_ratings wr where wr.worker_id = w.id), 0) as ratings_count
 from workers w;
 
+-- ============================================================
+-- PORTAIL FINANCE — lecture IA des factures/reçus fournisseurs
+-- ============================================================
+-- Champs additionnels sur expenses pour accueillir ce que l'IA en
+-- extrait (et réutilisables pour une saisie manuelle éventuelle) —
+-- amount reste le montant TOTAL de la dépense (taxes incluses), comme
+-- c'était déjà le cas pour complete_work_order.
+alter table expenses add column if not exists vendor_name text;
+alter table expenses add column if not exists category text;
+alter table expenses add column if not exists gst_amount numeric(10,2);
+alter table expenses add column if not exists qst_amount numeric(10,2);
+alter table expenses add column if not exists ai_confidence numeric(5,2);
+alter table expenses add column if not exists ai_extracted jsonb;
+
 

@@ -310,6 +310,43 @@
   <p id="pad-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
   <div id="pad-authorizations-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 
+  <h1 style="margin-top:40px;font-size:22px;">Factures fournisseurs (lecture IA)</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Téléverse une facture ou un reçu (PDF/photo) — l'IA propose le fournisseur, le montant, les taxes et la catégorie. Rien n'est enregistré tant que tu n'as pas confirmé.</p>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:14px;">
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Facture / reçu (PDF ou photo)</label>
+        <input type="file" id="receipt-file" accept=".pdf,image/*">
+      </div>
+      <button onclick="parseExpenseReceipt()" id="receipt-parse-btn" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Analyser avec l'IA</button>
+    </div>
+    <p id="receipt-parse-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
+    <div id="receipt-review" style="display:none;background:var(--paper);border:1px solid var(--line);padding:14px;">
+      <p id="receipt-confidence-note" style="font-size:12px;color:var(--muted);margin-bottom:10px;"></p>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:10px;">
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fournisseur</label><input type="text" id="rv-vendor" style="padding:8px;border:1px solid var(--line);width:170px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Catégorie</label>
+          <select id="rv-category" style="padding:8px;border:1px solid var(--line);">
+            <option value="plomberie">Plomberie</option><option value="electricite">Électricité</option><option value="cvac">CVAC</option>
+            <option value="serrurerie">Serrurerie</option><option value="structure">Structure</option><option value="peinture">Peinture</option>
+            <option value="menage">Ménage</option><option value="assurance">Assurance</option><option value="taxes_municipales">Taxes municipales</option>
+            <option value="utilities">Services publics</option><option value="administratif">Administratif</option><option value="autre">Autre</option>
+          </select>
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Immeuble</label>
+          <select id="rv-building" style="padding:8px;border:1px solid var(--line);min-width:200px;"><option value="">— Choisir —</option></select>
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Date de la facture</label><input type="date" id="rv-date" style="padding:8px;border:1px solid var(--line);"></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:10px;">
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description</label><input type="text" id="rv-description" style="padding:8px;border:1px solid var(--line);width:280px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">TPS ($)</label><input type="number" id="rv-gst" step="0.01" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">TVQ ($)</label><input type="number" id="rv-qst" step="0.01" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Montant total ($)</label><input type="number" id="rv-total" step="0.01" style="padding:8px;border:1px solid var(--line);width:110px;"></div>
+        <button onclick="confirmExpenseReceipt()" id="receipt-confirm-btn" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Confirmer et créer la dépense</button>
+      </div>
+    </div>
+  </div>
+
   <h1 style="margin-top:40px;font-size:22px;">Anomalies financières</h1>
   <p class="subtitle" style="margin-bottom:16px;">Détection automatique — factures en double, dépassements, écarts de loyer, reçus manquants</p>
   <table><thead><tr><th>Type</th><th>Client</th><th>Description</th><th>Sévérité</th><th></th></tr></thead>
@@ -930,6 +967,16 @@ async function callOpsApi(payload){
   return data;
 }
 
+async function callParseExpenseReceiptApi(payload){
+  const { data, error } = await supabaseClient.functions.invoke('parse-expense-receipt', { body: payload });
+  if(error){
+    let detail = error.message;
+    try { const body = await error.context?.json(); if(body?.error) detail = body.error; } catch(e){}
+    return { error: detail };
+  }
+  return data;
+}
+
 async function viewPhoto(bucket, path){
   const res = await callOpsApi({ action: 'get_signed_url', bucket, path });
   if(res?.signed_url){ window.open(res.signed_url, '_blank'); }
@@ -945,6 +992,7 @@ function photoLinksHtml(bucket, paths, label){
 
 async function loadOps(){
   await loadMarketplaceListings();
+  await loadBuildingsForReceipts();
   await loadWorkersAdmin();
   await loadServiceCatalog();
   await loadVisitInquiries();
@@ -1468,6 +1516,82 @@ async function loadWorkOrdersAdmin(){
         <button onclick="completeWorkOrderAdmin('${wo.id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Marquer complété</button>
       </div>
     </div>`).join('');
+}
+
+async function loadBuildingsForReceipts(){
+  const data = await callOpsApi({ action: 'list_all_buildings' });
+  const select = document.getElementById('rv-building');
+  if(!select) return;
+  const buildings = data?.buildings || [];
+  select.innerHTML = '<option value="">— Choisir —</option>' + buildings.map(b =>
+    `<option value="${esc(b.id)}">${esc(b.address)}${b.owners?.full_name ? ' — ' + esc(b.owners.full_name) : ''}</option>`
+  ).join('');
+}
+
+let lastParsedReceiptDocId = null;
+
+async function parseExpenseReceipt(){
+  const fileInput = document.getElementById('receipt-file');
+  const msg = document.getElementById('receipt-parse-msg');
+  const file = fileInput.files[0];
+  if(!file){ msg.textContent = 'Choisis un fichier.'; return; }
+  const btn = document.getElementById('receipt-parse-btn');
+  btn.disabled = true;
+  msg.textContent = "Analyse en cours (peut prendre quelques secondes)...";
+  document.getElementById('receipt-review').style.display = 'none';
+  try {
+    const file_base64 = await readFileAsBase64(file);
+    const res = await callParseExpenseReceiptApi({ action: 'parse', file_base64, filename: file.name, content_type: file.type });
+    if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
+    lastParsedReceiptDocId = res.document_id;
+    const p = res.parsed || {};
+    document.getElementById('rv-vendor').value = p.vendor_name || '';
+    document.getElementById('rv-category').value = p.category || 'autre';
+    document.getElementById('rv-description').value = p.description || '';
+    document.getElementById('rv-date').value = p.invoice_date || '';
+    document.getElementById('rv-gst').value = p.gst_amount ?? '';
+    document.getElementById('rv-qst').value = p.qst_amount ?? '';
+    document.getElementById('rv-total').value = p.total_amount ?? '';
+    document.getElementById('rv-building').value = res.matched_building_id || '';
+    document.getElementById('receipt-confidence-note').innerHTML = res.needs_review
+      ? `<span style="color:var(--rust);">Confiance ${res.confidence ?? '?'}% — vérifie chaque champ avant de confirmer.</span>`
+      : `<span style="color:var(--sage);">Confiance ${res.confidence}% — vérifie quand même l'immeuble avant de confirmer.</span>`;
+    document.getElementById('receipt-review').style.display = 'block';
+    msg.textContent = '';
+  } catch (e) {
+    msg.textContent = "Erreur : " + e;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function confirmExpenseReceipt(){
+  const building_id = document.getElementById('rv-building').value;
+  const total_amount = document.getElementById('rv-total').value;
+  const description = document.getElementById('rv-description').value.trim();
+  const msg = document.getElementById('receipt-parse-msg');
+  if(!building_id || !total_amount || !description){ msg.textContent = "Immeuble, description et montant total requis."; return; }
+  const btn = document.getElementById('receipt-confirm-btn');
+  btn.disabled = true;
+  try {
+    const res = await callParseExpenseReceiptApi({
+      action: 'confirm',
+      document_id: lastParsedReceiptDocId, building_id, description,
+      vendor_name: document.getElementById('rv-vendor').value.trim() || null,
+      category: document.getElementById('rv-category').value,
+      total_amount: Number(total_amount),
+      gst_amount: document.getElementById('rv-gst').value || null,
+      qst_amount: document.getElementById('rv-qst').value || null,
+      expense_date: document.getElementById('rv-date').value || null,
+    });
+    if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
+    msg.innerHTML = '<span style="color:var(--sage);">Dépense créée.</span>';
+    document.getElementById('receipt-review').style.display = 'none';
+    document.getElementById('receipt-file').value = '';
+    lastParsedReceiptDocId = null;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function reassignWorkOrder(work_order_id, worker_id){

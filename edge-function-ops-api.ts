@@ -59,6 +59,16 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ work_orders: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Liste globale (tous propriétaires confondus) pour le sélecteur
+    // d'immeuble de la lecture IA de factures — contrairement à
+    // onboarding-api.list_buildings, pas besoin de connaître le
+    // propriétaire d'avance : l'admin choisit souvent l'immeuble APRÈS
+    // que l'IA ait tenté de le deviner sur la facture.
+    if (action === "list_all_buildings") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/buildings?select=id,address,owners(full_name)&order=address.asc`, { headers: adminHeaders });
+      return new Response(JSON.stringify({ buildings: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (action === "list_workers") {
       const res = await fetch(`${supabaseUrl}/rest/v1/worker_verification_status?select=*&order=name.asc`, { headers: adminHeaders });
       return new Response(JSON.stringify({ workers: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
