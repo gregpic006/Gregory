@@ -33,6 +33,9 @@
   .result.active{display:block;}
   .result.error{border-left-color:var(--rust);}
   .muted{color:var(--muted);font-size:12.5px;}
+  .stars{font-size:26px;letter-spacing:4px;margin-bottom:10px;cursor:pointer;user-select:none;}
+  .stars span{color:var(--line);}
+  .stars span.filled{color:var(--brass);}
 </style>
 </head>
 <body>
@@ -50,6 +53,13 @@
     </div>
 
     <div id="panel-choices" class="panel active">
+      <div id="rating-block" style="display:none;margin-bottom:16px;">
+        <p class="muted" style="margin-bottom:6px;" id="rating-label">Note le travailleur (optionnel) :</p>
+        <div class="stars" id="stars">
+          <span data-v="1">★</span><span data-v="2">★</span><span data-v="3">★</span><span data-v="4">★</span><span data-v="5">★</span>
+        </div>
+        <textarea id="rating-comment" placeholder="Un commentaire sur son travail ? (optionnel)" style="min-height:60px;"></textarea>
+      </div>
       <div class="actions">
         <button class="primary" onclick="respond('confirm')">Oui, c'est réglé</button>
         <button onclick="showPanel('reopen')">Non, il y a encore un problème</button>
@@ -105,12 +115,23 @@ function showPanel(name){
   document.getElementById('panel-' + name).classList.add('active');
 }
 
+let selectedStars = 0;
+document.querySelectorAll('#stars span').forEach(el => {
+  el.addEventListener('click', () => {
+    selectedStars = Number(el.dataset.v);
+    document.querySelectorAll('#stars span').forEach(s => s.classList.toggle('filled', Number(s.dataset.v) <= selectedStars));
+  });
+});
+
 async function respond(action){
   const messageEl = document.getElementById(action + '-message');
   const message = messageEl ? messageEl.value.trim() : undefined;
+  const extra = action === 'confirm' && selectedStars
+    ? { stars: selectedStars, comment: document.getElementById('rating-comment').value.trim() }
+    : {};
   document.querySelectorAll('button').forEach(b => b.disabled = true);
 
-  const { ok, data } = await callConfirmApi({ action, message });
+  const { ok, data } = await callConfirmApi({ action, message, ...extra });
   const result = document.getElementById('result');
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
 
@@ -147,6 +168,10 @@ async function init(){
 
   document.getElementById('wo-description').textContent = data.description || '';
   document.getElementById('wo-address').textContent = `${data.address || ''} — Unité ${data.unit_number || ''}`;
+  if(data.worker_name){
+    document.getElementById('rating-label').textContent = `Note le travail de ${data.worker_name} (optionnel) :`;
+    document.getElementById('rating-block').style.display = 'block';
+  }
   document.getElementById('main').style.display = 'block';
 }
 

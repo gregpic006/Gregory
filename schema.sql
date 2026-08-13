@@ -2765,4 +2765,51 @@ $$;
 
 select cron.schedule('dispatch-advance-tiers', '*/5 * * * *', $$select trigger_dispatch_advance()$$);
 
+-- ============================================================
+-- ÉVALUATION DES TRAVAILLEURS — comble le trou identifié à l'audit :
+-- "rating" existait déjà comme colonne sur workers mais rien ne
+-- l'alimentait. Plutôt que de continuer à s'y fier, la moyenne est
+-- calculée en direct dans worker_verification_status (même principe que
+-- completed_jobs_count/jobs_offered_count) — aucun compteur stocké à
+-- resynchroniser. Point d'entrée : la page de confirmation à token que
+-- le locataire reçoit déjà par courriel (confirmer-reparation.html) —
+-- pas de nouvelle policy RLS ouverte au navigateur nécessaire, l'insert
+-- passe par handle-tenant-confirmation.ts (service_role).
+-- ============================================================
+create table if not exists worker_ratings (
+  id uuid primary key default gen_random_uuid(),
+  work_order_id uuid not null references work_orders(id) on delete cascade,
+  worker_id uuid not null references workers(id),
+  rated_by_type text not null default 'tenant' check (rated_by_type in ('tenant', 'owner')),
+  stars smallint not null check (stars between 1 and 5),
+  comment text,
+  created_at timestamptz default now(),
+  unique (work_order_id, rated_by_type)
+);
+alter table worker_ratings enable row level security;
+create index if not exists idx_worker_ratings_worker on worker_ratings(worker_id);
+
+-- Troisième redéfinition de worker_verification_status (voir les deux
+-- précédentes, tâche #39 puis section PORTAIL PRO ci-dessus) — même
+-- principe DROP + CREATE, pour la même raison de colonnes qui
+-- allongeraient w.* si on utilisait "or replace".
+drop view if exists worker_verification_status;
+create view worker_verification_status as
+select
+  w.*,
+  (w.requires_rbq and (w.rbq_license is null or w.rbq_license = '')) as missing_rbq_license,
+  (w.rbq_license_expiry is not null and w.rbq_license_expiry < current_date) as rbq_expired,
+  (w.insurance_document_id is null) as missing_insurance_doc,
+  (w.insurance_expiry is not null and w.insurance_expiry < current_date) as insurance_expired,
+  (w.rbq_license_expiry is not null and w.rbq_license_expiry >= current_date and w.rbq_license_expiry <= current_date + interval '15 days') as rbq_expiring_soon,
+  (w.insurance_expiry is not null and w.insurance_expiry >= current_date and w.insurance_expiry <= current_date + interval '15 days') as insurance_expiring_soon,
+  coalesce((select count(*) from work_orders wo where wo.worker_id = w.id and wo.status = 'completed'), 0) as completed_jobs_count,
+  coalesce((select count(*) from work_orders wo where wo.worker_id = w.id and wo.worker_response = 'declined'), 0) as declined_jobs_count,
+  coalesce((select count(*) from job_offers jo where jo.worker_id = w.id), 0) as jobs_offered_count,
+  coalesce((select count(*) from job_offers jo where jo.worker_id = w.id and jo.status = 'accepted'), 0) as jobs_accepted_count,
+  coalesce((select count(*) from work_orders wo2 where wo2.worker_id = w.id and wo2.status = 'cancelled'), 0) as jobs_cancelled_count,
+  (select round(avg(stars)::numeric, 2) from worker_ratings wr where wr.worker_id = w.id) as avg_rating,
+  coalesce((select count(*) from worker_ratings wr where wr.worker_id = w.id), 0) as ratings_count
+from workers w;
+
 

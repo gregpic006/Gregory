@@ -1188,7 +1188,7 @@ async function loadWorkersAdmin(){
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
       <b style="display:block;margin-bottom:4px;">${esc(w.name)} — ${esc(w.specialty) || 'spécialité non précisée'}</b>
       ${proDetails}
-      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">${esc(w.phone) || '—'} · ${esc(w.email) || '—'} · ${w.completed_jobs_count} travail(aux) complété(s), ${w.declined_jobs_count} refusé(s) — ${statusBadge}${soonBadge}${proBadge}</span>
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">${esc(w.phone) || '—'} · ${esc(w.email) || '—'} · ${w.completed_jobs_count} travail(aux) complété(s), ${w.declined_jobs_count} refusé(s)${w.ratings_count ? ` · ★ ${w.avg_rating}/5 (${w.ratings_count} avis)` : ' · pas encore d\'avis'} — ${statusBadge}${soonBadge}${proBadge}</span>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
         ${w.verification_status === 'pending' ? `
           <button onclick="verifyWorkerPro('${w.id}','verified')" style="border:1px solid var(--sage);background:none;color:var(--sage);padding:7px 12px;font-size:11.5px;cursor:pointer;">Approuver le dossier Portail Pro</button>

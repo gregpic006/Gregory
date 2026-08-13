@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
     }
 
     const woRes = await fetch(
-      `${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}&select=*,units(unit_number,buildings(address)),service_requests(id,tenant_id,tenants(full_name,email))`,
+      `${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}&select=*,units(unit_number,buildings(address)),service_requests(id,tenant_id,tenants(full_name,email)),workers(id,name)`,
       { headers: adminHeaders },
     );
     const [wo] = await woRes.json();
@@ -74,6 +74,7 @@ Deno.serve(async (req) => {
         address,
         unit_number: unit?.unit_number,
         tenant_confirmed: wo.tenant_confirmed,
+        worker_name: wo.workers?.name ?? null,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -82,6 +83,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === "confirm") {
+      const { stars, comment } = body;
       await fetch(`${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}`, {
         method: "PATCH",
         headers: adminHeaders,
@@ -96,6 +98,25 @@ Deno.serve(async (req) => {
         method: "POST", headers: adminHeaders,
         body: JSON.stringify({ actor_type: "system", action: "repair_case.tenant_confirmed", entity_type: "work_orders", entity_id: work_order_id, details: {} }),
       });
+
+      // Note optionnelle du travailleur — jamais bloquante pour la
+      // confirmation elle-même (un échec d'insert ici ne doit pas faire
+      // échouer la fermeture du dossier).
+      if (Number.isInteger(stars) && stars >= 1 && stars <= 5 && wo.worker_id) {
+        try {
+          await fetch(`${supabaseUrl}/rest/v1/worker_ratings`, {
+            method: "POST",
+            headers: { ...adminHeaders, Prefer: "resolution=ignore-duplicates" },
+            body: JSON.stringify({
+              work_order_id, worker_id: wo.worker_id, rated_by_type: "tenant",
+              stars, comment: comment ? String(comment).trim().slice(0, 1000) : null,
+            }),
+          });
+        } catch (e) {
+          console.error("Failed to record worker rating", e);
+        }
+      }
+
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
