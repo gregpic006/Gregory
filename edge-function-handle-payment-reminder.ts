@@ -137,6 +137,31 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
       }),
     });
 
+    // Portail Concierge — en plus du courriel, un SMS pour un retard
+    // réel (pas pour le rappel préventif) : message court et
+    // déterministe (pas rédigé par l'IA, contrairement au courriel).
+    // Tant qu'aucun compte Twilio n'est branché, send-sms.ts bascule
+    // automatiquement sur un courriel de secours — ne bloque jamais ce
+    // flux et n'a pas besoin d'être modifié une fois le compte ajouté.
+    if (reminder_type === "late" && tenant.phone) {
+      try {
+        await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: serviceRoleKey ?? "", Authorization: `Bearer ${serviceRoleKey}` },
+          body: JSON.stringify({
+            to_phone: tenant.phone,
+            message: `Portail : votre loyer de ${payment.amount} $ (échéance ${payment.due_date}) est en retard. Merci de nous contacter si besoin. — Portail`,
+            entity_type: "payments",
+            entity_id: payment_id,
+            fallback_email: tenant.email,
+            fallback_subject: "Rappel — loyer en retard (SMS non livré)",
+          }),
+        });
+      } catch (e) {
+        console.error("Failed to trigger send-sms", e);
+      }
+    }
+
     // Historique complet — sert d'audit et de base pour le plafond de fréquence.
     await fetch(`${supabaseUrl}/rest/v1/payment_reminders`, {
       method: "POST",

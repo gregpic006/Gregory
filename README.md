@@ -55,6 +55,9 @@ FLINKS_SECRET_KEY
 FLINKS_CUSTOMER_ID
 FLINKS_IFRAME_BASE_URL
 FLINKS_SYNC_SECRET
+TWILIO_ACCOUNT_SID       (optionnel — SMS Portail Concierge, repli automatique par courriel tant qu'absent)
+TWILIO_AUTH_TOKEN        (optionnel — idem)
+TWILIO_FROM_NUMBER       (optionnel — idem)
 ```
 
 La clé publique `SUPABASE_ANON_KEY` (préfixe `sb_publishable_...`) apparaît en clair dans le code client HTML — c'est normal et voulu, elle est conçue pour être publique. La clé `SUPABASE_SERVICE_ROLE_KEY`, elle, ne doit **jamais** apparaître côté client.

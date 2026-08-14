@@ -3148,4 +3148,25 @@ $$;
 
 select cron.schedule('execute-automation-rules', '*/30 * * * *', $$select execute_automation_rules()$$);
 
+-- ============ PORTAIL CONCIERGE — SMS (fondation, compte Twilio à venir) ============
+-- Décision produit : le code est livré complet même si aucun compte
+-- Twilio n'est encore branché (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN /
+-- TWILIO_FROM_NUMBER absents pour l'instant) — voir send-sms.ts, qui
+-- bascule automatiquement sur un courriel de secours tant que ces
+-- variables ne sont pas configurées, plutôt que d'échouer silencieusement.
+create table if not exists sms_log (
+  id uuid primary key default gen_random_uuid(),
+  recipient_phone text,
+  message text not null,
+  channel_used text not null check (channel_used in ('twilio','email_fallback','skipped')),
+  status text not null check (status in ('sent','error','skipped')),
+  error_detail text,
+  entity_type text,
+  entity_id uuid,
+  created_at timestamptz default now()
+);
+-- Pas de policy RLS ouverte : accessible uniquement via service_role
+-- (fonction Edge "send-sms").
+alter table sms_log enable row level security;
+
 
