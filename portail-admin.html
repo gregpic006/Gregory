@@ -1065,10 +1065,20 @@ async function viewPhoto(bucket, path){
   else { alert("Impossible d'ouvrir cette photo."); }
 }
 
+// Ne JAMAIS interpoler un nom de fichier (contrôlé par l'utilisateur qui
+// a téléversé la photo) directement dans une chaîne onclick="..." — même
+// échappé avec esc(), le navigateur décode l'entité HTML avant d'exécuter
+// le JS, ce qui permet de sortir de la chaîne littérale avec un guillemet
+// simple dans le nom de fichier. On passe donc par des attributs data-*
+// lus via dataset, jamais réinterprétés comme du code.
+function viewPhotoFromLink(el){
+  viewPhoto(el.dataset.bucket, el.dataset.path);
+}
+
 function photoLinksHtml(bucket, paths, label){
   const list = Array.isArray(paths) ? paths : [];
   if(!list.length) return '';
-  const links = list.map((p, i) => `<a href="#" onclick="viewPhoto('${bucket}', '${esc(p).replace(/'/g, "\\'")}'); return false;" style="margin-right:8px;">Photo ${i + 1}</a>`).join('');
+  const links = list.map((p, i) => `<a href="#" data-bucket="${esc(bucket)}" data-path="${esc(p)}" onclick="viewPhotoFromLink(this); return false;" style="margin-right:8px;">Photo ${i + 1}</a>`).join('');
   return `<div style="font-size:12.5px;margin-top:4px;"><b>${esc(label)} :</b> ${links}</div>`;
 }
 
