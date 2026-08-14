@@ -1236,13 +1236,16 @@ async function loadWorkersAdmin(){
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
       <b style="display:block;margin-bottom:4px;">${esc(w.name)} — ${esc(w.specialty) || 'spécialité non précisée'}</b>
       ${proDetails}
-      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">${esc(w.phone) || '—'} · ${esc(w.email) || '—'} · ${w.completed_jobs_count} travail(aux) complété(s), ${w.declined_jobs_count} refusé(s)${w.ratings_count ? ` · ★ ${w.avg_rating}/5 (${w.ratings_count} avis)` : ' · pas encore d\'avis'} — ${statusBadge}${soonBadge}${proBadge}</span>
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">${esc(w.phone) || '—'} · ${esc(w.email) || '—'} · ${w.completed_jobs_count} travail(aux) complété(s), ${w.declined_jobs_count} refusé(s)${w.ratings_count ? ` · ★ ${w.avg_rating}/5 (${w.ratings_count} avis)` : ' · pas encore d\'avis'} — ${statusBadge}${soonBadge}${proBadge}${w.active === false ? ' <span style="background:var(--rust);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">DÉSACTIVÉ</span>' : ''}</span>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
         ${w.verification_status === 'pending' ? `
           <button onclick="verifyWorkerPro('${w.id}','verified')" style="border:1px solid var(--sage);background:none;color:var(--sage);padding:7px 12px;font-size:11.5px;cursor:pointer;">Approuver le dossier Portail Pro</button>
           <button onclick="verifyWorkerPro('${w.id}','rejected')" style="border:1px solid var(--rust);background:none;color:var(--rust);padding:7px 12px;font-size:11.5px;cursor:pointer;">Refuser</button>
         ` : ''}
         ${w.user_id ? `<button data-role="worker" data-target-id="${esc(w.id)}" onclick="impersonateFromButton(this)" style="border:1px solid var(--ink);background:none;padding:7px 12px;font-size:11.5px;cursor:pointer;">Voir son portail</button>` : ''}
+        ${w.active === false
+          ? `<button onclick="toggleWorkerActive('${w.id}', true)" style="border:1px solid var(--sage);background:none;color:var(--sage);padding:7px 12px;font-size:11.5px;cursor:pointer;">Réactiver</button>`
+          : `<button onclick="toggleWorkerActive('${w.id}', false)" style="border:1px solid var(--rust);background:none;color:var(--rust);padding:7px 12px;font-size:11.5px;cursor:pointer;">Désactiver (ne recevra plus de mandats)</button>`}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
         <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Requiert RBQ</label>
@@ -1275,6 +1278,13 @@ async function verifyWorkerPro(worker_id, decision){
     rejection_reason = prompt('Raison du refus (visible par le travailleur, optionnel) :') || null;
   }
   const res = await callOpsApi({ action: 'verify_worker_pro', worker_id, decision, rejection_reason });
+  if(res?.error){ alert('Erreur : ' + res.error); return; }
+  await loadWorkersAdmin();
+}
+
+async function toggleWorkerActive(worker_id, active){
+  if(!active && !confirm('Désactiver ce travailleur ? Il ne recevra plus aucun nouveau mandat (assignation manuelle, cascade automatique ou dispatch Portail Pro) tant que tu ne le réactives pas.')) return;
+  const res = await callOpsApi({ action: 'toggle_worker_active', worker_id, active });
   if(res?.error){ alert('Erreur : ' + res.error); return; }
   await loadWorkersAdmin();
 }

@@ -155,12 +155,23 @@ Deno.serve(async (req) => {
       const specialty = wo.workers?.specialty;
       const specialtyFilter = specialty ? `&specialty=eq.${encodeURIComponent(specialty)}` : "";
 
+      // CORRECTIF SÉCURITÉ/FONCTIONNEL : interroge worker_verification_status
+      // (pas "workers" directement) et filtre par conformité RBQ/assurance
+      // et statut actif — sans ça, cette cascade pouvait réassigner à un
+      // travailleur avec licence expirée, assurance manquante, ou
+      // désactivé, contournant les mêmes contrôles déjà appliqués à
+      // l'assignation manuelle (create_work_order/reassign_work_order).
+      // Récupère aussi plusieurs candidats (au lieu de limit=1) pour tirer
+      // au sort — l'ancienne version prenait toujours le même premier
+      // résultat, sans répartition entre travailleurs disponibles.
       const candidatesRes = await fetch(
-        `${supabaseUrl}/rest/v1/workers?id=not.in.(${declinedIds.join(",")})${specialtyFilter}&select=id&limit=1`,
+        `${supabaseUrl}/rest/v1/worker_verification_status?id=not.in.(${declinedIds.join(",")})${specialtyFilter}&active=eq.true&missing_rbq_license=eq.false&rbq_expired=eq.false&missing_insurance_doc=eq.false&insurance_expired=eq.false&select=id&limit=20`,
         { headers: adminHeaders },
       );
       const candidates = await candidatesRes.json().catch(() => []);
-      const nextWorker = Array.isArray(candidates) && candidates.length ? candidates[0] : null;
+      const nextWorker = Array.isArray(candidates) && candidates.length
+        ? candidates[Math.floor(Math.random() * candidates.length)]
+        : null;
 
       if (nextWorker) {
         await fetch(`${supabaseUrl}/rest/v1/work_orders?id=eq.${work_order_id}`, {

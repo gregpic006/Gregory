@@ -2226,16 +2226,29 @@ create policy "owner views own bank connections" on bank_connections for select
 
 -- Synchronisation quotidienne : appelle la fonction Edge flinks-api,
 -- action "sync_all", qui parcourt toutes les connexions actives.
+-- CORRECTIF SÉCURITÉ : flinks-api.ts action "sync_all" exigeait auparavant
+-- AUCUNE authentification — n'importe qui pouvait déclencher une vraie
+-- synchronisation bancaire pour tous les propriétaires connectés. Elle
+-- exige maintenant un en-tête "x-flinks-sync-key" égal au secret
+-- FLINKS_SYNC_SECRET. Ce secret ne doit JAMAIS être écrit en clair dans ce
+-- fichier (dépôt public sur GitHub) — il est stocké dans Supabase Vault et
+-- lu ici dynamiquement. À exécuter UNE SEULE FOIS, à la main, dans le SQL
+-- Editor (jamais commité dans schema.sql) :
+--   select vault.create_secret('<valeur réelle de FLINKS_SYNC_SECRET>', 'flinks_sync_secret');
 create or replace function trigger_flinks_daily_sync()
-returns void language plpgsql as $$
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_sync_key text;
 begin
+  select decrypted_secret into v_sync_key from vault.decrypted_secrets where name = 'flinks_sync_secret';
   perform net.http_post(
     url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/flinks-api',
     body := jsonb_build_object('action', 'sync_all'),
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
-      'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+      'x-flinks-sync-key', coalesce(v_sync_key, '')
     )
   );
 end;
@@ -2825,5 +2838,148 @@ alter table expenses add column if not exists gst_amount numeric(10,2);
 alter table expenses add column if not exists qst_amount numeric(10,2);
 alter table expenses add column if not exists ai_confidence numeric(5,2);
 alter table expenses add column if not exists ai_extracted jsonb;
+
+-- ============================================================
+-- CORRECTIFS DE SÉCURITÉ ET FIABILITÉ (audit)
+-- ============================================================
+
+-- CORRECTIF SÉCURITÉ/FONCTIONNEL : redéfinition de
+-- process_worker_response_timeouts() (voir sa première définition plus
+-- haut, tâche #24). La version originale piochait le prochain travailleur
+-- directement dans "workers", sans jamais vérifier sa conformité
+-- RBQ/assurance ni son statut actif — un travailleur avec licence
+-- expirée, assurance manquante, ou même désactivé/rejeté du programme
+-- Portail Pro pouvait recevoir un mandat via cette cascade automatique,
+-- alors que create_work_order/reassign_work_order bloquent déjà ce même
+-- cas pour l'assignation manuelle. Redéfinie ici (pas à sa première
+-- apparition) car elle doit référencer worker_verification_status et
+-- workers.active, qui n'existent pas encore à ce point du fichier si
+-- celui-ci est rejoué en entier sur une base vide.
+create or replace function process_worker_response_timeouts()
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  wo record;
+  v_next_worker_id uuid;
+  v_admin_count int;
+begin
+  -- 1. Rappel après 30 minutes sans réponse.
+  for wo in
+    select id from work_orders
+    where worker_response = 'pending'
+    and worker_notified = true
+    and coalesce(response_reminder_sent, false) = false
+    and worker_notified_at <= now() - interval '30 minutes'
+  loop
+    perform net.http_post(
+      url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-worker-job-assigned',
+      body := jsonb_build_object('work_order_id', wo.id, 'notification_type', 'reminder'),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+        'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+      )
+    );
+    update work_orders set response_reminder_sent = true where id = wo.id;
+  end loop;
+
+  -- 2. Après 2 heures sans réponse : cascade au prochain travailleur
+  --    disponible de la même spécialité, CONFORME (RBQ/assurance) et
+  --    ACTIF (jamais déjà sollicité pour ce travail).
+  for wo in
+    select w.id, w.worker_id, w.declined_worker_ids, wk.specialty
+    from work_orders w
+    join workers wk on wk.id = w.worker_id
+    where w.worker_response = 'pending'
+    and w.worker_notified = true
+    and coalesce(w.response_escalated, false) = false
+    and w.worker_notified_at <= now() - interval '2 hours'
+  loop
+    select id into v_next_worker_id
+    from worker_verification_status
+    where specialty is not distinct from wo.specialty
+    and id <> wo.worker_id
+    and not (id = any(coalesce(wo.declined_worker_ids, '{}')))
+    and coalesce(active, true)
+    and not missing_rbq_license
+    and not rbq_expired
+    and not missing_insurance_doc
+    and not insurance_expired
+    order by random()
+    limit 1;
+
+    if v_next_worker_id is not null then
+      update work_orders set
+        declined_worker_ids = array_append(coalesce(declined_worker_ids, '{}'), worker_id),
+        worker_id = v_next_worker_id,
+        worker_notified = false
+      where id = wo.id;
+      -- notify_worker_new_job() se charge de la notification et de la
+      -- remise à zéro des compteurs pour le nouveau travailleur.
+    else
+      update work_orders set response_escalated = true where id = wo.id;
+
+      select count(*) into v_admin_count from users where is_admin = true and email is not null;
+      if v_admin_count > 0 then
+        perform net.http_post(
+          url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/handle-worker-job-assigned',
+          body := jsonb_build_object('work_order_id', wo.id, 'notification_type', 'all_declined'),
+          headers := jsonb_build_object(
+            'Content-Type', 'application/json',
+            'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+            'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+          )
+        );
+      end if;
+    end if;
+  end loop;
+end;
+$$;
+
+-- CORRECTIF SÉCURITÉ : la policy "owner or admin read workers" laissait
+-- n'importe quel propriétaire lire l'annuaire COMPLET des travailleurs
+-- (nom, téléphone, courriel, licence RBQ) — y compris ceux qui n'ont
+-- jamais travaillé pour lui. Un propriétaire n'a besoin de voir que les
+-- travailleurs déjà assignés à un de ses propres travaux (aucun portail
+-- propriétaire n'affiche la liste complète des travailleurs par ailleurs
+-- — vérifié : seul un JOIN via work_orders est utilisé).
+drop policy if exists "owner or admin read workers" on workers;
+create policy "owner read workers assigned to own units" on workers for select
+  using (
+    auth_is_admin()
+    or id in (select worker_id from work_orders where unit_id in (select owned_unit_ids()) and worker_id is not null)
+  );
+
+-- CORRECTIF FONCTIONNEL : génération atomique des numéros de facture.
+-- L'ancienne méthode (COUNT des factures existantes + 1, calculé côté
+-- edge function) pouvait produire le même numéro pour deux propriétaires
+-- dont la génération de rapport mensuel tournait en même temps (déclenchée
+-- en parallèle par trigger_monthly_owner_reports() via pg_net) — le
+-- deuxième INSERT échouait silencieusement sur la contrainte unique
+-- invoice_number, et la réponse n'était jamais vérifiée : la facture de
+-- cet propriétaire n'était simplement jamais créée, sans aucune alerte.
+-- Le UPSERT ci-dessous est atomique (verrou de ligne Postgres standard
+-- sur ON CONFLICT DO UPDATE) : deux appels concurrents pour la même année
+-- ne peuvent plus jamais obtenir le même numéro.
+create table if not exists invoice_number_counters (
+  year text primary key,
+  last_number int not null default 0
+);
+alter table invoice_number_counters enable row level security;
+
+create or replace function next_invoice_number(p_year text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_next int;
+begin
+  insert into invoice_number_counters (year, last_number) values (p_year, 1)
+  on conflict (year) do update set last_number = invoice_number_counters.last_number + 1
+  returning last_number into v_next;
+  return 'PORT-' || p_year || '-' || lpad(v_next::text, 4, '0');
+end;
+$$;
 
 

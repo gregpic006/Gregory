@@ -247,20 +247,38 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
     const invoiceTotal = Math.round((invoiceSubtotal + gstAmount + qstAmount) * 100) / 100;
 
     if (invoiceSubtotal > 0) {
+      // CORRECTIF FONCTIONNEL : la génération par COMPTAGE (nombre de
+      // factures existantes + 1) n'était pas atomique — comme les rapports
+      // mensuels de tous les propriétaires partent en parallèle
+      // (trigger_monthly_owner_reports, non bloquant), deux exécutions
+      // concurrentes pouvaient calculer le même numéro. Le deuxième INSERT
+      // échouait alors silencieusement sur la contrainte unique
+      // invoice_number, sans jamais être vérifié — la facture de ce
+      // propriétaire n'était simplement jamais créée. next_invoice_number()
+      // (schema.sql) est atomique (verrou de ligne sur ON CONFLICT DO
+      // UPDATE) : deux appels concurrents ne peuvent plus obtenir le même
+      // numéro.
       const yearPrefix = period_end.slice(0, 4);
-      const countRes = await fetch(`${supabaseUrl}/rest/v1/invoices?invoice_number=like.PORT-${yearPrefix}-*&select=id`, { headers: adminHeaders });
-      const existingInvoicesThisYear = await countRes.json().catch(() => []);
-      const invoiceNumber = `PORT-${yearPrefix}-${String((Array.isArray(existingInvoicesThisYear) ? existingInvoicesThisYear.length : 0) + 1).padStart(4, "0")}`;
-
-      await fetch(`${supabaseUrl}/rest/v1/invoices?on_conflict=owner_id,period_start,period_end`, {
-        method: "POST",
-        headers: { ...adminHeaders, Prefer: "resolution=ignore-duplicates" },
-        body: JSON.stringify({
-          owner_id, invoice_number: invoiceNumber, period_start, period_end,
-          management_fee_amount: managementFee, coordination_fees_amount: coordinationFeesTotal,
-          subtotal: invoiceSubtotal, gst_amount: gstAmount, qst_amount: qstAmount, total_amount: invoiceTotal,
-        }),
+      const invoiceNumberRes = await fetch(`${supabaseUrl}/rest/v1/rpc/next_invoice_number`, {
+        method: "POST", headers: adminHeaders, body: JSON.stringify({ p_year: yearPrefix }),
       });
+      const invoiceNumber = await invoiceNumberRes.json().catch(() => null);
+      if (!invoiceNumberRes.ok || !invoiceNumber) {
+        console.error("Failed to generate invoice number for owner", owner_id, await invoiceNumberRes.text().catch(() => ""));
+      } else {
+        const invoiceInsertRes = await fetch(`${supabaseUrl}/rest/v1/invoices?on_conflict=owner_id,period_start,period_end`, {
+          method: "POST",
+          headers: { ...adminHeaders, Prefer: "resolution=ignore-duplicates" },
+          body: JSON.stringify({
+            owner_id, invoice_number: invoiceNumber, period_start, period_end,
+            management_fee_amount: managementFee, coordination_fees_amount: coordinationFeesTotal,
+            subtotal: invoiceSubtotal, gst_amount: gstAmount, qst_amount: qstAmount, total_amount: invoiceTotal,
+          }),
+        });
+        if (!invoiceInsertRes.ok) {
+          console.error("Failed to insert invoice for owner", owner_id, await invoiceInsertRes.text().catch(() => ""));
+        }
+      }
     }
 
     return new Response(JSON.stringify({ ok: true }), { status: 200 });

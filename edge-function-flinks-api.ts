@@ -143,7 +143,18 @@ Deno.serve(async (req) => {
     };
 
     // ---- Action système : appelée par pg_cron (voir trigger_flinks_daily_sync) ----
+    // CORRECTIF SÉCURITÉ : cette action déclenchait une vraie synchronisation
+    // bancaire pour TOUS les propriétaires connectés sans aucune
+    // authentification — n'importe qui pouvait la déclencher en connaissant
+    // juste l'URL. Protégée maintenant par le même secret partagé que
+    // reconcile-bank-transactions (FLINKS_SYNC_SECRET), jamais exposé côté
+    // client, lu depuis Supabase Vault côté SQL (voir trigger_flinks_daily_sync
+    // dans schema.sql) plutôt qu'écrit en clair dans un fichier public.
     if (action === "sync_all") {
+      const systemKey = req.headers.get("x-flinks-sync-key") || "";
+      if (!flinksSyncSecret || systemKey !== flinksSyncSecret) {
+        return new Response(JSON.stringify({ error: "Non autorisé" }), { status: 403, headers: corsHeaders });
+      }
       const connsRes = await fetch(`${supabaseUrl}/rest/v1/bank_connections?status=eq.active&select=id,owner_id,flinks_login_id`, { headers: adminHeaders });
       const connections = await connsRes.json().catch(() => []);
       const results: Record<string, unknown>[] = [];

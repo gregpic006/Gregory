@@ -160,6 +160,22 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
+    // Désactive/réactive un travailleur — un travailleur désactivé n'est
+    // plus jamais choisi par create_work_order, reassign_work_order, la
+    // cascade automatique (process_worker_response_timeouts, decline) ni
+    // le dispatch Portail Pro. Distinct de verify_worker_pro : un
+    // travailleur peut être "vérifié" mais temporairement désactivé (ex:
+    // en congé prolongé) sans perdre son dossier de vérification.
+    if (action === "toggle_worker_active") {
+      const { worker_id, active } = body;
+      if (!worker_id) {
+        return new Response(JSON.stringify({ error: "worker_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/workers?id=eq.${worker_id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ active: !!active }) });
+      await logAudit(active ? "worker.reactivated" : "worker.deactivated", "workers", worker_id, {});
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     if (action === "list_service_catalog") {
       const res = await fetch(`${supabaseUrl}/rest/v1/service_catalog?select=*&order=category.asc,label.asc`, { headers: adminHeaders });
       return new Response(JSON.stringify({ catalog: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -206,13 +222,14 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: "Champs manquants" }), { status: 400, headers: corsHeaders });
       }
 
-      const verifRes = await fetch(`${supabaseUrl}/rest/v1/worker_verification_status?id=eq.${worker_id}&select=missing_rbq_license,rbq_expired,missing_insurance_doc,insurance_expired`, { headers: adminHeaders });
+      const verifRes = await fetch(`${supabaseUrl}/rest/v1/worker_verification_status?id=eq.${worker_id}&select=missing_rbq_license,rbq_expired,missing_insurance_doc,insurance_expired,active`, { headers: adminHeaders });
       const [verif] = await verifRes.json();
       const blockingReasons: string[] = [];
       if (verif?.missing_rbq_license) blockingReasons.push("licence RBQ manquante");
       if (verif?.rbq_expired) blockingReasons.push("licence RBQ expirée");
       if (verif?.missing_insurance_doc) blockingReasons.push("preuve d'assurance manquante");
       if (verif?.insurance_expired) blockingReasons.push("assurance expirée");
+      if (verif?.active === false) blockingReasons.push("travailleur désactivé");
       if (blockingReasons.length) {
         return new Response(JSON.stringify({ error: `Impossible d'assigner ce travailleur — ${blockingReasons.join(", ")}. Complète sa vérification d'abord.` }), { status: 400, headers: corsHeaders });
       }
@@ -304,13 +321,14 @@ Deno.serve(async (req) => {
     if (action === "reassign_work_order") {
       const { work_order_id, worker_id } = body;
 
-      const verifRes = await fetch(`${supabaseUrl}/rest/v1/worker_verification_status?id=eq.${worker_id}&select=missing_rbq_license,rbq_expired,missing_insurance_doc,insurance_expired`, { headers: adminHeaders });
+      const verifRes = await fetch(`${supabaseUrl}/rest/v1/worker_verification_status?id=eq.${worker_id}&select=missing_rbq_license,rbq_expired,missing_insurance_doc,insurance_expired,active`, { headers: adminHeaders });
       const [verif] = await verifRes.json();
       const blockingReasons: string[] = [];
       if (verif?.missing_rbq_license) blockingReasons.push("licence RBQ manquante");
       if (verif?.rbq_expired) blockingReasons.push("licence RBQ expirée");
       if (verif?.missing_insurance_doc) blockingReasons.push("preuve d'assurance manquante");
       if (verif?.insurance_expired) blockingReasons.push("assurance expirée");
+      if (verif?.active === false) blockingReasons.push("travailleur désactivé");
       if (blockingReasons.length) {
         return new Response(JSON.stringify({ error: `Impossible d'assigner ce travailleur — ${blockingReasons.join(", ")}. Complète sa vérification d'abord.` }), { status: 400, headers: corsHeaders });
       }
