@@ -171,9 +171,12 @@
         <p class="subtitle" id="owner-subtitle">Chargement...</p>
         <div class="metrics">
           <div class="metric"><div class="label">Revenus encaissés (mois en cours)</div><div class="val" id="m-revenue">—</div></div>
+          <div class="metric"><div class="label">Dépenses (mois en cours)</div><div class="val" id="m-expenses">—</div></div>
+          <div class="metric"><div class="label">Revenu net estimé (mois en cours)</div><div class="val" id="m-net">—</div></div>
           <div class="metric flag"><div class="label">Loyers en retard</div><div class="val" id="m-late">—</div></div>
           <div class="metric"><div class="label">Unités occupées</div><div class="val" id="m-occupancy">—</div></div>
           <div class="metric flag"><div class="label">Travaux en attente d'approbation</div><div class="val" id="m-approvals">—</div></div>
+          <div class="metric flag"><div class="label">Baux se terminant sous 60 jours</div><div class="val" id="m-renewals">—</div></div>
         </div>
       </section>
 
@@ -215,8 +218,8 @@
 
       <section id="expenses" class="section">
         <div class="toolbar"><h2>Dépenses</h2></div>
-        <table><thead><tr><th>Description</th><th>Montant</th><th>Date</th></tr></thead>
-          <tbody id="expenses-body"><tr class="empty-row"><td colspan="3">Chargement...</td></tr></tbody>
+        <table><thead><tr><th>Description</th><th>Fournisseur</th><th>Catégorie</th><th>Montant</th><th>Date</th></tr></thead>
+          <tbody id="expenses-body"><tr class="empty-row"><td colspan="5">Chargement...</td></tr></tbody>
         </table>
       </section>
 
@@ -423,7 +426,7 @@ async function loadBuildings(){
     .select('*, units(*, leases(*, tenants(*), payments(*)))')
     .eq('owner_id', ownerRecord.id);
 
-  renderOverview(buildings || []);
+  await renderOverview(buildings || []);
   renderBuildingsTab(buildings || []);
   renderUnitsTab(buildings || []);
   renderPaymentsTab(buildings || []);
@@ -439,28 +442,46 @@ async function loadBuildings(){
   await loadRentals();
 }
 
-function renderOverview(buildings){
+async function renderOverview(buildings){
   const addr = buildings.map(b=>b.address).join(', ') || 'Aucun immeuble';
   document.getElementById('owner-subtitle').textContent = addr;
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().slice(0,10);
+  const renewalWindowEnd = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0,10);
+  const today = now.toISOString().slice(0,10);
 
-  let occupied = 0, total = 0, revenue = 0, late = 0;
+  let occupied = 0, total = 0, revenue = 0, late = 0, renewalsSoon = 0;
   buildings.forEach(b => (b.units||[]).forEach(u => {
     total++;
     if(u.status === 'occupied') occupied++;
-    (u.leases||[]).forEach(l => (l.payments||[]).forEach(p => {
-      const inCurrentMonth = p.due_date >= monthStart && p.due_date < monthEnd;
-      if(p.status === 'paid' && inCurrentMonth) revenue += Number(p.amount);
-      if(p.status === 'late') late++;
-    }));
+    (u.leases||[]).forEach(l => {
+      if(l.status === 'active' && l.end_date && l.end_date >= today && l.end_date <= renewalWindowEnd) renewalsSoon++;
+      (l.payments||[]).forEach(p => {
+        const inCurrentMonth = p.due_date >= monthStart && p.due_date < monthEnd;
+        if(p.status === 'paid' && inCurrentMonth) revenue += Number(p.amount);
+        if(p.status === 'late') late++;
+      });
+    });
   }));
 
+  const buildingIds = buildings.map(b => b.id);
+  let expensesThisMonth = 0;
+  if(buildingIds.length){
+    const { data: monthExpenses } = await supabaseClient
+      .from('expenses').select('amount,expense_date')
+      .in('building_id', buildingIds)
+      .gte('expense_date', monthStart).lt('expense_date', monthEnd);
+    expensesThisMonth = (monthExpenses || []).reduce((sum, e) => sum + Number(e.amount), 0);
+  }
+
   document.getElementById('m-revenue').textContent = revenue.toLocaleString('fr-CA') + ' $';
+  document.getElementById('m-expenses').textContent = expensesThisMonth.toLocaleString('fr-CA') + ' $';
+  document.getElementById('m-net').textContent = (revenue - expensesThisMonth).toLocaleString('fr-CA') + ' $';
   document.getElementById('m-late').textContent = late;
   document.getElementById('m-occupancy').textContent = occupied + ' / ' + total;
+  document.getElementById('m-renewals').textContent = renewalsSoon;
 }
 
 function renderBuildingsTab(buildings){
@@ -573,11 +594,11 @@ async function syncOwnerBankNow(connection_id){
 
 async function loadExpenses(){
   const buildingIds = (await supabaseClient.from('buildings').select('id').eq('owner_id', ownerRecord.id)).data?.map(b=>b.id) || [];
-  const { data } = await supabaseClient.from('expenses').select('*').in('building_id', buildingIds);
+  const { data } = await supabaseClient.from('expenses').select('*').in('building_id', buildingIds).order('expense_date', { ascending: false });
   const body = document.getElementById('expenses-body');
   body.innerHTML = (data && data.length)
-    ? data.map(e => `<tr><td>${esc(e.description)}</td><td>${Number(e.amount).toLocaleString('fr-CA')} $</td><td>${esc(e.expense_date)}</td></tr>`).join('')
-    : '<tr class="empty-row"><td colspan="3">Aucune dépense.</td></tr>';
+    ? data.map(e => `<tr><td>${esc(e.description)}</td><td>${esc(e.vendor_name) || '—'}</td><td>${esc(e.category) || '—'}</td><td>${Number(e.amount).toLocaleString('fr-CA')} $</td><td>${esc(e.expense_date)}</td></tr>`).join('')
+    : '<tr class="empty-row"><td colspan="5">Aucune dépense.</td></tr>';
 }
 
 async function loadWorkTab(){
