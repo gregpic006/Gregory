@@ -19,7 +19,7 @@
 // sensible exposée en retour).
 //
 // Auto-assignation : chaque prospect trouvé est assigné directement au
-// cold caller actif le moins chargé (aucune approbation admin requise
+// prospecteur téléphonique actif le moins chargé (aucune approbation admin requise
 // avant assignation, sur demande explicite).
 
 const corsHeaders = {
@@ -49,13 +49,13 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Action inconnue" }), { status: 400, headers: corsHeaders });
     }
 
-    // 1. Cold callers actifs — pas de callers actifs, pas de recherche
+    // 1. Prospecteurs téléphoniques actifs — aucun actif, pas de recherche
     // (on ne veut jamais de prospect trouvé qui reste orphelin sans suivi).
     const callersRes = await fetch(`${supabaseUrl}/rest/v1/cold_callers?active=eq.true&select=id,full_name`, { headers: adminHeaders });
     const callers = await callersRes.json().catch(() => []);
     if (!Array.isArray(callers) || callers.length === 0) {
       return new Response(
-        JSON.stringify({ ok: true, inserted: 0, note: "Aucun cold caller actif — recherche annulée." }),
+        JSON.stringify({ ok: true, inserted: 0, note: "Aucun prospecteur téléphonique actif — recherche annulée." }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }

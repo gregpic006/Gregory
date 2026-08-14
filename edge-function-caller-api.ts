@@ -1,4 +1,4 @@
-// Portail des cold callers (travailleurs autonomes de prospection
+// Portail des prospecteurs téléphoniques (travailleurs autonomes de prospection
 // téléphonique). Contrairement à crm-api.ts (réservé aux admins), cette
 // fonction sert un compte "caller" — mais elle n'ouvre AUCUNE policy RLS
 // sur prospects (qui reste verrouillée au rôle service_role, voir
@@ -7,7 +7,7 @@
 // comme crm-api.ts le fait pour l'admin — la même donnée sensible, gardée
 // par la même discipline, juste un périmètre plus étroit.
 //
-// Un cold caller ne peut PAS marquer un dossier "lost", ni modifier le coût
+// Un prospecteur téléphonique ne peut PAS marquer un dossier "lost", ni modifier le coût
 // d'acquisition — ces décisions restent à l'admin via crm-api.ts. Via
 // update_my_stage, il peut seulement faire progresser un prospect de 'new'
 // à 'contacted' ou 'interested'. La seule façon d'atteindre 'signed' est
@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     const callerRes = await fetch(`${supabaseUrl}/rest/v1/cold_callers?user_id=eq.${userId}&select=id,full_name,active`, { headers: adminHeaders });
     const [caller] = await callerRes.json().catch(() => [null]);
     if (!caller || !caller.active) {
-      return new Response(JSON.stringify({ error: "Accès refusé — compte cold caller introuvable ou désactivé" }), { status: 403, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "Accès refusé — compte de prospecteur téléphonique introuvable ou désactivé" }), { status: 403, headers: corsHeaders });
     }
     const callerId = caller.id;
 
@@ -203,7 +203,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
     if (action === "update_my_stage") {
       const { prospect_id, stage } = body;
       if (!prospect_id || !CALLER_ALLOWED_STAGES.includes(stage)) {
-        return new Response(JSON.stringify({ error: "Statut invalide pour un cold caller" }), { status: 400, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: "Statut invalide pour un prospecteur téléphonique" }), { status: 400, headers: corsHeaders });
       }
       const prospRes = await fetch(`${supabaseUrl}/rest/v1/prospects?id=eq.${prospect_id}&select=assigned_caller_id`, { headers: adminHeaders });
       const [prospect] = await prospRes.json();
@@ -217,7 +217,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
-    // Un cold caller crée lui-même le compte propriétaire quand un
+    // Un prospecteur téléphonique crée lui-même le compte propriétaire quand un
     // prospect accepte de devenir client au téléphone — pas besoin
     // d'attendre l'admin. Si prospect_id est fourni, il doit être assigné
     // à cet appelant ; le prospect passe alors à l'étape "signed" et

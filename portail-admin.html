@@ -162,7 +162,7 @@
   </div>
 
   <h1 style="margin-top:40px;font-size:22px;">Comptes de démonstration</h1>
-  <p class="subtitle" style="margin-bottom:16px;">Un accès de connexion permanent à chacun des 4 portails (propriétaire, locataire, cold caller, travailleur) sur un immeuble/unité fictifs partagés — pour tester sans repasser par les formulaires ci-dessus à chaque fois. Le travailleur démo est auto-vérifié et couvre la même zone que l'immeuble démo, pour que le dispatch automatique trouve un candidat tout de suite.</p>
+  <p class="subtitle" style="margin-bottom:16px;">Un accès de connexion permanent à chacun des 4 portails (propriétaire, locataire, prospecteur téléphonique, travailleur) sur un immeuble/unité fictifs partagés — pour tester sans repasser par les formulaires ci-dessus à chaque fois. Le travailleur démo est auto-vérifié et couvre la même zone que l'immeuble démo, pour que le dispatch automatique trouve un candidat tout de suite.</p>
   <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:32px;">
     <button onclick="seedDemoAccounts()" id="seed-demo-btn" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Créer / régénérer mes 4 accès de démo</button>
     <p style="font-size:11.5px;color:var(--muted);margin-top:8px;">Ré-appuyer sur ce bouton ne crée pas de doublons — ça régénère simplement le mot de passe des comptes démo existants.</p>
@@ -369,7 +369,7 @@
     <button onclick="createProspect()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter un prospect</button>
   </div>
 
-  <table><thead><tr><th>Prospect</th><th class="num">Portes</th><th class="num">Revenu potentiel/mois</th><th>Intérêt</th><th>Statut</th><th class="num">Complétude</th><th class="num">Prob. signature</th><th>Prochain geste</th><th>Prochain suivi</th><th>Cold caller</th><th></th></tr></thead>
+  <table><thead><tr><th>Prospect</th><th class="num">Portes</th><th class="num">Revenu potentiel/mois</th><th>Intérêt</th><th>Statut</th><th class="num">Complétude</th><th class="num">Prob. signature</th><th>Prochain geste</th><th>Prochain suivi</th><th>Prospecteur</th><th></th></tr></thead>
     <tbody id="prospects-body"><tr class="empty-row"><td colspan="11">Chargement...</td></tr></tbody>
   </table>
 
@@ -378,7 +378,7 @@
     <span id="find-prospects-msg" style="font-size:12.5px;color:var(--muted);"></span>
   </div>
 
-  <h1 style="margin-top:40px;font-size:22px;">Cold callers — prospection téléphonique</h1>
+  <h1 style="margin-top:40px;font-size:22px;">Prospecteurs téléphoniques</h1>
   <p class="subtitle" style="margin-bottom:16px;">Comptes des travailleurs autonomes qui font de la prospection par téléphone — ils voient uniquement les prospects qui leur sont assignés ci-dessus</p>
 
   <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
@@ -389,7 +389,7 @@
   </div>
   <p id="cc-msg" style="font-size:12.5px;margin-top:-8px;margin-bottom:16px;"></p>
 
-  <table><thead><tr><th>Cold caller</th><th class="num">Prospects assignés</th><th>Répartition</th><th class="num">Appels (7j)</th><th>Statut</th><th></th></tr></thead>
+  <table><thead><tr><th>Prospecteur</th><th class="num">Prospects assignés</th><th>Répartition</th><th class="num">Appels (7j)</th><th>Statut</th><th></th></tr></thead>
     <tbody id="callers-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
   </table>
 
@@ -871,13 +871,13 @@ const auditActionLabel = {
   'work_order.worker_reported_done': 'Travailleur : travail signalé terminé', 'work_order.worker_accepted': 'Travailleur : assignation acceptée',
   'work_order.worker_declined': 'Travailleur : assignation refusée', 'work_order.worker_propose_time': 'Travailleur : autre heure proposée',
   'work_order.worker_request_info': 'Travailleur : informations demandées',
-  'prospect.caller_assigned': 'Prospect assigné à un cold caller', 'cold_caller.create': 'Cold caller créé',
-  'cold_caller.reactivated': 'Cold caller réactivé', 'cold_caller.deactivated': 'Cold caller désactivé',
-  'cold_caller.login_reset': 'Mot de passe cold caller réinitialisé',
-  'prospect.call_logged_by_caller': 'Appel loggé par un cold caller', 'prospect.stage_change_by_caller': 'Statut prospect modifié par un cold caller',
+  'prospect.caller_assigned': 'Prospect assigné à un prospecteur téléphonique', 'cold_caller.create': 'Prospecteur téléphonique créé',
+  'cold_caller.reactivated': 'Prospecteur téléphonique réactivé', 'cold_caller.deactivated': 'Prospecteur téléphonique désactivé',
+  'cold_caller.login_reset': 'Mot de passe du prospecteur téléphonique réinitialisé',
+  'prospect.call_logged_by_caller': 'Appel loggé par un prospecteur téléphonique', 'prospect.stage_change_by_caller': 'Statut prospect modifié par un prospecteur téléphonique',
   'prospect.ai_found_and_assigned': 'Prospect trouvé par l\'IA et assigné',
-  'cold_caller.delete': 'Cold caller supprimé', 'admin.impersonate': 'Accès à un portail client généré (admin)',
-  'owner.create_by_caller': 'Propriétaire créé par un cold caller',
+  'cold_caller.delete': 'Prospecteur téléphonique supprimé', 'admin.impersonate': 'Accès à un portail client généré (admin)',
+  'owner.create_by_caller': 'Propriétaire créé par un prospecteur téléphonique',
   'worker.pro_verified': 'Dossier Portail Pro approuvé', 'worker.pro_rejected': 'Dossier Portail Pro refusé',
   'worker.self_registered': "Travailleur inscrit lui-même (Portail Pro)",
   'service_catalog.create': 'Entrée de catalogue de services créée',
@@ -892,7 +892,7 @@ const auditEntityLabel = {
   bank_connections: 'Connexions bancaires', bank_transactions: 'Transactions bancaires', visits: 'Visites',
   company_settings: "Paramètres de l'entreprise", invoices: 'Factures', pad_authorizations: 'Autorisations de prélèvement',
   privacy_incidents: 'Incidents de confidentialité', personal_data_requests: "Demandes d'accès/rectification",
-  cold_callers: 'Cold callers',
+  cold_callers: 'Prospecteurs téléphoniques',
   autre: 'Autre',
 };
 
@@ -1734,7 +1734,7 @@ async function loadCallers(){
   callersDirectory = data?.callers || [];
   const body = document.getElementById('callers-body');
   if(!callersDirectory.length){
-    body.innerHTML = '<tr class="empty-row"><td colspan="6">Aucun cold caller.</td></tr>';
+    body.innerHTML = '<tr class="empty-row"><td colspan="6">Aucun prospecteur téléphonique.</td></tr>';
     return;
   }
   const stageAbbrev = { new:'nouveau', contacted:'contacté', interested:'intéressé', proposal_sent:'proposition', signed:'signé', lost:'perdu' };
@@ -1848,10 +1848,10 @@ async function createColdCaller(){
 }
 
 async function resetCallerLogin(caller_id){
-  if(!confirm('Régénérer un mot de passe temporaire pour ce cold caller ?')) return;
+  if(!confirm('Régénérer un mot de passe temporaire pour ce prospecteur téléphonique ?')) return;
   const res = await callOnboardingApi({ action: 'reset_cold_caller_login', caller_id });
   if(res?.error){ alert('Erreur : ' + res.error); return; }
-  alert(`Nouveau mot de passe temporaire pour ${res.email} :\n\n${res.temp_password}\n\nCommunique-le manuellement au cold caller (le courriel de bienvenue n'est pas renvoyé automatiquement ici).`);
+  alert(`Nouveau mot de passe temporaire pour ${res.email} :\n\n${res.temp_password}\n\nCommunique-le manuellement au prospecteur téléphonique (le courriel de bienvenue n'est pas renvoyé automatiquement ici).`);
 }
 
 function deleteColdCallerFromButton(btn){

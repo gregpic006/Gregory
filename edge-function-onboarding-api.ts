@@ -551,7 +551,7 @@ Deno.serve(async (req) => {
       let emailSent = false;
       let emailError: string | null = null;
       try {
-        const emailRes = await sendEmail(email, "Bienvenue sur Portail — ton accès cold caller",
+        const emailRes = await sendEmail(email, "Bienvenue sur Portail — ton accès prospection téléphonique",
           `Bonjour ${full_name},\n\nTon compte Portail pour la prospection téléphonique est prêt.\n\nPortail : ${CALLER_PORTAL_URL}\nCourriel : ${email}\nMot de passe temporaire : ${password}\n\nConnecte-toi pour voir ta file d'appels et logger tes appels. Tu peux changer ton mot de passe via "Mot de passe oublié" sur la page de connexion.\n\nL'équipe Portail`);
         emailSent = emailRes.ok;
         if (!emailRes.ok) {
@@ -566,7 +566,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, caller_id: caller?.id, temp_password: password, email_sent: emailSent, email_error: emailError }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Régénère un mot de passe temporaire pour un cold caller déjà créé —
+    // Régénère un mot de passe temporaire pour un prospecteur téléphonique déjà créé —
     // filet de sécurité si le courriel de bienvenue n'a jamais été reçu
     // (voir la note dans create_cold_caller). Contrairement à
     // update_owner_login, ne change pas le courriel de connexion.
@@ -578,7 +578,7 @@ Deno.serve(async (req) => {
       const callerRes = await fetch(`${supabaseUrl}/rest/v1/cold_callers?id=eq.${caller_id}&select=id,user_id,email,full_name`, { headers: adminHeaders });
       const [caller] = await callerRes.json().catch(() => [null]);
       if (!caller || !caller.user_id) {
-        return new Response(JSON.stringify({ error: "Cold caller ou compte introuvable" }), { status: 404, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: "Prospecteur téléphonique ou compte introuvable" }), { status: 404, headers: corsHeaders });
       }
       const password = randomPassword();
       const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users/${caller.user_id}`, {
@@ -594,7 +594,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, email: caller.email, temp_password: password }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Supprime complètement un cold caller (dossier + compte Auth), sur le
+    // Supprime complètement un prospecteur téléphonique (dossier + compte Auth), sur le
     // modèle de delete_owner_completely. Les prospects qui lui étaient
     // assignés ne sont pas supprimés — juste désassignés (ils redeviennent
     // visibles pour l'admin, à réassigner à quelqu'un d'autre au besoin).
@@ -606,7 +606,7 @@ Deno.serve(async (req) => {
       const callerRes = await fetch(`${supabaseUrl}/rest/v1/cold_callers?id=eq.${caller_id}&select=id,user_id,full_name`, { headers: adminHeaders });
       const [caller] = await callerRes.json().catch(() => [null]);
       if (!caller) {
-        return new Response(JSON.stringify({ error: "Cold caller introuvable" }), { status: 404, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: "Prospecteur téléphonique introuvable" }), { status: 404, headers: corsHeaders });
       }
 
       await fetch(`${supabaseUrl}/rest/v1/prospects?assigned_caller_id=eq.${caller_id}`, {
@@ -618,7 +618,7 @@ Deno.serve(async (req) => {
       });
       const deletedRows = await deleteRes.json().catch(() => []);
       if (!deleteRes.ok) {
-        return new Response(JSON.stringify({ error: "Impossible de supprimer le dossier cold caller" }), { status: 500, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: "Impossible de supprimer le dossier du prospecteur téléphonique" }), { status: 500, headers: corsHeaders });
       }
       if (caller.user_id) {
         await fetch(`${supabaseUrl}/auth/v1/admin/users/${caller.user_id}`, { method: "DELETE", headers: adminHeaders }).catch(() => null);
@@ -638,14 +638,14 @@ Deno.serve(async (req) => {
     }
 
     // Permet à l'admin d'ouvrir, en un clic depuis son propre tableau de
-    // bord, le portail exact d'un propriétaire/locataire/cold caller —
+    // bord, le portail exact d'un propriétaire/locataire/prospecteur téléphonique —
     // sans connaître son mot de passe. Génère un lien magique Supabase à
     // usage unique (redirige vers le bon portail avec une session déjà
     // ouverte pour ce compte) plutôt qu'une vraie connexion : le mot de
     // passe du client n'est jamais consulté ni modifié. Chaque génération
     // est consignée à l'audit, avant même que le lien soit utilisé.
     // Crée en un clic un compte de démonstration pour chacun des 4 rôles
-    // (propriétaire, locataire, cold caller, travailleur) sur un immeuble/
+    // (propriétaire, locataire, prospecteur téléphonique, travailleur) sur un immeuble/
     // unité fictifs partagés — pour accéder à chaque portail directement
     // avec un vrai mot de passe permanent, sans repasser par tous les
     // formulaires d'onboarding un par un à chaque fois. Idempotent : repéré
@@ -736,7 +736,7 @@ Deno.serve(async (req) => {
         if (!existingCaller) {
           await fetch(`${supabaseUrl}/rest/v1/cold_callers`, {
             method: "POST", headers: adminHeaders,
-            body: JSON.stringify({ user_id: callerAuth.id, full_name: "Cold Caller Démo", email: "demo-cold-caller@portailgestion.ca" }),
+            body: JSON.stringify({ user_id: callerAuth.id, full_name: "Prospecteur Démo", email: "demo-cold-caller@portailgestion.ca" }),
           });
         }
 
@@ -771,7 +771,7 @@ Deno.serve(async (req) => {
           accounts: [
             { role: "Propriétaire", email: "demo-proprietaire@portailgestion.ca", temp_password: ownerAuth.password, portal_url: OWNER_PORTAL_URL },
             { role: "Locataire", email: "demo-locataire@portailgestion.ca", temp_password: tenantAuth.password, portal_url: TENANT_PORTAL_URL },
-            { role: "Cold caller", email: "demo-cold-caller@portailgestion.ca", temp_password: callerAuth.password, portal_url: CALLER_PORTAL_URL },
+            { role: "Prospecteur téléphonique", email: "demo-cold-caller@portailgestion.ca", temp_password: callerAuth.password, portal_url: CALLER_PORTAL_URL },
             { role: "Travailleur", email: "demo-travailleur@portailgestion.ca", temp_password: workerAuth.password, portal_url: WORKER_PORTAL_URL },
           ],
         }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });

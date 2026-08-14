@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Portail cold caller</title>
+<title>Portail — Prospection téléphonique</title>
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png">
 <meta name="robots" content="noindex, nofollow">
@@ -99,7 +99,7 @@
 <div id="login-screen">
   <div class="login-box">
     <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
-    <div class="sub">Espace cold caller</div>
+    <div class="sub">Espace prospection téléphonique</div>
     <div class="f"><label>Courriel</label><input type="email" id="login-email"></div>
     <div class="f"><label>Mot de passe</label><input type="password" id="login-password"></div>
     <button onclick="handleLogin()">Se connecter</button>
@@ -130,7 +130,7 @@
   <div class="shell">
     <aside>
       <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
-      <span class="brand-sub">Espace cold caller</span>
+      <span class="brand-sub">Espace prospection téléphonique</span>
       <button class="tab-btn active" data-tab="queue" onclick="showTab('queue')">Ma file d'appels</button>
       <button class="tab-btn" data-tab="new-client" onclick="showTab('new-client')">+ Nouveau client</button>
       <div class="signout">
@@ -276,7 +276,7 @@ async function loadCallerDashboard(userId){
     .from('cold_callers').select('*').eq('user_id', userId).single();
 
   if(error || !caller){
-    showLoginError("Aucun profil cold caller associé à ce compte.");
+    showLoginError("Aucun profil de prospecteur téléphonique associé à ce compte.");
     return;
   }
   if(!caller.active){
