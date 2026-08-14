@@ -911,7 +911,20 @@ const auditActionLabel = {
   'service_catalog.create': 'Entrée de catalogue de services créée',
   'work_order.dispatched': 'Travail diffusé aux travailleurs admissibles', 'work_order.dispatch_escalated_to_admin': 'Dispatch escaladé à l\'admin',
   'work_order.dispatch_no_eligible_workers': 'Aucun travailleur admissible pour la diffusion', 'work_order.auto_dispatch_started': 'Dispatch automatique démarré',
-  'work_order.worker_accepted_offer': 'Travailleur : offre acceptée',
+  'work_order.worker_accepted_offer': 'Travailleur : offre acceptée', 'work_order.all_workers_declined': 'Tous les travailleurs ont refusé le travail',
+  'dissatisfaction.escalated': "Signal d'insatisfaction escaladé", 'dissatisfaction.resolved': "Signal d'insatisfaction résolu",
+  'onboarding.reminder_sent': 'Rappel de dossier incomplet envoyé (auto)', 'onboarding.reminder_sent_manual': 'Rappel de dossier incomplet envoyé (manuel)',
+  'payment_reminder_escalated': 'Rappel de loyer escaladé à un humain',
+  'prospect.call_corrected': 'Appel de prospect corrigé',
+  'repair_case.tenant_confirmed': 'Locataire : réparation confirmée réglée', 'repair_case.tenant_reopened': 'Locataire : dossier de réparation rouvert',
+  'safety_override_triggered': 'Consigne de sécurité déterministe déclenchée',
+  'worker.document_uploaded': 'Document de travailleur téléversé', 'worker.profile_updated': 'Profil travailleur mis à jour',
+  'worker.reactivated': 'Travailleur réactivé', 'worker.deactivated': 'Travailleur désactivé',
+  'automation_rule.created': "Règle d'automatisation créée", 'automation_rule.deleted': "Règle d'automatisation supprimée",
+  'automation_rule.activated': "Règle d'automatisation activée", 'automation_rule.deactivated': "Règle d'automatisation désactivée",
+  'expense.create_from_ai_receipt': "Dépense créée à partir d'une facture lue par IA",
+  'lease_renewal.signed_by_tenant': 'Bail signé électroniquement par le locataire',
+  'admin.seed_demo_accounts': 'Comptes de démonstration créés/régénérés',
 };
 const auditEntityLabel = {
   owners: 'Propriétaires', buildings: 'Immeubles', units: 'Unités', tenants: 'Locataires',
@@ -921,6 +934,8 @@ const auditEntityLabel = {
   company_settings: "Paramètres de l'entreprise", invoices: 'Factures', pad_authorizations: 'Autorisations de prélèvement',
   privacy_incidents: 'Incidents de confidentialité', personal_data_requests: "Demandes d'accès/rectification",
   cold_callers: 'Prospecteurs téléphoniques',
+  dissatisfaction_signals: "Signaux d'insatisfaction", documents: 'Documents', financial_anomalies: 'Anomalies financières',
+  automation_rules: "Règles d'automatisation", expenses: 'Dépenses', service_catalog: 'Catalogue de services', users: 'Comptes utilisateurs',
   autre: 'Autre',
 };
 
@@ -1132,7 +1147,7 @@ async function loadInvoices(){
   }
   container.innerHTML = invoices.map(inv => `
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:12px 16px;margin-bottom:8px;font-size:13px;">
-      <b>${esc(inv.invoice_number)}</b> — ${esc(inv.owners?.full_name) ?? ''} — ${esc(inv.period_start)} au ${esc(inv.period_end)}
+      <b>${esc(inv.invoice_number)}</b> — ${esc(inv.owners?.full_name) || ''} — ${esc(inv.period_start)} au ${esc(inv.period_end)}
       <div style="color:var(--muted);font-size:12px;margin-top:4px;">
         Frais de gestion : ${Number(inv.management_fee_amount).toLocaleString('fr-CA')} $ · Coordination : ${Number(inv.coordination_fees_amount).toLocaleString('fr-CA')} $
         ${Number(inv.gst_amount) > 0 ? ` · TPS : ${Number(inv.gst_amount).toLocaleString('fr-CA')} $` : ''}${Number(inv.qst_amount) > 0 ? ` · TVQ : ${Number(inv.qst_amount).toLocaleString('fr-CA')} $` : ''}
@@ -1168,7 +1183,7 @@ async function loadPadAuthorizations(){
   const padStatusColor = { pending: 'var(--muted)', active: 'var(--sage)', revoked: 'var(--rust)' };
   container.innerHTML = authorizations.map(a => `
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:12px 16px;margin-bottom:8px;font-size:13px;">
-      <b>${esc(a.owners?.full_name) ?? ''}</b> — <span style="color:${padStatusColor[a.status] || 'var(--muted)'};font-weight:600;">${padStatusLabel[a.status] || esc(a.status)}</span>
+      <b>${esc(a.owners?.full_name) || ''}</b> — <span style="color:${padStatusColor[a.status] || 'var(--muted)'};font-weight:600;">${padStatusLabel[a.status] || esc(a.status)}</span>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">
         ${a.consent_method ? esc(a.consent_method) + ' — ' : ''}${a.consented_at ? 'consenti le ' + new Date(a.consented_at).toLocaleDateString('fr-CA') : ''}
         ${a.processor ? ' · Fournisseur : ' + esc(a.processor) : ''}
@@ -1494,7 +1509,7 @@ async function loadLatePaymentsAdmin(){
     return `
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">
       <div>
-        <b style="display:block;margin-bottom:4px;">${esc(tenant?.full_name) ?? ''} — ${esc(unit?.buildings?.address) ?? ''}, unité ${esc(unit?.unit_number) ?? ''}</b>
+        <b style="display:block;margin-bottom:4px;">${esc(tenant?.full_name) || ''} — ${esc(unit?.buildings?.address) || ''}, unité ${esc(unit?.unit_number) || ''}</b>
         <span style="font-size:12.5px;color:var(--muted);">${Number(p.amount).toLocaleString('fr-CA')} $ dû le ${esc(p.due_date)} — ${statusBadge}</span>
       </div>
       <button onclick="togglePaymentPause('${p.id}', ${!p.reminder_paused})" style="background:${p.reminder_paused ? 'var(--ink)' : 'transparent'};color:${p.reminder_paused ? 'var(--paper)' : 'var(--ink)'};border:1px solid var(--ink);padding:8px 14px;font-size:12.5px;cursor:pointer;">
@@ -1530,7 +1545,7 @@ async function loadServiceRequestsAdmin(){
       ${sr.safety_override ? `<div style="background:#c0392b;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;display:inline-block;margin-bottom:8px;">⚠ URGENCE SÉCURITÉ — ${esc((sr.safety_flags || []).join(', '))}</div>` : ''}
       ${sr.pending_reassessment ? `<div style="background:#8a5fb0;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;display:inline-block;margin-bottom:8px;">↻ REFUSÉ PAR LE PROPRIÉTAIRE — nouvelle soumission requise d'ici le ${esc(sr.reassessment_due || '—')}</div>` : ''}
       ${(!sr.safety_override && sr.ai_needs_review) ? `<div style="background:#e6a817;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;display:inline-block;margin-bottom:8px;">🔎 À VALIDER PAR UN HUMAIN${sr.ai_confidence != null ? ' — confiance IA ' + Math.round(sr.ai_confidence) + '%' : ''}</div>` : ''}
-      <b style="display:block;margin-bottom:4px;">${esc(sr.tenants?.full_name) ?? ''} — ${esc(sr.units?.buildings?.address) ?? ''}, unité ${esc(sr.units?.unit_number) ?? ''}</b>
+      <b style="display:block;margin-bottom:4px;">${esc(sr.tenants?.full_name) || ''} — ${esc(sr.units?.buildings?.address) || ''}, unité ${esc(sr.units?.unit_number) || ''}</b>
       <span style="font-size:12.5px;color:var(--muted);display:block;">${esc(sr.description)}</span>
       ${photoLinksHtml('service-request-photos', sr.photo_urls, 'Photos du locataire')}
       ${sr.ai_category ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.6;">
@@ -1601,7 +1616,7 @@ async function loadWorkOrdersAdmin(){
   const statusLabel = { open:'Ouvert', assigned:'Assigné', in_progress:'En cours' };
   container.innerHTML = orders.map(wo => `
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
-      <b style="display:block;margin-bottom:4px;">${esc(wo.units?.buildings?.address) ?? ''}, unité ${esc(wo.units?.unit_number) ?? ''} — ${esc(wo.description)}</b>
+      <b style="display:block;margin-bottom:4px;">${esc(wo.units?.buildings?.address) || ''}, unité ${esc(wo.units?.unit_number) || ''} — ${esc(wo.description)}</b>
       <span style="font-size:12.5px;color:var(--muted);">Travailleur : ${wo.workers?.name != null ? esc(wo.workers.name) : '—'} (${wo.workers?.phone != null ? esc(wo.workers.phone) : '—'}) — Paie : ${wo.worker_pay != null ? Number(wo.worker_pay).toLocaleString('fr-CA') + ' $' : '—'} + 10% coordination — Statut : ${statusLabel[wo.status] || esc(wo.status)}</span>
       ${wo.worker_reported_done_at ? `<div style="background:#e8f0e6;border-left:2px solid var(--sage);padding:8px 10px;margin-top:8px;font-size:12.5px;">✓ Travailleur : travail signalé terminé le ${new Date(wo.worker_reported_done_at).toLocaleString('fr-CA')}${wo.worker_completion_note ? '<br><b>Note :</b> ' + esc(wo.worker_completion_note) : ''}</div>` : ''}
       ${photoLinksHtml('service-request-photos', wo.photo_before_urls, 'Photos avant')}
@@ -2065,7 +2080,7 @@ async function loadFlinksConnections(){
   const statusColor = { active: 'var(--sage)', error: 'var(--rust)', disconnected: 'var(--muted)' };
   container.innerHTML = connections.map(c => `
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
-      <b style="display:block;margin-bottom:4px;">${esc(c.owners?.full_name) ?? ''} — ${esc(c.institution_name) || 'Institution inconnue'}</b>
+      <b style="display:block;margin-bottom:4px;">${esc(c.owners?.full_name) || ''} — ${esc(c.institution_name) || 'Institution inconnue'}</b>
       <span style="font-size:12.5px;color:${statusColor[c.status] || 'var(--muted)'};font-weight:600;">${statusLabel[c.status] || esc(c.status)}</span>
       <span style="font-size:12.5px;color:var(--muted);"> — dernière synchro : ${c.last_synced_at ? new Date(c.last_synced_at).toLocaleString('fr-CA') : 'jamais'}</span>
       ${c.last_sync_error ? `<div style="font-size:12px;color:var(--rust);margin-top:4px;">${esc(c.last_sync_error)}</div>` : ''}
