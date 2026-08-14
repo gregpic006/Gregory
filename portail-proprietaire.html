@@ -159,6 +159,7 @@
       <button class="tab-btn" data-tab="documents" onclick="showTab('documents')">Documents</button>
       <button class="tab-btn" data-tab="messages" onclick="showTab('messages')">Messages</button>
       <button class="tab-btn" data-tab="reports" onclick="showTab('reports')">Rapports mensuels</button>
+      <button class="tab-btn" data-tab="copilot" onclick="showTab('copilot')">Copilot</button>
       <div class="signout">
         <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
       </div>
@@ -284,6 +285,19 @@
         <div class="toolbar" style="margin-top:32px;"><h2>Factures — frais de gestion Portail</h2></div>
         <p style="color:var(--muted);font-size:13.5px;margin-bottom:14px;">Frais de gestion et de coordination des travaux, déjà déduits du montant net qui te revient chaque mois — voici le détail formel pour ta comptabilité.</p>
         <div id="invoices-body-owner"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+      </section>
+
+      <section id="copilot" class="section">
+        <div class="toolbar"><h2>Copilot financier</h2></div>
+        <p style="color:var(--muted);font-size:13.5px;margin-bottom:14px;">Pose une question sur tes revenus, tes dépenses ou tes travaux — les réponses sont calculées à partir de tes vraies données des 24 derniers mois, jamais inventées.</p>
+        <div class="wo-form open" style="margin-bottom:16px;">
+          <div class="f" style="flex:1;"><label>Ta question</label>
+            <input type="text" id="copilot-question" placeholder="Ex. : Combien j'ai dépensé en plomberie cet été ?" onkeydown="if(event.key==='Enter') askFinances();">
+          </div>
+          <button onclick="askFinances()" id="copilot-ask-btn">Demander</button>
+        </div>
+        <div id="copilot-answer" style="white-space:pre-wrap;font-size:14px;line-height:1.6;padding:14px;background:var(--paper-2);border:1px solid var(--line);min-height:40px;color:var(--ink);"></div>
+        <p style="color:var(--muted);font-size:12px;margin-top:10px;">Exemples : « Quel est mon revenu total ce mois-ci ? » · « Combien de paiements en retard depuis le début de l'année ? » · « Quel immeuble me coûte le plus cher en entretien ? »</p>
       </section>
     </main>
   </div>
@@ -762,6 +776,30 @@ async function askDocuments(){
     answerEl.textContent = text;
   } catch (e) {
     answerEl.textContent = 'Erreur de communication avec l\'assistant.';
+  }
+}
+
+async function askFinances(){
+  const question = document.getElementById('copilot-question').value.trim();
+  const answerEl = document.getElementById('copilot-answer');
+  if(!question) return;
+  answerEl.textContent = 'Calcul en cours…';
+
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/ask-finances`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ question }),
+    });
+    const data = await res.json();
+    answerEl.textContent = data.answer || data.error || 'Aucune réponse.';
+  } catch (e) {
+    answerEl.textContent = 'Erreur de communication avec le Copilot.';
   }
 }
 
