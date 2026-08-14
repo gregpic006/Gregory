@@ -347,6 +347,34 @@
     </div>
   </div>
 
+  <h1 style="margin-top:40px;font-size:22px;">Automatisations (Studio)</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Fondation du moteur de règles — déclencheurs déterministes seulement (pas d'IA dans ce moteur). Chaque règle se déclenche une seule fois par dossier concerné, jamais en boucle.</p>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom de la règle</label><input type="text" id="ar-name" placeholder="Ex: Alerte retard 5 jours" style="padding:8px;border:1px solid var(--line);width:220px;"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Déclencheur</label>
+      <select id="ar-trigger" style="padding:8px;border:1px solid var(--line);">
+        <option value="retard_loyer">Loyer en retard depuis N jours</option>
+        <option value="bail_echeance">Bail se terminant dans N jours</option>
+      </select>
+    </div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">N (jours)</label><input type="number" id="ar-threshold" value="5" style="padding:8px;border:1px solid var(--line);width:70px;"></div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Action</label>
+      <select id="ar-action" style="padding:8px;border:1px solid var(--line);" onchange="document.getElementById('ar-message-wrap').style.display = this.value === 'envoyer_rappel_email' ? 'block' : 'none';">
+        <option value="notifier_admin">Notifier l'admin (journal d'audit)</option>
+        <option value="envoyer_rappel_email">Envoyer un courriel au locataire</option>
+      </select>
+    </div>
+    <button onclick="createAutomationRule()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Créer la règle</button>
+    <div id="ar-message-wrap" style="display:none;width:100%;">
+      <label style="display:block;font-size:11px;color:var(--muted);margin:8px 0 4px;">Message du courriel (rédigé par toi — jamais généré par l'IA)</label>
+      <textarea id="ar-message" placeholder="Ex: Nous constatons que votre loyer est en retard. Merci de régulariser votre situation ou de nous contacter rapidement." style="width:100%;padding:8px;border:1px solid var(--line);min-height:70px;font-family:'Inter',sans-serif;"></textarea>
+    </div>
+  </div>
+  <p id="ar-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
+  <table><thead><tr><th>Règle</th><th>Déclencheur</th><th>Action</th><th>Déclenchements</th><th>Statut</th><th></th></tr></thead>
+    <tbody id="automation-rules-body"><tr class="empty-row"><td colspan="6">Chargement...</td></tr></tbody>
+  </table>
+
   <h1 style="margin-top:40px;font-size:22px;">Anomalies financières</h1>
   <p class="subtitle" style="margin-bottom:16px;">Détection automatique — factures en double, dépassements, écarts de loyer, reçus manquants</p>
   <table><thead><tr><th>Type</th><th>Client</th><th>Description</th><th>Sévérité</th><th></th></tr></thead>
@@ -967,6 +995,60 @@ async function callOpsApi(payload){
   return data;
 }
 
+const triggerLabel = { retard_loyer: "Loyer en retard", bail_echeance: "Bail se termine bientôt" };
+const actionLabel = { notifier_admin: "Notifier l'admin", envoyer_rappel_email: "Courriel au locataire" };
+
+async function loadAutomationRules(){
+  const data = await callOpsApi({ action: 'list_automation_rules' });
+  const body = document.getElementById('automation-rules-body');
+  const rules = data?.rules || [];
+  body.innerHTML = rules.length ? rules.map(r => `
+    <tr>
+      <td>${esc(r.name)}</td>
+      <td>${esc(triggerLabel[r.trigger_type] || r.trigger_type)} (${r.threshold_days} j)</td>
+      <td>${esc(actionLabel[r.action_type] || r.action_type)}</td>
+      <td>${r.run_count}</td>
+      <td>${r.active ? 'Active' : 'Désactivée'}</td>
+      <td>
+        <button onclick="toggleAutomationRule('${r.id}', ${!r.active})" style="border:1px solid var(--ink);background:none;padding:5px 10px;font-size:11.5px;cursor:pointer;margin-right:6px;">${r.active ? 'Désactiver' : 'Activer'}</button>
+        <button onclick="deleteAutomationRule('${r.id}')" style="border:1px solid var(--rust);color:var(--rust);background:none;padding:5px 10px;font-size:11.5px;cursor:pointer;">Supprimer</button>
+      </td>
+    </tr>
+  `).join('') : '<tr class="empty-row"><td colspan="6">Aucune règle créée.</td></tr>';
+}
+
+async function createAutomationRule(){
+  const name = document.getElementById('ar-name').value.trim();
+  const trigger_type = document.getElementById('ar-trigger').value;
+  const threshold_days = document.getElementById('ar-threshold').value;
+  const action_type = document.getElementById('ar-action').value;
+  const action_message = document.getElementById('ar-message').value.trim();
+  const msgEl = document.getElementById('ar-msg');
+  if(!name){ msgEl.textContent = 'Le nom de la règle est requis.'; return; }
+  if(action_type === 'envoyer_rappel_email' && !action_message){ msgEl.textContent = 'Le message du courriel est requis pour cette action.'; return; }
+
+  const res = await callOpsApi({ action: 'create_automation_rule', name, trigger_type, threshold_days, action_type, action_message });
+  if(res?.ok){
+    msgEl.textContent = 'Règle créée.';
+    document.getElementById('ar-name').value = '';
+    document.getElementById('ar-message').value = '';
+    await loadAutomationRules();
+  } else {
+    msgEl.textContent = 'Erreur lors de la création.';
+  }
+}
+
+async function toggleAutomationRule(rule_id, active){
+  const res = await callOpsApi({ action: 'toggle_automation_rule', rule_id, active });
+  if(res?.ok) await loadAutomationRules();
+}
+
+async function deleteAutomationRule(rule_id){
+  if(!confirm('Supprimer cette règle définitivement ?')) return;
+  const res = await callOpsApi({ action: 'delete_automation_rule', rule_id });
+  if(res?.ok) await loadAutomationRules();
+}
+
 async function callParseExpenseReceiptApi(payload){
   const { data, error } = await supabaseClient.functions.invoke('parse-expense-receipt', { body: payload });
   if(error){
@@ -1001,6 +1083,7 @@ async function loadOps(){
   await loadWorkOrdersAdmin();
   await loadLatePaymentsAdmin();
   await loadCompanySettings();
+  await loadAutomationRules();
   await loadInvoices();
 }
 

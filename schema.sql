@@ -3016,4 +3016,136 @@ create table if not exists lease_signatures (
 -- c'est un accès public, exactement comme confirmer-reparation.html).
 alter table lease_signatures enable row level security;
 
+-- ============ AUTOMATIONS / STUDIO — MOTEUR DE RÈGLES (FONDATION) ============
+-- Fondation volontairement restreinte à un catalogue FERMÉ de
+-- déclencheurs déterministes (pas un bus d'événements générique ni un
+-- éditeur visuel) : les mêmes signaux déjà calculés ailleurs dans le
+-- système (retard de loyer via payments.status, échéance de bail via
+-- leases.end_date) plutôt qu'une nouvelle source de vérité. Le message
+-- envoyé au locataire est TOUJOURS rédigé par l'admin à la création de
+-- la règle (action_message) — l'IA n'intervient jamais dans ce moteur,
+-- pour rester prévisible et auditable de bout en bout.
+create table if not exists automation_rules (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  trigger_type text not null check (trigger_type in ('retard_loyer','bail_echeance')),
+  threshold_days int not null default 0,
+  action_type text not null check (action_type in ('notifier_admin','envoyer_rappel_email')),
+  action_message text,
+  active boolean not null default true,
+  created_by uuid references users(id),
+  created_at timestamptz default now()
+);
+-- Pas de policy RLS ouverte : accessible uniquement via service_role
+-- (fonction Edge "ops-api", gardée par is_admin).
+alter table automation_rules enable row level security;
+
+create table if not exists automation_rule_runs (
+  id uuid primary key default gen_random_uuid(),
+  rule_id uuid references automation_rules(id) on delete cascade,
+  entity_type text not null,
+  entity_id uuid not null,
+  fired_at timestamptz default now(),
+  result text not null default 'success' check (result in ('success','error')),
+  details jsonb
+);
+alter table automation_rule_runs enable row level security;
+-- Empêche qu'une même règle refire indéfiniment pour la même entité tant
+-- que la condition reste vraie : un seul déclenchement par règle+entité,
+-- jamais répété (contrairement aux rappels de loyer classiques qui, eux,
+-- répètent volontairement — ce moteur-ci est pour des alertes ponctuelles).
+create unique index if not exists automation_rule_runs_unique_fire
+  on automation_rule_runs (rule_id, entity_id);
+
+create or replace function execute_automation_rules()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  r record;
+  p record;
+  l record;
+begin
+  for r in select * from automation_rules where active loop
+
+    if r.trigger_type = 'retard_loyer' then
+      for p in
+        select pay.id as payment_id
+        from payments pay
+        where pay.status = 'late'
+          and pay.due_date <= (current_date - r.threshold_days * interval '1 day')
+          and not exists (
+            select 1 from automation_rule_runs
+            where rule_id = r.id and entity_id = pay.id
+          )
+      loop
+        begin
+          if r.action_type = 'notifier_admin' then
+            insert into audit_log (actor_type, actor_id, action, entity_type, entity_id, details)
+            values ('system', null, 'automation.rule_fired', 'payments', p.payment_id,
+              jsonb_build_object('rule_name', r.name, 'message', r.action_message));
+          elsif r.action_type = 'envoyer_rappel_email' then
+            perform net.http_post(
+              url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/run-automation-email',
+              body := jsonb_build_object('rule_id', r.id, 'entity_type', 'payments', 'entity_id', p.payment_id),
+              headers := jsonb_build_object(
+                'Content-Type', 'application/json',
+                'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+                'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+              )
+            );
+          end if;
+          insert into automation_rule_runs (rule_id, entity_type, entity_id, result, details)
+          values (r.id, 'payments', p.payment_id, 'success', jsonb_build_object('trigger_type', r.trigger_type));
+        exception when others then
+          insert into automation_rule_runs (rule_id, entity_type, entity_id, result, details)
+          values (r.id, 'payments', p.payment_id, 'error', jsonb_build_object('error', sqlerrm));
+        end;
+      end loop;
+
+    elsif r.trigger_type = 'bail_echeance' then
+      for l in
+        select le.id as lease_id
+        from leases le
+        where le.status = 'active'
+          and le.end_date is not null
+          and le.end_date <= (current_date + r.threshold_days * interval '1 day')
+          and not exists (
+            select 1 from automation_rule_runs
+            where rule_id = r.id and entity_id = le.id
+          )
+      loop
+        begin
+          if r.action_type = 'notifier_admin' then
+            insert into audit_log (actor_type, actor_id, action, entity_type, entity_id, details)
+            values ('system', null, 'automation.rule_fired', 'leases', l.lease_id,
+              jsonb_build_object('rule_name', r.name, 'message', r.action_message));
+          elsif r.action_type = 'envoyer_rappel_email' then
+            perform net.http_post(
+              url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/run-automation-email',
+              body := jsonb_build_object('rule_id', r.id, 'entity_type', 'leases', 'entity_id', l.lease_id),
+              headers := jsonb_build_object(
+                'Content-Type', 'application/json',
+                'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+                'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR'
+              )
+            );
+          end if;
+          insert into automation_rule_runs (rule_id, entity_type, entity_id, result, details)
+          values (r.id, 'leases', l.lease_id, 'success', jsonb_build_object('trigger_type', r.trigger_type));
+        exception when others then
+          insert into automation_rule_runs (rule_id, entity_type, entity_id, result, details)
+          values (r.id, 'leases', l.lease_id, 'error', jsonb_build_object('error', sqlerrm));
+        end;
+      end loop;
+    end if;
+
+  end loop;
+end;
+$$;
+
+select cron.schedule('execute-automation-rules', '*/30 * * * *', $$select execute_automation_rules()$$);
+
 

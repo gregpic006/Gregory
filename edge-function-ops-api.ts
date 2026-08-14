@@ -651,6 +651,83 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
+    // ---- Automations / Studio (fondation) ----
+    // Catalogue fermé de déclencheurs (pas un bus d'événements générique) :
+    // les mêmes signaux déjà calculés ailleurs (retard de loyer, échéance
+    // de bail). Le message envoyé est TOUJOURS rédigé par l'admin ici,
+    // jamais par l'IA — voir execute_automation_rules() dans schema.sql.
+    if (action === "list_automation_rules") {
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/automation_rules?select=*&order=created_at.desc`,
+        { headers: adminHeaders },
+      );
+      const rules = await res.json();
+      const runsRes = await fetch(
+        `${supabaseUrl}/rest/v1/automation_rule_runs?select=rule_id,result&order=fired_at.desc&limit=1000`,
+        { headers: adminHeaders },
+      );
+      const runs = await runsRes.json();
+      const runCounts: Record<string, number> = {};
+      for (const r of Array.isArray(runs) ? runs : []) {
+        runCounts[r.rule_id] = (runCounts[r.rule_id] || 0) + 1;
+      }
+      return new Response(JSON.stringify({
+        rules: (Array.isArray(rules) ? rules : []).map((r: any) => ({ ...r, run_count: runCounts[r.id] || 0 })),
+      }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "create_automation_rule") {
+      const { name, trigger_type, threshold_days, action_type, action_message } = body;
+      if (!name || !trigger_type || !action_type) {
+        return new Response(JSON.stringify({ error: "name, trigger_type et action_type requis" }), { status: 400, headers: corsHeaders });
+      }
+      if (!["retard_loyer", "bail_echeance"].includes(trigger_type)) {
+        return new Response(JSON.stringify({ error: "trigger_type invalide" }), { status: 400, headers: corsHeaders });
+      }
+      if (!["notifier_admin", "envoyer_rappel_email"].includes(action_type)) {
+        return new Response(JSON.stringify({ error: "action_type invalide" }), { status: 400, headers: corsHeaders });
+      }
+      if (action_type === "envoyer_rappel_email" && !action_message) {
+        return new Response(JSON.stringify({ error: "action_message requis pour envoyer_rappel_email — l'IA ne rédige jamais ce message automatiquement" }), { status: 400, headers: corsHeaders });
+      }
+      const insertRes = await fetch(`${supabaseUrl}/rest/v1/automation_rules`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({
+          name, trigger_type,
+          threshold_days: Number(threshold_days) || 0,
+          action_type, action_message: action_message || null,
+          created_by: userId,
+        }),
+      });
+      const [created] = await insertRes.json();
+      await logAudit("automation_rule.created", "automation_rules", created?.id || null, { name, trigger_type, action_type });
+      return new Response(JSON.stringify({ ok: true, rule: created }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "toggle_automation_rule") {
+      const { rule_id, active } = body;
+      if (!rule_id) {
+        return new Response(JSON.stringify({ error: "rule_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/automation_rules?id=eq.${rule_id}`, {
+        method: "PATCH", headers: adminHeaders,
+        body: JSON.stringify({ active: !!active }),
+      });
+      await logAudit(active ? "automation_rule.activated" : "automation_rule.deactivated", "automation_rules", rule_id, { active: !!active });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "delete_automation_rule") {
+      const { rule_id } = body;
+      if (!rule_id) {
+        return new Response(JSON.stringify({ error: "rule_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/automation_rules?id=eq.${rule_id}`, { method: "DELETE", headers: adminHeaders });
+      await logAudit("automation_rule.deleted", "automation_rules", rule_id, {});
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });
