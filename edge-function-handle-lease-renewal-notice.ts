@@ -5,13 +5,17 @@
 // selon la méthode réglementaire du TAL, hors de ce système). L'IA se
 // limite à rédiger la lettre à partir de faits déjà déterminés, et un
 // avertissement légal fixe (non généré par l'IA) est toujours ajouté.
-// La réponse et la signature du locataire sont enregistrées
-// manuellement par l'admin, pas via un flux public automatisé — ce
-// sont des actes à portée légale.
+// Le locataire signe désormais lui-même électroniquement via le lien
+// envoyé ci-dessous (voir handle-lease-signature.ts / signer-bail.html) —
+// décision produit confirmée le 2026-08-14. record_response reste
+// disponible pour que l'admin consigne une réponse obtenue autrement
+// (ex. verbale), mais n'est plus le chemin principal.
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const SITE_BASE_URL = "https://portailgestion.ca";
 
 const LEGAL_DISCLAIMER = "Cet avis est transmis à titre informatif dans le cadre de la gestion de votre logement. Il ne remplace pas vos droits prévus au Code civil du Québec : si vous souhaitez refuser une augmentation de loyer ou une modification des conditions du bail, vous devez aviser le propriétaire par écrit dans le délai d'un mois suivant la réception du présent avis, à défaut de quoi vous serez réputé avoir accepté. Pour toute question sur vos droits, vous pouvez consulter le Tribunal administratif du logement (tal.gouv.qc.ca).";
 
@@ -80,6 +84,9 @@ Deno.serve(async (req) => {
       if (!lease) {
         return new Response(JSON.stringify({ error: "Bail introuvable" }), { status: 404, headers: corsHeaders });
       }
+      // Un nouveau token de signature est généré à chaque envoi d'avis (y
+      // compris un renvoi) : invalide tout lien précédemment transmis.
+      const signatureToken = crypto.randomUUID();
       const tenant = lease.tenants;
       if (!tenant?.email) {
         return new Response(JSON.stringify({ error: "Aucun courriel pour ce locataire" }), { status: 400, headers: corsHeaders });
@@ -146,6 +153,14 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         }),
       }).catch((e) => console.error("Failed to write ai_run_log", e));
 
+      // La signature électronique n'a de sens que si le locataire doit
+      // manifester son accord (renouvellement, augmentation) — pas pour
+      // un non-renouvellement, qui est une simple notification.
+      const signatureUrl = `${SITE_BASE_URL}/signer-bail.html?lease=${lease_id}&token=${signatureToken}`;
+      const signatureLine = notice_type !== "non_renouvellement"
+        ? `\n\nPour confirmer votre accord, signez électroniquement ici : ${signatureUrl}`
+        : "";
+
       await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
@@ -153,7 +168,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
           from: "Portail <onboarding@mail.portailgestion.ca>",
           to: [tenant.email],
           subject: parsed.subject,
-          text: `${parsed.body}\n\n---\n${LEGAL_DISCLAIMER}`,
+          text: `${parsed.body}${signatureLine}\n\n---\n${LEGAL_DISCLAIMER}`,
         }),
       });
 
@@ -165,6 +180,9 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
           renewal_notice_type: notice_type,
           renewal_notice_amount: notice_type === "augmentation" ? Number(new_rent_amount) : null,
           renewal_deadline_missed: false,
+          renewal_signed: false,
+          renewal_signed_at: null,
+          renewal_signature_token: notice_type !== "non_renouvellement" ? signatureToken : null,
         }),
       });
 

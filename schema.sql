@@ -2982,4 +2982,38 @@ begin
 end;
 $$;
 
+-- ============ SIGNATURE ÉLECTRONIQUE — RENOUVELLEMENTS DE BAIL ============
+-- Décision produit (2026-08-14, explicitement confirmée par le client
+-- après avoir été prévenu du compromis) : le locataire signe lui-même
+-- via un lien à usage unique et c'est immédiatement final — pas de
+-- validation admin avant que le bail soit marqué signé. Ceci REMPLACE
+-- l'ancien flux "réponse enregistrée à la main par l'admin" pour la
+-- signature elle-même (record_response reste disponible pour les cas
+-- où l'admin doit consigner une réponse obtenue autrement, ex. verbale).
+-- renewal_signature_token : identifiant non devinable généré
+-- automatiquement à la création du bail, sur le même modèle que
+-- work_orders.tenant_confirmation_token. Il est invalidé (mis à null)
+-- dès qu'une signature est enregistrée, pour empêcher toute réutilisation
+-- du lien.
+alter table leases add column if not exists renewal_signature_token uuid default gen_random_uuid();
+alter table leases add column if not exists renewal_signed_at timestamptz;
+alter table leases add column if not exists renewal_signature_ip text;
+
+create table if not exists lease_signatures (
+  id uuid primary key default gen_random_uuid(),
+  lease_id uuid references leases(id) on delete cascade,
+  notice_type text,
+  signature_image text not null,   -- tracé du canvas, encodé en PNG base64
+  signer_name text not null,
+  ip_address text,
+  user_agent text,
+  signed_at timestamptz default now(),
+  created_at timestamptz default now()
+);
+-- RLS activé sans aucune policy : accessible uniquement via service_role,
+-- depuis la fonction Edge "handle-lease-signature", elle-même gardée par
+-- le token à usage unique (pas d'authentification requise pour signer —
+-- c'est un accès public, exactement comme confirmer-reparation.html).
+alter table lease_signatures enable row level security;
+
 
