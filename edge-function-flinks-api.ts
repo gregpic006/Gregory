@@ -77,6 +77,46 @@ async function flinksGetAccountsDetail(token: string, requestId: string): Promis
   return data.Accounts as FlinksAccount[];
 }
 
+// Vérifie la signature du JWT (HS256, secret du projet Supabase) au lieu
+// de se fier uniquement au réglage "Verify JWT" de la plateforme —
+// défense en profondeur : cette fonction reste sûre même si ce réglage
+// est mal configuré pour une fonction en particulier.
+async function verifySupabaseJwt(jwt: string, jwtSecret: string): Promise<{ sub: string; [key: string]: unknown } | null> {
+  const parts = jwt.split(".");
+  if (parts.length !== 3 || !jwtSecret) return null;
+  const [headerB64, payloadB64, signatureB64] = parts;
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(jwtSecret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      base64UrlToBytes(signatureB64),
+      new TextEncoder().encode(`${headerB64}.${payloadB64}`),
+    );
+    if (!valid) return null;
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payloadB64)));
+    if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function base64UrlToBytes(b64url: string): Uint8Array {
+  let b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
+  while (b64.length % 4 !== 0) b64 += "=";
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -184,8 +224,12 @@ Deno.serve(async (req) => {
     if (!jwt) {
       return new Response(JSON.stringify({ error: "Non authentifié" }), { status: 401, headers: corsHeaders });
     }
-    const claims = JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-    const userId = claims.sub;
+    const jwtSecret = Deno.env.get("SUPABASE_JWT_SECRET") ?? "";
+    const claims = await verifySupabaseJwt(jwt, jwtSecret);
+    if (!claims) {
+      return new Response(JSON.stringify({ error: "Jeton invalide ou expiré" }), { status: 401, headers: corsHeaders });
+    }
+    const userId = claims.sub as string;
     const userRes = await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${userId}&select=is_admin`, { headers: adminHeaders });
     const [user] = await userRes.json();
     const isAdmin = !!user?.is_admin;

@@ -56,6 +56,7 @@ FLINKS_SECRET_KEY
 FLINKS_CUSTOMER_ID
 FLINKS_IFRAME_BASE_URL
 FLINKS_SYNC_SECRET
+SUPABASE_JWT_SECRET      (requis — vérification de signature JWT, voir section Sécurité ci-dessous)
 TWILIO_ACCOUNT_SID       (optionnel — SMS Portail Concierge, repli automatique par courriel tant qu'absent)
 TWILIO_AUTH_TOKEN        (optionnel — idem)
 TWILIO_FROM_NUMBER       (optionnel — idem)
@@ -76,13 +77,21 @@ La clé publique `SUPABASE_ANON_KEY` (préfixe `sb_publishable_...`) apparaît e
 
 Ce monitoring reste volontairement minimal (checks applicatifs de base, pas d'observabilité/tracing complet) — voir la roadmap 🟡 pour la suite quand le volume de portes le justifiera.
 
-## État connu du projet (à la dernière session — 2026-08-14)
+## Sécurité — vérification JWT
+
+Chaque fonction admin-authentifiée vérifie maintenant elle-même la **signature** du JWT (HS256, `SUPABASE_JWT_SECRET`) via `verifySupabaseJwt()` — inlinée dans chaque fichier (pas de module partagé tant que le déploiement reste manuel par copier-coller, voir CI/CD ci-dessous). Avant ce correctif, les fonctions décodaient seulement le payload (base64) sans vérifier qu'il avait été signé par Supabase, reposant entièrement sur le réglage "Verify JWT" de la plateforme (Dashboard → Edge Functions → chaque fonction → Settings) — un réglage par fonction, jamais audité, donc source d'erreur humaine facile. La vérification en code est maintenant la garantie réelle ; le réglage plateforme reste une deuxième couche, pas la seule.
+
+**Configuration requise** : Supabase Dashboard → Project Settings → API → JWT Settings → copie le "JWT Secret" → ajoute-le comme secret d'edge function nommé `SUPABASE_JWT_SECRET`.
+
+Fonctions concernées : `ops-api`, `worker-api`, `caller-api`, `onboarding-api`, `reconcile-bank-transactions`, `crm-api`, `admin-api`, `privacy-api`, `ask-documents`, `ask-finances`, `handle-lease-renewal-notice`, `flinks-api`, `parse-expense-receipt`.
+
+## État connu du projet (à la dernière session — 2026-08-17)
 
 Un audit de sécurité/fonctionnel (2026-08-05) avait identifié plusieurs points, **tous corrigés et déployés depuis** :
-- **Sécurité (corrigé)** : `flinks-api.ts` action `sync_all` protégée par un secret partagé (`FLINKS_SYNC_SECRET`, lu depuis Supabase Vault, jamais commité) ; les cascades automatiques de réassignation de travailleur (`process_worker_response_timeouts()` et `handle-worker-response.ts`) filtrent maintenant par `worker_verification_status` (RBQ/assurance/actif) ; policy RLS `workers` resserrée (un propriétaire ne voit que les travailleurs déjà assignés à ses unités) ; ajout d'un toggle actif/inactif par travailleur.
+- **Sécurité (corrigé)** : `flinks-api.ts` action `sync_all` protégée par un secret partagé (`FLINKS_SYNC_SECRET`, lu depuis Supabase Vault, jamais commité) ; les cascades automatiques de réassignation de travailleur (`process_worker_response_timeouts()` et `handle-worker-response.ts`) filtrent maintenant par `worker_verification_status` (RBQ/assurance/actif) ; policy RLS `workers` resserrée (un propriétaire ne voit que les travailleurs déjà assignés à ses unités) ; ajout d'un toggle actif/inactif par travailleur ; **vérification de signature JWT réelle** dans les 13 fonctions admin-authentifiées (voir section ci-dessus, ne dépend plus uniquement du réglage plateforme).
 - **Fonctionnel (corrigé)** : `invoice_number` généré via un compteur atomique (`next_invoice_number()`, upsert avec verrou de ligne) — plus de risque de collision lors de la génération concurrente des factures mensuelles.
-- **Non corrigé** : aucune fonction edge ne vérifie elle-même la signature JWT — repose sur le réglage "Verify JWT" de Supabase Dashboard (à confirmer manuellement pour chaque fonction admin) ; pas d'interface pour les actions admin destructrices (ex. `delete_owner_completely`).
-- Fonctionnalités ajoutées depuis l'audit : Portail Copilot (Q&A financier), signature électronique des renouvellements de bail (`signer-bail.html` / `handle-lease-signature.ts`), fondation du moteur de règles Automations/Studio (`automation_rules`), SMS Portail Concierge via Twilio (`send-sms.ts`, avec repli automatique par courriel tant qu'aucun compte Twilio n'est branché).
+- **Non corrigé** : pas d'interface pour les actions admin destructrices (ex. `delete_owner_completely`) ; 2FA non implémentée pour les comptes admin ; CI/CD et préproduction pas encore en place (déploiement manuel par copier-coller — voir roadmap 🔴).
+- Fonctionnalités ajoutées depuis l'audit : Portail Copilot (Q&A financier), signature électronique des renouvellements de bail (`signer-bail.html` / `handle-lease-signature.ts`), fondation du moteur de règles Automations/Studio (`automation_rules`), SMS Portail Concierge via Twilio (`send-sms.ts`), monitoring minimum (`check_system_health()`, `health-check.ts`), sauvegardes automatiques (voir `BACKUPS.md`).
 - Le domaine d'envoi de courriels (DNS Namecheap/Resend) était en cours de finalisation.
 
 ## Conventions de code à respecter
