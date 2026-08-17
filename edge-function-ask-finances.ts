@@ -33,7 +33,7 @@ async function verifySupabaseJwt(jwt: string, jwtSecret: string, supabaseUrl: st
 
     let valid = false;
     if (header.alg === "HS256") {
-      if (!jwtSecret) return null;
+      if (!jwtSecret) { console.error("jwt_verify: hs256_no_secret_configured"); return null; }
       const key = await crypto.subtle.importKey(
         "raw",
         new TextEncoder().encode(jwtSecret),
@@ -42,6 +42,7 @@ async function verifySupabaseJwt(jwt: string, jwtSecret: string, supabaseUrl: st
         ["verify"],
       );
       valid = await crypto.subtle.verify("HMAC", key, signature, signingInput);
+      if (!valid) console.error("jwt_verify: hs256_signature_mismatch");
     } else if (header.alg === "ES256") {
       // Supabase signe désormais les nouveaux JWT avec une clé
       // asymétrique ECC (P-256) par défaut — on vérifie via la clé
@@ -50,25 +51,34 @@ async function verifySupabaseJwt(jwt: string, jwtSecret: string, supabaseUrl: st
       // l'ancien secret JWT legacy (les deux peuvent coexister pendant
       // une migration Supabase).
       const jwks = await getSupabaseJwks(supabaseUrl);
+      console.error("jwt_verify: jwks_fetched", "keys_count=" + jwks.keys.length, "want_kid=" + header.kid, "available_kids=" + jwks.keys.map((k: any) => k.kid).join(","));
       const jwk = jwks.keys.find((k: any) => k.kid === header.kid && k.kty === "EC");
-      if (!jwk) return null;
-      const publicKey = await crypto.subtle.importKey(
-        "jwk",
-        { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
-        { name: "ECDSA", namedCurve: "P-256" },
-        false,
-        ["verify"],
-      );
-      valid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, publicKey, signature, signingInput);
+      if (!jwk) { console.error("jwt_verify: no_matching_jwk_for_kid", header.kid); return null; }
+      try {
+        const publicKey = await crypto.subtle.importKey(
+          "jwk",
+          { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
+          { name: "ECDSA", namedCurve: "P-256" },
+          false,
+          ["verify"],
+        );
+        valid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, publicKey, signature, signingInput);
+        if (!valid) console.error("jwt_verify: es256_signature_mismatch");
+      } catch (importErr) {
+        console.error("jwt_verify: es256_import_or_verify_threw", String(importErr));
+        return null;
+      }
     } else {
+      console.error("jwt_verify: unsupported_alg", header.alg);
       return null;
     }
 
     if (!valid) return null;
     const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payloadB64)));
-    if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) return null;
+    if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) { console.error("jwt_verify: token_expired"); return null; }
     return payload;
-  } catch {
+  } catch (outerErr) {
+    console.error("jwt_verify: outer_exception", String(outerErr));
     return null;
   }
 }
