@@ -1,0 +1,19 @@
+name: Tests d'étanchéité
+
+on:
+  workflow_dispatch: {}
+  # Déclenchement manuel uniquement — ce script teste des scénarios
+  # d'accès non autorisé contre la production ; on préfère le lancer
+  # sciemment (ex: après un déploiement touchant la sécurité) plutôt
+  # que de laisser un cron le faire sans supervision.
+
+jobs:
+  security-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Lancer les tests d'étanchéité
+        run: node scripts/security-check.mjs

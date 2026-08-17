@@ -85,6 +85,12 @@ Chaque fonction admin-authentifiée vérifie maintenant elle-même la **signatur
 
 Fonctions concernées : `ops-api`, `worker-api`, `caller-api`, `onboarding-api`, `reconcile-bank-transactions`, `crm-api`, `admin-api`, `privacy-api`, `ask-documents`, `ask-finances`, `handle-lease-renewal-notice`, `flinks-api`, `parse-expense-receipt`.
 
+## Tests d'étanchéité
+
+`scripts/security-check.mjs` tente en conditions réelles (contre la prod) des accès qui doivent échouer : JWT forgé contre les 13 fonctions admin, requêtes sans authentification, `flinks-api sync_all` sans le secret partagé, lecture des tables verrouillées (`prospects`, `automation_rules`, etc.) avec la seule clé anon. Aucune action destructive ni coûteuse.
+
+À lancer depuis l'onglet **Actions** du repo → "Tests d'étanchéité" → "Run workflow" (déclenchement manuel volontairement — pas de cron automatique contre la prod). Ou en local : `node scripts/security-check.mjs` (aucun secret requis, tout est en lecture/rejet).
+
 ## État connu du projet (à la dernière session — 2026-08-17)
 
 Un audit de sécurité/fonctionnel (2026-08-05) avait identifié plusieurs points, **tous corrigés et déployés depuis** :

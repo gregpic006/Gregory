@@ -1,0 +1,159 @@
+// Tests d'étanchéité — vérifie en conditions réelles (contre la prod)
+// que les protections déjà en place résistent vraiment à un accès non
+// autorisé. Ne fait AUCUNE action destructive ou coûteuse (pas de
+// sync_all réel, pas d'écriture) : uniquement des tentatives d'accès
+// qui DOIVENT échouer, et vérifie qu'elles échouent bien.
+//
+// Exécuté via GitHub Actions (workflow_dispatch uniquement — voir
+// security-check.yml), sur le même modèle que e2e-diagnostic.mjs :
+// déclenché manuellement, jamais en cron automatique non supervisé.
+//
+// Chaque test s'ajoute à `results` avec {name, status, detail}.
+// status: 'PASS' (la protection a bien bloqué l'accès) | 'FAIL' (accès
+// obtenu alors qu'il aurait dû être refusé — faille réelle) | 'SKIP'.
+// Le script quitte avec le code 1 si au moins un test échoue.
+
+const SUPABASE_URL = "https://kdmwfbcziokygfcmjxeq.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR";
+
+const results = [];
+function record(name, status, detail = "") {
+  results.push({ name, status, detail });
+  const icon = status === "PASS" ? "✅" : status === "SKIP" ? "⏭️ " : "❌";
+  console.log(`${icon} ${name}${detail ? " — " + detail : ""}`);
+}
+
+function base64url(obj) {
+  return Buffer.from(JSON.stringify(obj)).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// JWT dont la signature est fabriquée (pas signée avec le vrai secret du
+// projet, qu'un attaquant ne connaît évidemment pas) — c'est exactement
+// ce qu'un attaquant sans accès au secret peut produire. Si une fonction
+// l'accepte, la vérification de signature ne fonctionne pas.
+function forgedJwt(claimsOverride = {}) {
+  const header = { alg: "HS256", typ: "JWT" };
+  const payload = {
+    sub: "00000000-0000-0000-0000-000000000000",
+    role: "authenticated",
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    ...claimsOverride,
+  };
+  return `${base64url(header)}.${base64url(payload)}.forged_signature_not_valid_${Date.now()}`;
+}
+
+async function callFn(name, jwtOrNull, body, extraHeaders = {}) {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_ANON_KEY,
+      ...(jwtOrNull ? { Authorization: `Bearer ${jwtOrNull}` } : {}),
+      ...extraHeaders,
+    },
+    body: JSON.stringify(body || {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+async function restRequestAnon(path) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+  });
+  const data = await res.json().catch(() => []);
+  return { ok: res.ok, status: res.status, data };
+}
+
+// ---- 1. Fonctions admin-authentifiées : un JWT forgé doit être rejeté ----
+// C'est le test de régression direct sur le correctif de vérification
+// de signature JWT (voir README, section "Sécurité — vérification JWT").
+const ADMIN_FUNCTIONS = [
+  "ops-api", "worker-api", "caller-api", "onboarding-api",
+  "reconcile-bank-transactions", "crm-api", "admin-api", "privacy-api",
+  "ask-documents", "ask-finances", "handle-lease-renewal-notice", "flinks-api",
+  "parse-expense-receipt",
+];
+
+async function testForgedJwtRejected() {
+  const jwt = forgedJwt();
+  for (const fn of ADMIN_FUNCTIONS) {
+    const res = await callFn(fn, jwt, { action: "list" });
+    if (res.status === 401) {
+      record(`JWT forgé rejeté — ${fn}`, "PASS");
+    } else {
+      record(`JWT forgé rejeté — ${fn}`, "FAIL", `Statut ${res.status} au lieu de 401 — signature JWT non vérifiée ?`);
+    }
+  }
+}
+
+// ---- 2. Fonctions admin-authentifiées : aucune Authorization → 401 ----
+async function testNoAuthRejected() {
+  for (const fn of ["ops-api", "admin-api", "onboarding-api"]) {
+    const res = await callFn(fn, null, {});
+    if (res.status === 401) {
+      record(`Requête sans authentification rejetée — ${fn}`, "PASS");
+    } else {
+      record(`Requête sans authentification rejetée — ${fn}`, "FAIL", `Statut ${res.status} au lieu de 401`);
+    }
+  }
+}
+
+// ---- 3. flinks-api sync_all sans le secret partagé → 403 ----
+async function testFlinksSyncAllProtected() {
+  const res = await callFn("flinks-api", null, { action: "sync_all" });
+  if (res.status === 403) {
+    record("flinks-api sync_all sans secret rejeté", "PASS");
+  } else {
+    record("flinks-api sync_all sans secret rejeté", "FAIL", `Statut ${res.status} au lieu de 403 — une synchronisation bancaire réelle pourrait être déclenchée sans autorisation`);
+  }
+}
+
+// ---- 4. Tables sensibles verrouillées service_role : clé anon seule ne doit rien lire ----
+const LOCKED_TABLES = ["prospects", "automation_rules", "financial_anomalies", "job_offers", "worker_ratings", "public_submission_log", "ai_run_log"];
+
+async function testLockedTablesNotReadableByAnon() {
+  for (const table of LOCKED_TABLES) {
+    const res = await restRequestAnon(table);
+    const rowCount = Array.isArray(res.data) ? res.data.length : -1;
+    if (res.status === 200 && rowCount === 0) {
+      record(`Table verrouillée illisible par la clé anon — ${table}`, "PASS");
+    } else if (res.status === 401 || res.status === 403) {
+      record(`Table verrouillée illisible par la clé anon — ${table}`, "PASS", `Statut ${res.status}`);
+    } else {
+      record(`Table verrouillée illisible par la clé anon — ${table}`, "FAIL", `Statut ${res.status}, ${rowCount} ligne(s) retournée(s) — RLS ne bloque pas cette table`);
+    }
+  }
+}
+
+// ---- 5. Endpoint public de santé — juste vérifier qu'il répond ----
+async function testHealthCheckReachable() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/health-check`, { headers: { apikey: SUPABASE_ANON_KEY } });
+    if (res.status === 200 || res.status === 503) {
+      record("Endpoint health-check joignable", "PASS", `Statut ${res.status}`);
+    } else {
+      record("Endpoint health-check joignable", "FAIL", `Statut inattendu ${res.status}`);
+    }
+  } catch (e) {
+    record("Endpoint health-check joignable", "FAIL", String(e.message || e));
+  }
+}
+
+async function main() {
+  await testForgedJwtRejected();
+  await testNoAuthRejected();
+  await testFlinksSyncAllProtected();
+  await testLockedTablesNotReadableByAnon();
+  await testHealthCheckReachable();
+
+  const failed = results.filter((r) => r.status === "FAIL");
+  console.log(`\n${results.length} test(s) — ${results.length - failed.length} réussi(s), ${failed.length} échoué(s).`);
+  if (failed.length) {
+    console.log("\n⚠️  Failles potentielles détectées :");
+    failed.forEach((r) => console.log(`  - ${r.name}: ${r.detail}`));
+    process.exit(1);
+  }
+}
+
+main();
