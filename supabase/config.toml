@@ -1,0 +1,94 @@
+# Config Supabase CLI — utilisée uniquement par le pipeline de
+# déploiement (.github/workflows/deploy.yml). Ne change pas la façon de
+# travailler au quotidien : les fichiers source restent
+# edge-function-<nom>.ts à la racine du repo, copiés dans
+# supabase/functions/<nom>/index.ts par le workflow au moment du
+# déploiement (voir ce fichier), jamais commités sous cette forme.
+#
+# verify_jwt = true  → Supabase rejette la requête AVANT même d'exécuter
+#   la fonction si le token n'est pas un JWT Supabase valide. Réservé
+#   aux fonctions où TOUT appel légitime vient d'un utilisateur connecté
+#   (propriétaire/locataire/admin/travailleur/prospecteur).
+# verify_jwt = false → la fonction gère elle-même l'authentification
+#   (lien à token unique, secret partagé, appel système/cron, ou aucune
+#   auth requise pour un formulaire public). Les 13 fonctions
+#   "admin-authentifiées" vérifient de toute façon la signature JWT en
+#   code (voir README, section Sécurité) — ce réglage plateforme est une
+#   couche additionnelle, pas la seule.
+
+project_id = "kdmwfbcziokygfcmjxeq"
+
+[functions.admin-api]
+verify_jwt = true
+[functions.ask-documents]
+verify_jwt = true
+[functions.ask-finances]
+verify_jwt = true
+[functions.caller-api]
+verify_jwt = true
+[functions.crm-api]
+verify_jwt = true
+[functions.handle-lease-renewal-notice]
+verify_jwt = true
+[functions.onboarding-api]
+verify_jwt = true
+[functions.ops-api]
+verify_jwt = true
+[functions.parse-expense-receipt]
+verify_jwt = true
+[functions.privacy-api]
+verify_jwt = true
+[functions.reconcile-bank-transactions]
+verify_jwt = true
+[functions.worker-api]
+verify_jwt = true
+
+# ---- Fonctions publiques, à token, ou système/cron (verify_jwt = false) ----
+[functions.analyze-satisfaction-signal]
+verify_jwt = false
+[functions.dispatch-work-order]
+verify_jwt = false
+[functions.find-prospects-ai]
+verify_jwt = false
+[functions.flinks-api]
+verify_jwt = false
+[functions.generate-listing]
+verify_jwt = false
+[functions.generate-owner-report]
+verify_jwt = false
+[functions.handle-approval-decision]
+verify_jwt = false
+[functions.handle-document-upload]
+verify_jwt = false
+[functions.handle-inquiry]
+verify_jwt = false
+[functions.handle-lease-signature]
+verify_jwt = false
+[functions.handle-mandat-inquiry]
+verify_jwt = false
+[functions.handle-payment-reminder]
+verify_jwt = false
+[functions.handle-public-inquiry]
+verify_jwt = false
+[functions.handle-service-request]
+verify_jwt = false
+[functions.handle-tenant-confirmation]
+verify_jwt = false
+[functions.handle-visit-response]
+verify_jwt = false
+[functions.handle-worker-job-assigned]
+verify_jwt = false
+[functions.handle-worker-registration]
+verify_jwt = false
+[functions.handle-worker-response]
+verify_jwt = false
+[functions.health-check]
+verify_jwt = false
+[functions.run-automation-email]
+verify_jwt = false
+[functions.send-health-alert]
+verify_jwt = false
+[functions.send-onboarding-reminder]
+verify_jwt = false
+[functions.send-sms]
+verify_jwt = false

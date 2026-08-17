@@ -4,13 +4,9 @@ SaaS de gestion immobilière résidentielle, construit sur Supabase (Postgres + 
 
 ## ⚠️ Le plus important à savoir avant de toucher au code
 
-**Il n'y a AUCUN pipeline de déploiement.** Le code de ce repo n'est PAS automatiquement synchronisé avec Supabase :
-
-- Les **fichiers `.html`** (les 5 portails + pages publiques) se déploient automatiquement via **GitHub Pages** dès qu'un push atteint `main` — ça, c'est automatique.
-- Les **fichiers `edge-function-*.ts`** sont des copies locales tenues à jour manuellement. Le vrai code qui tourne est celui collé dans **Supabase Dashboard → Edge Functions**. Après avoir modifié `edge-function-ops-api.ts` par exemple, il faut aller coller le nouveau contenu dans la fonction `ops-api` sur Supabase et déployer — sinon rien ne change en production.
-- Le fichier **`schema.sql`** n'est PAS exécuté automatiquement non plus. C'est un script cumulatif (conçu pour être rejoué du début à la fin sur une base vide, ou juste ses nouvelles sections collées à la suite sur une base existante) qu'on colle dans **Supabase Dashboard → SQL Editor**. Il est écrit pour être idempotent (`create table if not exists`, `add column if not exists`, etc.) donc le rejouer au complet ne casse rien.
-
-Une des prochaines priorités techniques (voir section Roadmap plus bas) devrait être de mettre en place un vrai pipeline (Supabase CLI + GitHub Actions) pour éliminer ce copier-coller manuel, qui est la plus grosse source d'erreur humaine du projet actuellement.
+- Les **fichiers `.html`** (les 5 portails + pages publiques) se déploient automatiquement via **GitHub Pages** dès qu'un push atteint `main`.
+- Les **fichiers `edge-function-*.ts`** se déploient maintenant automatiquement aussi, via `.github/workflows/deploy.yml` (voir section CI/CD ci-dessous) — un push sur `main` qui touche un fichier `edge-function-*.ts` les redéploie tous vers Supabase en quelques secondes. **Configuration à faire une seule fois** avant que ça fonctionne (secrets GitHub) — voir CI/CD.
+- Le fichier **`schema.sql`** n'est PAS automatisé et ne le sera pas tel quel : c'est un historique cumulatif (beaucoup de `create table`/`create policy` SANS garde `if not exists`), donc le rejouer en entier sur une base déjà provisionnée échoue. Il reste la référence de ce qui a déjà été appliqué. **Toute NOUVELLE modification de schéma doit désormais aller dans `supabase/migrations/`** (un fichier par changement, jamais dans schema.sql) — voir CI/CD pour la procédure.
 
 ## Architecture
 
@@ -90,6 +86,20 @@ Fonctions concernées : `ops-api`, `worker-api`, `caller-api`, `onboarding-api`,
 `scripts/security-check.mjs` tente en conditions réelles (contre la prod) des accès qui doivent échouer : JWT forgé contre les 13 fonctions admin, requêtes sans authentification, `flinks-api sync_all` sans le secret partagé, lecture des tables verrouillées (`prospects`, `automation_rules`, etc.) avec la seule clé anon. Aucune action destructive ni coûteuse.
 
 À lancer depuis l'onglet **Actions** du repo → "Tests d'étanchéité" → "Run workflow" (déclenchement manuel volontairement — pas de cron automatique contre la prod). Ou en local : `node scripts/security-check.mjs` (aucun secret requis, tout est en lecture/rejet).
+
+## CI/CD et préproduction
+
+**Fonctions edge — automatisé.** `.github/workflows/deploy.yml` déploie toutes les fonctions vers Supabase à chaque push sur `main` qui touche un fichier `edge-function-*.ts`. Les fichiers source restent à la racine (convention inchangée) ; le workflow les copie dans `supabase/functions/<nom>/index.ts` (structure attendue par la CLI Supabase) uniquement le temps du déploiement, jamais commité sous cette forme.
+
+**Configuration requise (une seule fois)** — 2 secrets GitHub (repo → Settings → Secrets and variables → Actions) :
+- `SUPABASE_ACCESS_TOKEN` — Supabase Dashboard → ton compte (icône en haut à droite) → Access Tokens → génère-en un nouveau (accès complet à tous tes projets, à garder secret).
+- `SUPABASE_PROJECT_REF` — l'identifiant du projet, visible dans l'URL du dashboard (`kdmwfbcziokygfcmjxeq` pour ce projet — déjà public dans le code client, mais gardé en secret ici par cohérence).
+
+`supabase/config.toml` déclare le réglage `verify_jwt` de chaque fonction (`true` pour les 12 fonctions admin-authentifiées, `false` pour les fonctions publiques/à token/système) — **important** : sans ce fichier, un déploiement automatisé réinitialiserait ce réglage à sa valeur par défaut et casserait potentiellement les fonctions publiques.
+
+**Schéma SQL — semi-automatisé, en transition.** `schema.sql` reste l'historique figé (référence de lecture, ne plus y ajouter). Toute nouvelle modification de schéma va dans un nouveau fichier sous `supabase/migrations/` (nommage `YYYYMMDDHHMMSS_description.sql`, généré par `supabase migration new <description>` en local). Il n'y a pas encore de workflow automatique pour ces migrations — **étape manuelle unique restante** pour l'activer : quelqu'un avec la CLI Supabase installée en local doit faire un `supabase link --project-ref <ref>` puis `supabase db pull` une fois, pour établir la base "déjà appliquée" avant de brancher `supabase db push` en CI. Tant que ce n'est pas fait, applique les fichiers de `supabase/migrations/` manuellement dans le SQL Editor, comme avant.
+
+**Préproduction.** Pas encore créée — crée un deuxième projet Supabase (gratuit) dédié aux tests, et un deuxième jeu de secrets GitHub (`SUPABASE_ACCESS_TOKEN_PREPROD` peut réutiliser le même token, `SUPABASE_PROJECT_REF_PREPROD` pointe vers ce nouveau projet). Une fois créé, dupliquer `deploy.yml` en `deploy-preprod.yml` déclenché sur push vers une branche `preprod` plutôt que `main` — le même principe de copie `edge-function-*.ts → supabase/functions/` s'applique tel quel.
 
 ## État connu du projet (à la dernière session — 2026-08-17)
 

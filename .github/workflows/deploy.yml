@@ -1,0 +1,42 @@
+name: Déploiement des edge functions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'edge-function-*.ts'
+      - 'supabase/config.toml'
+  workflow_dispatch: {}
+
+jobs:
+  deploy-functions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Préparer la structure attendue par la CLI Supabase
+        # Les fichiers source restent edge-function-<nom>.ts à la racine
+        # (convention du projet, inchangée) — cette étape les copie dans
+        # la structure supabase/functions/<nom>/index.ts uniquement pour
+        # ce run, jamais commitée.
+        run: |
+          set -euo pipefail
+          mkdir -p supabase/functions
+          for f in edge-function-*.ts; do
+            name="${f#edge-function-}"
+            name="${name%.ts}"
+            mkdir -p "supabase/functions/$name"
+            cp "$f" "supabase/functions/$name/index.ts"
+          done
+          ls supabase/functions
+
+      - name: Déployer toutes les fonctions vers la production
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          supabase functions deploy --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
