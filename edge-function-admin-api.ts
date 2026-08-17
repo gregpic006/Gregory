@@ -19,24 +19,48 @@ function describeOnboardingGaps(c: any): string[] {
 // de se fier uniquement au réglage "Verify JWT" de la plateforme —
 // défense en profondeur : cette fonction reste sûre même si ce réglage
 // est mal configuré pour une fonction en particulier.
-async function verifySupabaseJwt(jwt: string, jwtSecret: string): Promise<{ sub: string; [key: string]: unknown } | null> {
+async function verifySupabaseJwt(jwt: string, jwtSecret: string, supabaseUrl: string): Promise<{ sub: string; [key: string]: unknown } | null> {
   const parts = jwt.split(".");
-  if (parts.length !== 3 || !jwtSecret) return null;
+  if (parts.length !== 3) return null;
   const [headerB64, payloadB64, signatureB64] = parts;
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(jwtSecret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"],
-    );
-    const valid = await crypto.subtle.verify(
-      "HMAC",
-      key,
-      base64UrlToBytes(signatureB64),
-      new TextEncoder().encode(`${headerB64}.${payloadB64}`),
-    );
+    const header = JSON.parse(new TextDecoder().decode(base64UrlToBytes(headerB64)));
+    const signingInput = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
+    const signature = base64UrlToBytes(signatureB64);
+
+    let valid = false;
+    if (header.alg === "HS256") {
+      if (!jwtSecret) return null;
+      const key = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(jwtSecret),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["verify"],
+      );
+      valid = await crypto.subtle.verify("HMAC", key, signature, signingInput);
+    } else if (header.alg === "ES256") {
+      // Supabase signe désormais les nouveaux JWT avec une clé
+      // asymétrique ECC (P-256) par défaut — on vérifie via la clé
+      // publique exposée sur /auth/v1/jwks plutôt qu'un secret partagé.
+      // Le HS256 ci-dessus reste supporté pour les projets encore sur
+      // l'ancien secret JWT legacy (les deux peuvent coexister pendant
+      // une migration Supabase).
+      const jwks = await getSupabaseJwks(supabaseUrl);
+      const jwk = jwks.keys.find((k: any) => k.kid === header.kid && k.kty === "EC");
+      if (!jwk) return null;
+      const publicKey = await crypto.subtle.importKey(
+        "jwk",
+        { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
+        { name: "ECDSA", namedCurve: "P-256" },
+        false,
+        ["verify"],
+      );
+      valid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, publicKey, signature, signingInput);
+    } else {
+      return null;
+    }
+
     if (!valid) return null;
     const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payloadB64)));
     if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) return null;
@@ -44,6 +68,22 @@ async function verifySupabaseJwt(jwt: string, jwtSecret: string): Promise<{ sub:
   } catch {
     return null;
   }
+}
+
+// Cache en mémoire du trousseau de clés publiques (JWKS) du projet —
+// évite un appel réseau à chaque requête ; réutilisé tant que l'instance
+// de la fonction edge reste "chaude", et rafraîchi après 10 minutes pour
+// suivre une éventuelle rotation de clé côté Supabase.
+let cachedJwks: { keys: any[] } | null = null;
+let cachedJwksAt = 0;
+async function getSupabaseJwks(supabaseUrl: string): Promise<{ keys: any[] }> {
+  const now = Date.now();
+  if (cachedJwks && now - cachedJwksAt < 10 * 60 * 1000) return cachedJwks;
+  const res = await fetch(`${supabaseUrl}/auth/v1/jwks`);
+  const data = await res.json().catch(() => ({ keys: [] }));
+  cachedJwks = { keys: Array.isArray(data?.keys) ? data.keys : [] };
+  cachedJwksAt = now;
+  return cachedJwks;
 }
 
 function base64UrlToBytes(b64url: string): Uint8Array {
@@ -67,7 +107,7 @@ Deno.serve(async (req) => {
     }
 
     const jwtSecret = Deno.env.get("SUPABASE_JWT_SECRET") ?? "";
-    const claims = await verifySupabaseJwt(jwt, jwtSecret);
+    const claims = await verifySupabaseJwt(jwt, jwtSecret, Deno.env.get("SUPABASE_URL") ?? "");
     if (!claims) {
       return new Response(JSON.stringify({ error: "Jeton invalide ou expiré" }), { status: 401, headers: corsHeaders });
     }
