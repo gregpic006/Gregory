@@ -40,6 +40,7 @@ Une des prochaines priorités techniques (voir section Roadmap plus bas) devrait
 
 - Domaine : `portailgestion.ca`, configuré via le fichier `CNAME` à la racine + GitHub Pages.
 - DNS géré chez Namecheap (courriel transactionnel via Resend, domaine expéditeur `mail.portailgestion.ca`).
+- Sauvegardes de la base de données : voir [`BACKUPS.md`](./BACKUPS.md).
 
 ## Secrets requis (configurés dans Supabase → Edge Functions → Secrets, jamais commités dans ce repo)
 

@@ -1,0 +1,34 @@
+name: Sauvegarde de la base de données
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # 8h UTC = ~3-4h du matin heure de l'Est (selon l'heure d'été) —
+    # en dehors des heures d'utilisation normale du service.
+    - cron: '0 8 * * *'
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Installer pg_dump
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Créer la sauvegarde
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::Le secret SUPABASE_DB_URL n'est pas configuré — voir BACKUPS.md."
+            exit 1
+          fi
+          pg_dump "$DATABASE_URL" --no-owner --no-privileges --format=custom --file=portail-backup.dump
+
+      - name: Téléverser comme artefact (conservé 30 jours)
+        uses: actions/upload-artifact@v4
+        with:
+          name: portail-backup-${{ github.run_id }}
+          path: portail-backup.dump
+          retention-days: 30
+          compression-level: 9
