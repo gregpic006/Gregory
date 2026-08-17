@@ -126,7 +126,9 @@ let cachedJwksAt = 0;
 async function getSupabaseJwks(supabaseUrl: string): Promise<{ keys: any[] }> {
   const now = Date.now();
   if (cachedJwks && now - cachedJwksAt < 10 * 60 * 1000) return cachedJwks;
-  const res = await fetch(`${supabaseUrl}/auth/v1/jwks`);
+  const res = await fetch(`${supabaseUrl}/auth/v1/jwks`, {
+    headers: { apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "" },
+  });
   const data = await res.json().catch(() => ({ keys: [] }));
   cachedJwks = { keys: Array.isArray(data?.keys) ? data.keys : [] };
   cachedJwksAt = now;
