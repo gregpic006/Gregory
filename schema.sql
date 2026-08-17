@@ -3169,4 +3169,124 @@ create table if not exists sms_log (
 -- (fonction Edge "send-sms").
 alter table sms_log enable row level security;
 
+-- ============ MONITORING MINIMUM — santé du système ============
+-- Vérifications déterministes seulement (pas d'IA) : tâches cron sans
+-- exécution réussie récente, connexions bancaires désynchronisées,
+-- taux d'erreur IA anormal, demandes Loi 25 approchant le délai légal.
+-- Volontairement minimal — ce n'est pas de l'observabilité complète
+-- (voir roadmap 🟡), juste de quoi être alerté avant qu'un client s'en
+-- aperçoive.
+create or replace function check_system_health()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_issues jsonb := '[]'::jsonb;
+  v_stale_cron_count int := 0;
+  v_stale_flinks_count int;
+  v_ai_error_count int;
+  v_stuck_privacy_count int;
+begin
+  -- 1. Tâches cron actives sans exécution réussie depuis 26h (marge
+  --    large sur la plus fréquente : les tâches quotidiennes tournent
+  --    normalement une fois par 24h).
+  begin
+    select count(*) into v_stale_cron_count
+    from cron.job j
+    where j.active
+      and not exists (
+        select 1 from cron.job_run_details d
+        where d.jobid = j.jobid and d.status = 'succeeded' and d.end_time > now() - interval '26 hours'
+      );
+  exception when others then
+    v_stale_cron_count := -1; -- schéma cron inaccessible depuis cette fonction — signalé séparément, pas bloquant
+  end;
+  if v_stale_cron_count > 0 then
+    v_issues := v_issues || jsonb_build_object('type', 'cron_stale', 'severity', 'critical', 'detail', v_stale_cron_count || ' tâche(s) cron sans exécution réussie depuis 26h');
+  elsif v_stale_cron_count < 0 then
+    v_issues := v_issues || jsonb_build_object('type', 'cron_check_unavailable', 'severity', 'warning', 'detail', 'Impossible de lire cron.job_run_details depuis cette fonction — à vérifier manuellement');
+  end if;
+
+  -- 2. Connexions bancaires actives non synchronisées depuis 48h.
+  select count(*) into v_stale_flinks_count
+  from bank_connections
+  where status = 'active' and (last_synced_at is null or last_synced_at < now() - interval '48 hours');
+  if v_stale_flinks_count > 0 then
+    v_issues := v_issues || jsonb_build_object('type', 'flinks_stale', 'severity', 'warning', 'detail', v_stale_flinks_count || ' connexion(s) bancaire(s) non synchronisée(s) depuis 48h');
+  end if;
+
+  -- 3. Taux d'erreur IA élevé dans les dernières 24h.
+  select count(*) into v_ai_error_count
+  from ai_run_log
+  where created_at > now() - interval '24 hours' and error is not null;
+  if v_ai_error_count > 10 then
+    v_issues := v_issues || jsonb_build_object('type', 'ai_errors_high', 'severity', 'warning', 'detail', v_ai_error_count || ' erreurs IA dans les dernières 24h');
+  end if;
+
+  -- 4. Demandes de confidentialité (Loi 25, délai légal de 30 jours)
+  --    approchant l'échéance sans avoir été traitées.
+  select count(*) into v_stuck_privacy_count
+  from personal_data_requests
+  where status = 'pending' and created_at < now() - interval '25 days';
+  if v_stuck_privacy_count > 0 then
+    v_issues := v_issues || jsonb_build_object('type', 'privacy_deadline_risk', 'severity', 'critical', 'detail', v_stuck_privacy_count || ' demande(s) Loi 25 approchant le délai légal de 30 jours');
+  end if;
+
+  return jsonb_build_object('checked_at', now(), 'healthy', jsonb_array_length(v_issues) = 0, 'issues', v_issues);
+end;
+$$;
+
+-- État de la dernière alerte envoyée — évite de spammer les admins à
+-- chaque exécution du cron (aux 15 minutes) tant que le problème n'est
+-- pas résolu : une alerte par incident continu, pas une par vérification.
+create table if not exists system_health_alert_state (
+  id boolean primary key default true,
+  last_alert_sent_at timestamptz,
+  constraint system_health_alert_state_singleton check (id)
+);
+alter table system_health_alert_state enable row level security;
+insert into system_health_alert_state (id) values (true) on conflict (id) do nothing;
+
+create or replace function trigger_health_check_alert()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_health jsonb;
+  v_last_alert timestamptz;
+  v_health_key text;
+begin
+  v_health := check_system_health();
+  if (v_health->>'healthy')::boolean then
+    return;
+  end if;
+
+  select last_alert_sent_at into v_last_alert from system_health_alert_state where id = true;
+  if v_last_alert is not null and v_last_alert > now() - interval '2 hours' then
+    return; -- déjà alerté récemment pour cet incident en cours
+  end if;
+
+  select decrypted_secret into v_health_key from vault.decrypted_secrets where name = 'health_alert_secret';
+
+  perform net.http_post(
+    url := 'https://kdmwfbcziokygfcmjxeq.supabase.co/functions/v1/send-health-alert',
+    body := jsonb_build_object('issues', v_health->'issues'),
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+      'apikey', 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR',
+      'x-health-alert-key', coalesce(v_health_key, '')
+    )
+  );
+
+  update system_health_alert_state set last_alert_sent_at = now() where id = true;
+end;
+$$;
+
+select cron.schedule('health-check-alert', '*/15 * * * *', $$select trigger_health_check_alert()$$);
+
 

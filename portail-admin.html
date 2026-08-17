@@ -74,6 +74,8 @@
     <button class="signout" onclick="handleSignOut()">Se déconnecter</button>
   </div>
 
+  <div id="system-health-banner" style="display:none;margin-bottom:16px;padding:12px 16px;font-size:13px;"></div>
+
   <h1 style="font-size:22px;">Centre de commandement du jour</h1>
   <p class="subtitle" style="margin-bottom:16px;">Tout ce qui demande ton attention aujourd'hui, en un seul endroit</p>
   <div id="command-center-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
@@ -508,6 +510,7 @@ async function loadAdminDashboard(){
 
   const { totals, clients, anomalies, command_center } = data;
   renderCommandCenter(command_center);
+  await loadSystemHealth();
   document.getElementById('m-clients').textContent = totals.clients_count;
   document.getElementById('m-buildings').textContent = totals.buildings_count;
   document.getElementById('m-units').textContent = totals.units_count;
@@ -676,6 +679,31 @@ async function closeDataRequestManually(request_id){
   const resolution_note = prompt('Note de résolution (ex: correction appliquée manuellement) :') || '';
   const res = await callPrivacyApi({ action: 'update_data_request', request_id, status: 'fulfilled', resolution_note });
   if(res?.ok){ await loadDataRequests(); }
+}
+
+const healthSeverityColor = { critical: 'var(--rust)', warning: 'var(--brass)' };
+const healthSeverityLabel = { critical: '🔴 Critique', warning: '🟠 Avertissement' };
+
+async function loadSystemHealth(){
+  const banner = document.getElementById('system-health-banner');
+  const res = await callOpsApi({ action: 'get_system_health' });
+  const health = res?.health;
+  if(!health){ banner.style.display = 'none'; return; }
+
+  if(health.healthy){
+    banner.style.display = 'block';
+    banner.style.background = 'var(--paper-2)';
+    banner.style.borderLeft = '3px solid var(--sage)';
+    banner.innerHTML = `🟢 Système en bon état (vérifié ${new Date(health.checked_at).toLocaleString('fr-CA')})`;
+    return;
+  }
+
+  banner.style.display = 'block';
+  banner.style.background = '#fdf0ef';
+  banner.style.borderLeft = '3px solid var(--rust)';
+  banner.innerHTML = `<b>État du système — ${health.issues.length} problème(s) détecté(s)</b><ul style="margin:8px 0 0 18px;padding:0;">` +
+    health.issues.map(i => `<li><span style="color:${healthSeverityColor[i.severity] || 'inherit'};">${healthSeverityLabel[i.severity] || i.severity}</span> — ${esc(i.detail)}</li>`).join('') +
+    `</ul>`;
 }
 
 function renderCommandCenter(cc){

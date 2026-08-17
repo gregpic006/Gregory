@@ -58,9 +58,22 @@ FLINKS_SYNC_SECRET
 TWILIO_ACCOUNT_SID       (optionnel — SMS Portail Concierge, repli automatique par courriel tant qu'absent)
 TWILIO_AUTH_TOKEN        (optionnel — idem)
 TWILIO_FROM_NUMBER       (optionnel — idem)
+HEALTH_ALERT_SECRET      (requis pour le monitoring — voir section Monitoring ci-dessous)
 ```
 
 La clé publique `SUPABASE_ANON_KEY` (préfixe `sb_publishable_...`) apparaît en clair dans le code client HTML — c'est normal et voulu, elle est conçue pour être publique. La clé `SUPABASE_SERVICE_ROLE_KEY`, elle, ne doit **jamais** apparaître côté client.
+
+## Monitoring minimum
+
+`check_system_health()` (SQL) vérifie 4 signaux déterministes : tâches cron sans exécution réussie depuis 26h, connexions bancaires Flinks désynchronisées depuis 48h, taux d'erreur IA anormal (>10/24h), demandes de confidentialité (Loi 25) approchant le délai légal de 30 jours.
+
+- `trigger_health_check_alert()` tourne aux 15 minutes (`pg_cron`) et envoie un courriel aux admins via `send-health-alert.ts` si un problème est détecté — au maximum un courriel toutes les 2h par incident continu (pas de spam).
+- `health-check.ts` est un endpoint public en lecture seule (aucune donnée sensible), fait pour être branché sur un moniteur externe gratuit comme [UptimeRobot](https://uptimerobot.com) : configure-le pour pinger `https://<ton-projet>.supabase.co/functions/v1/health-check` toutes les 5 minutes, avec le header `apikey: <SUPABASE_ANON_KEY>`. Il répond `200` si tout va bien, `503` sinon.
+- Le tableau de bord admin affiche aussi ce statut en haut de page (bandeau vert/rouge).
+
+**Configuration requise pour activer les alertes par courriel** — génère un secret aléatoire (ex: `openssl rand -hex 32`) et exécute dans Supabase SQL Editor : `select vault.create_secret('<ta-valeur-générée>', 'health_alert_secret');`, puis ajoute la même valeur comme secret d'edge function `HEALTH_ALERT_SECRET`.
+
+Ce monitoring reste volontairement minimal (checks applicatifs de base, pas d'observabilité/tracing complet) — voir la roadmap 🟡 pour la suite quand le volume de portes le justifiera.
 
 ## État connu du projet (à la dernière session — 2026-08-14)
 

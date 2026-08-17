@@ -728,6 +728,16 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
+    // Monitoring minimum — mêmes vérifications déterministes que
+    // l'endpoint public health-check.ts, mais consommé ici par le
+    // tableau de bord admin (authentifié, pas besoin d'un aller-retour
+    // public supplémentaire).
+    if (action === "get_system_health") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/rpc/check_system_health`, { method: "POST", headers: adminHeaders, body: "{}" });
+      const health = await res.json().catch(() => ({ healthy: false, issues: [] }));
+      return new Response(JSON.stringify({ health }), { status: 200, headers: corsHeaders });
+    }
+
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });
