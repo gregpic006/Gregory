@@ -366,6 +366,34 @@
   <p id="tpad-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
   <div id="tpad-authorizations-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 
+  <h1 style="margin-top:40px;font-size:22px;">Comptabilité — grand livre</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Plan de comptes, écritures à partie double (postées automatiquement pour les loyers perçus, dépenses et factures Portail), et balance de vérification — par propriétaire.</p>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Propriétaire</label>
+      <select id="gl-owner" style="padding:8px;border:1px solid var(--line);" onchange="loadGlData()"><option value="">— Choisir —</option></select>
+    </div>
+  </div>
+
+  <h3 style="font-size:13px;margin-bottom:8px;">Balance de vérification</h3>
+  <div id="gl-trial-balance-body" style="margin-bottom:24px;"><p style="color:var(--muted);font-size:13.5px;">Choisis un propriétaire.</p></div>
+
+  <h3 style="font-size:13px;margin-bottom:8px;">Nouvelle écriture manuelle</h3>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:10px;">
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Date</label><input type="date" id="gl-entry-date" style="padding:8px;border:1px solid var(--line);"></div>
+      <div style="flex:1;min-width:200px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description</label><input type="text" id="gl-entry-desc" style="padding:8px;border:1px solid var(--line);width:100%;"></div>
+    </div>
+    <div id="gl-entry-lines"></div>
+    <button onclick="addGlLine()" style="border:1px solid var(--ink);background:none;padding:6px 12px;font-size:12px;cursor:pointer;margin-top:6px;">+ Ligne</button>
+    <div style="margin-top:10px;">
+      <button onclick="saveGlEntry()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Enregistrer l'écriture</button>
+      <span id="gl-entry-msg" style="font-size:12.5px;margin-left:8px;"></span>
+    </div>
+  </div>
+
+  <h3 style="font-size:13px;margin-bottom:8px;">Journal des écritures (200 dernières)</h3>
+  <div id="gl-journal-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Choisis un propriétaire.</p></div>
+
   <h1 style="margin-top:40px;font-size:22px;">Factures fournisseurs (lecture IA)</h1>
   <p class="subtitle" style="margin-bottom:16px;">Téléverse une facture ou un reçu (PDF/photo) — l'IA propose le fournisseur, le montant, les taxes et la catégorie. Rien n'est enregistré tant que tu n'as pas confirmé.</p>
   <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
@@ -904,6 +932,7 @@ async function obInit(){
   const options = '<option value="">— Choisir —</option>' + (data?.owners || []).map(o => `<option value="${o.id}">${esc(o.full_name)}${o.company_name ? ' — ' + esc(o.company_name) : ''}</option>`).join('');
   document.getElementById('ob-building-owner').innerHTML = options;
   document.getElementById('bulk-import-owner').innerHTML = options;
+  document.getElementById('gl-owner').innerHTML = options;
 }
 
 // Parseur CSV léger avec support des champs entre guillemets (ex: une
@@ -1428,6 +1457,88 @@ async function saveTenantPadAuthorization(){
   const res = await callOpsApi({ action: 'update_tenant_pad_authorization', lease_id, tenant_id, status, consent_method, processor });
   msg.textContent = res?.ok ? 'Enregistré.' : 'Erreur.';
   await loadTenantPadAuthorizations();
+}
+
+let glAccountsCache = [];
+
+async function loadGlData(){
+  const owner_id = document.getElementById('gl-owner').value;
+  if(!owner_id) return;
+
+  const [tbRes, accRes, journalRes] = await Promise.all([
+    callOpsApi({ action: 'get_trial_balance', owner_id }),
+    callOpsApi({ action: 'list_gl_accounts', owner_id }),
+    callOpsApi({ action: 'list_journal_entries', owner_id }),
+  ]);
+
+  glAccountsCache = accRes?.accounts || [];
+
+  const tbBody = document.getElementById('gl-trial-balance-body');
+  const tb = tbRes?.trial_balance || [];
+  tbBody.innerHTML = !tb.length ? '<p style="color:var(--muted);font-size:13.5px;">Aucun mouvement pour l\'instant.</p>' :
+    '<table><thead><tr><th>Code</th><th>Compte</th><th>Type</th><th class="num">Débit</th><th class="num">Crédit</th><th class="num">Solde</th></tr></thead><tbody>' +
+    tb.map(a => `<tr><td>${esc(a.code)}</td><td>${esc(a.name)}</td><td>${esc(a.account_type)}</td><td class="num">${Number(a.total_debit).toLocaleString('fr-CA')} $</td><td class="num">${Number(a.total_credit).toLocaleString('fr-CA')} $</td><td class="num">${Number(a.balance).toLocaleString('fr-CA')} $</td></tr>`).join('') +
+    '</tbody></table>';
+
+  const journalBody = document.getElementById('gl-journal-body');
+  const entries = journalRes?.entries || [];
+  journalBody.innerHTML = !entries.length ? '<p style="color:var(--muted);font-size:13.5px;">Aucune écriture pour l\'instant.</p>' :
+    entries.map(e => `
+      <div style="background:var(--paper-2);border:1px solid var(--line);padding:10px 14px;margin-bottom:6px;font-size:12.5px;">
+        <b>${esc(e.description)}</b> — ${new Date(e.entry_date).toLocaleDateString('fr-CA')} <span style="color:var(--muted);">(${esc(e.source_type)})</span>
+        <div style="margin-top:4px;">
+          ${(e.gl_journal_lines || []).map(l => `<div>${esc(l.gl_accounts?.code)} ${esc(l.gl_accounts?.name)} — ${Number(l.debit) > 0 ? 'Débit ' + Number(l.debit).toLocaleString('fr-CA') + ' $' : 'Crédit ' + Number(l.credit).toLocaleString('fr-CA') + ' $'}</div>`).join('')}
+        </div>
+      </div>`).join('');
+
+  resetGlLines();
+}
+
+function glAccountOptions(){
+  return '<option value="">— Compte —</option>' + glAccountsCache.map(a => `<option value="${a.id}">${esc(a.code)} — ${esc(a.name)}</option>`).join('');
+}
+
+function addGlLine(){
+  const container = document.getElementById('gl-entry-lines');
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;align-items:end;margin-bottom:6px;';
+  row.innerHTML = `
+    <select class="gl-line-account" style="padding:6px;border:1px solid var(--line);flex:1;">${glAccountOptions()}</select>
+    <input type="number" class="gl-line-debit" placeholder="Débit" step="0.01" style="padding:6px;border:1px solid var(--line);width:100px;">
+    <input type="number" class="gl-line-credit" placeholder="Crédit" step="0.01" style="padding:6px;border:1px solid var(--line);width:100px;">
+    <button onclick="this.parentElement.remove()" style="border:1px solid var(--line);background:none;padding:6px 10px;cursor:pointer;">×</button>`;
+  container.appendChild(row);
+}
+
+function resetGlLines(){
+  const container = document.getElementById('gl-entry-lines');
+  container.innerHTML = '';
+  addGlLine();
+  addGlLine();
+}
+
+async function saveGlEntry(){
+  const owner_id = document.getElementById('gl-owner').value;
+  const entry_date = document.getElementById('gl-entry-date').value;
+  const description = document.getElementById('gl-entry-desc').value;
+  const msg = document.getElementById('gl-entry-msg');
+  if(!owner_id){ msg.textContent = 'Choisis un propriétaire.'; return; }
+  if(!description){ msg.textContent = 'Description requise.'; return; }
+
+  const lines = Array.from(document.querySelectorAll('#gl-entry-lines > div')).map(row => ({
+    account_id: row.querySelector('.gl-line-account').value,
+    debit: Number(row.querySelector('.gl-line-debit').value) || 0,
+    credit: Number(row.querySelector('.gl-line-credit').value) || 0,
+  })).filter(l => l.account_id && (l.debit > 0 || l.credit > 0));
+
+  if(lines.length < 2){ msg.textContent = 'Au moins 2 lignes (un débit et un crédit) requises.'; return; }
+
+  msg.textContent = 'Enregistrement...';
+  const res = await callOpsApi({ action: 'create_manual_journal_entry', owner_id, entry_date: entry_date || undefined, description, lines });
+  if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
+  msg.textContent = 'Écriture enregistrée.';
+  document.getElementById('gl-entry-desc').value = '';
+  await loadGlData();
 }
 
 async function loadVisitInquiries(){

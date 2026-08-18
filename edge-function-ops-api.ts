@@ -807,6 +807,72 @@ Deno.serve(async (req) => {
     // Observabilité — historique des vérifications de santé (une par 15
     // minutes, voir system_health_log dans les migrations) pour voir une
     // tendance se dégrader plutôt qu'un seul instantané "en ce moment".
+    // Module comptable — grand livre à partie double par propriétaire.
+    // Voir supabase/migrations/20260818080337_module_comptable.sql.
+    if (action === "get_trial_balance") {
+      const { owner_id } = body;
+      if (!owner_id) {
+        return new Response(JSON.stringify({ error: "owner_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      const res = await fetch(`${supabaseUrl}/rest/v1/rpc/gl_trial_balance`, {
+        method: "POST", headers: adminHeaders, body: JSON.stringify({ p_owner_id: owner_id }),
+      });
+      return new Response(JSON.stringify({ trial_balance: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "list_gl_accounts") {
+      const { owner_id } = body;
+      if (!owner_id) {
+        return new Response(JSON.stringify({ error: "owner_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      const res = await fetch(`${supabaseUrl}/rest/v1/gl_accounts?owner_id=eq.${owner_id}&select=id,code,name,account_type&order=code.asc`, { headers: adminHeaders });
+      return new Response(JSON.stringify({ accounts: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "list_journal_entries") {
+      const { owner_id } = body;
+      if (!owner_id) {
+        return new Response(JSON.stringify({ error: "owner_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/gl_journal_entries?owner_id=eq.${owner_id}&select=*,gl_journal_lines(debit,credit,gl_accounts(code,name))&order=entry_date.desc&limit=200`,
+        { headers: adminHeaders },
+      );
+      return new Response(JSON.stringify({ entries: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Écriture manuelle — pour tout ce que les écritures automatiques
+    // (loyer/dépense/facture) ne couvrent pas : ajustements, corrections,
+    // écritures d'ouverture. Exige que les lignes s'équilibrent
+    // (somme des débits = somme des crédits) avant d'écrire quoi que ce
+    // soit — sinon le grand livre perd son sens.
+    if (action === "create_manual_journal_entry") {
+      const { owner_id, entry_date, description, lines } = body;
+      if (!owner_id || !description || !Array.isArray(lines) || lines.length < 2) {
+        return new Response(JSON.stringify({ error: "owner_id, description et au moins 2 lignes requis" }), { status: 400, headers: corsHeaders });
+      }
+      const totalDebit = lines.reduce((s: number, l: any) => s + (Number(l.debit) || 0), 0);
+      const totalCredit = lines.reduce((s: number, l: any) => s + (Number(l.credit) || 0), 0);
+      if (Math.abs(totalDebit - totalCredit) > 0.01) {
+        return new Response(JSON.stringify({ error: `Débits (${totalDebit}) et crédits (${totalCredit}) ne s'équilibrent pas` }), { status: 400, headers: corsHeaders });
+      }
+      const entryRes = await fetch(`${supabaseUrl}/rest/v1/gl_journal_entries`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({ owner_id, entry_date: entry_date || new Date().toISOString().slice(0, 10), description, source_type: "manual", created_by: "admin" }),
+      });
+      const [entry] = await entryRes.json().catch(() => [null]);
+      if (!entry?.id) {
+        return new Response(JSON.stringify({ error: "Impossible de créer l'écriture" }), { status: 500, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/gl_journal_lines`, {
+        method: "POST", headers: adminHeaders,
+        body: JSON.stringify(lines.map((l: any) => ({ journal_entry_id: entry.id, account_id: l.account_id, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0 }))),
+      });
+      await logAudit("gl_journal_entry.manual_create", "gl_journal_entries", entry.id, { owner_id, description, total: totalDebit });
+      return new Response(JSON.stringify({ ok: true, entry_id: entry.id }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (action === "get_health_history") {
       const res = await fetch(`${supabaseUrl}/rest/v1/system_health_log?select=checked_at,healthy,issue_count,issues&order=checked_at.desc&limit=200`, { headers: adminHeaders });
       return new Response(JSON.stringify({ history: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
