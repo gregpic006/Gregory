@@ -872,7 +872,13 @@ Deno.serve(async (req) => {
       const linkRes = await fetch(`${supabaseUrl}/auth/v1/admin/generate_link`, {
         method: "POST",
         headers: adminHeaders,
-        body: JSON.stringify({ type: "magiclink", email: userRow.email, options: { redirect_to: config.portalUrl } }),
+        // redirect_to doit être au niveau racine du corps, PAS imbriqué
+        // dans "options" — l'API REST de GoTrue (contrairement au SDK JS,
+        // qui accepte options.redirectTo et le remappe en interne) ignore
+        // silencieusement un redirect_to imbriqué et retombe sur le Site
+        // URL configuré dans Supabase, sans erreur (voir
+        // github.com/supabase/auth/issues/1738).
+        body: JSON.stringify({ type: "magiclink", email: userRow.email, redirect_to: config.portalUrl }),
       });
       const linkData = await linkRes.json();
       const actionLink = linkData?.action_link || linkData?.properties?.action_link;
