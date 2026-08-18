@@ -79,11 +79,14 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: `Le plafond doit être un montant entre ${SPENDING_CAP_MIN} $ et ${SPENDING_CAP_MAX.toLocaleString("fr-CA")} $` }), { status: 400, headers: corsHeaders });
       }
       const previousCap = owner.spending_cap;
-      await fetch(`${supabaseUrl}/rest/v1/owners?id=eq.${owner.id}`, {
+      const patchRes = await fetch(`${supabaseUrl}/rest/v1/owners?id=eq.${owner.id}`, {
         method: "PATCH",
         headers: adminHeaders,
         body: JSON.stringify({ spending_cap: newCap }),
       });
+      if (!patchRes.ok) {
+        return new Response(JSON.stringify({ error: "Impossible d'enregistrer le plafond — réessaie." }), { status: 500, headers: corsHeaders });
+      }
       await logAudit("owner.update_spending_cap", { previous_cap: previousCap, new_cap: newCap });
       return new Response(JSON.stringify({ ok: true, spending_cap: newCap }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }

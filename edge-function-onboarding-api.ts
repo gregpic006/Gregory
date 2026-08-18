@@ -955,6 +955,25 @@ Deno.serve(async (req) => {
       // Étape 3 — traite chaque ligne, avec une limite de concurrence pour
       // rester rapide sans surcharger PostgREST/Auth de 500 requêtes
       // simultanées.
+      //
+      // Deux lignes du MÊME fichier visant la même unité (copier-coller
+      // maladroit) tomberaient potentiellement dans le même lot
+      // concurrent : les deux liraient unitByKey comme "n'existe pas"
+      // avant qu'aucune des deux n'ait fini de créer l'unité, créant
+      // deux unités en double. On neutralise ça en pré-réclamant, de
+      // façon synchrone (donc sans risque de course), la première ligne
+      // à traiter pour chaque clé — les lignes suivantes avec la même
+      // clé sont immédiatement signalées comme doublons plutôt que
+      // d'entrer dans le traitement concurrent.
+      const firstRowIndexForKey = new Map<string, number>();
+      rows.forEach((row: any, index: number) => {
+        const buildingId = buildingByAddress.get(normalizeAddress(row.address || ""));
+        const unitNumber = String(row.unit_number || "").trim().toLowerCase();
+        if (!buildingId || !unitNumber) return;
+        const key = `${buildingId}::${unitNumber}`;
+        if (!firstRowIndexForKey.has(key)) firstRowIndexForKey.set(key, index);
+      });
+
       const CONCURRENCY = 8;
       const results: Array<{ row: number; address: string; unit_number: string; status: string; detail?: string }> = new Array(rows.length);
 
@@ -971,6 +990,10 @@ Deno.serve(async (req) => {
           return;
         }
         const unitKey = `${buildingId}::${unitNumber.toLowerCase()}`;
+        if (firstRowIndexForKey.get(unitKey) !== index) {
+          results[index] = { row: index + 1, address, unit_number: unitNumber, status: "error", detail: "Doublon dans le fichier (même immeuble/unité qu'une ligne précédente) — ignoré" };
+          return;
+        }
         let unitId = unitByKey.get(unitKey);
         let unitCreated = false;
         if (!unitId) {
@@ -1035,10 +1058,14 @@ Deno.serve(async (req) => {
           return;
         }
 
-        await fetch(`${supabaseUrl}/rest/v1/leases`, {
+        const leaseRes = await fetch(`${supabaseUrl}/rest/v1/leases`, {
           method: "POST", headers: adminHeaders,
           body: JSON.stringify({ unit_id: unitId, tenant_id: tenant.id, start_date: startDate, monthly_rent: monthlyRent, status: "active" }),
         });
+        if (!leaseRes.ok) {
+          results[index] = { row: index + 1, address, unit_number: unitNumber, status: "error", detail: "Locataire créé mais échec de création du bail — vérifie manuellement" };
+          return;
+        }
         await fetch(`${supabaseUrl}/rest/v1/units?id=eq.${unitId}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "occupied" }) });
         unitsWithActiveLease.add(unitId);
 

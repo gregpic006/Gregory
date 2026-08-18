@@ -634,11 +634,14 @@ Deno.serve(async (req) => {
       const patch: Record<string, unknown> = { status, consent_method: consent_method || null, processor: processor || null, processor_reference: processor_reference || null, notes: notes || null };
       if (status === "active") patch.consented_at = new Date().toISOString();
       if (status === "revoked") patch.revoked_at = new Date().toISOString();
-      await fetch(`${supabaseUrl}/rest/v1/pad_authorizations?on_conflict=owner_id`, {
+      const upsertRes = await fetch(`${supabaseUrl}/rest/v1/pad_authorizations?on_conflict=owner_id`, {
         method: "POST",
         headers: { ...adminHeaders, Prefer: "resolution=merge-duplicates" },
         body: JSON.stringify({ owner_id, ...patch }),
       });
+      if (!upsertRes.ok) {
+        return new Response(JSON.stringify({ error: "Impossible d'enregistrer l'autorisation PAD" }), { status: 500, headers: corsHeaders });
+      }
       await logAudit("pad_authorization.updated", "pad_authorizations", null, { owner_id, status });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
@@ -668,11 +671,14 @@ Deno.serve(async (req) => {
       };
       if (status === "active") patch.consented_at = new Date().toISOString();
       if (status === "revoked") patch.revoked_at = new Date().toISOString();
-      await fetch(`${supabaseUrl}/rest/v1/tenant_pad_authorizations?on_conflict=lease_id`, {
+      const upsertRes = await fetch(`${supabaseUrl}/rest/v1/tenant_pad_authorizations?on_conflict=lease_id`, {
         method: "POST",
         headers: { ...adminHeaders, Prefer: "resolution=merge-duplicates" },
         body: JSON.stringify({ lease_id, tenant_id, ...patch }),
       });
+      if (!upsertRes.ok) {
+        return new Response(JSON.stringify({ error: "Impossible d'enregistrer l'autorisation PAD" }), { status: 500, headers: corsHeaders });
+      }
       await logAudit("tenant_pad_authorization.updated", "tenant_pad_authorizations", null, { lease_id, status });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
@@ -865,10 +871,17 @@ Deno.serve(async (req) => {
       if (!entry?.id) {
         return new Response(JSON.stringify({ error: "Impossible de créer l'écriture" }), { status: 500, headers: corsHeaders });
       }
-      await fetch(`${supabaseUrl}/rest/v1/gl_journal_lines`, {
+      const linesRes = await fetch(`${supabaseUrl}/rest/v1/gl_journal_lines`, {
         method: "POST", headers: adminHeaders,
         body: JSON.stringify(lines.map((l: any) => ({ journal_entry_id: entry.id, account_id: l.account_id, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0 }))),
       });
+      if (!linesRes.ok) {
+        // Écriture sans lignes = grand livre déséquilibré, contraire à
+        // l'invariant qu'on vient de valider — on retire l'en-tête plutôt
+        // que de laisser une écriture fantôme.
+        await fetch(`${supabaseUrl}/rest/v1/gl_journal_entries?id=eq.${entry.id}`, { method: "DELETE", headers: adminHeaders });
+        return new Response(JSON.stringify({ error: "Impossible d'enregistrer les lignes de l'écriture — annulée" }), { status: 500, headers: corsHeaders });
+      }
       await logAudit("gl_journal_entry.manual_create", "gl_journal_entries", entry.id, { owner_id, description, total: totalDebit });
       return new Response(JSON.stringify({ ok: true, entry_id: entry.id }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
