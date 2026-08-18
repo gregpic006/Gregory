@@ -23,92 +23,30 @@ const LEGAL_DISCLAIMER = "Cet avis est transmis à titre informatif dans le cadr
 // de se fier uniquement au réglage "Verify JWT" de la plateforme —
 // défense en profondeur : cette fonction reste sûre même si ce réglage
 // est mal configuré pour une fonction en particulier.
-async function verifySupabaseJwt(jwt: string, jwtSecret: string, supabaseUrl: string): Promise<{ sub: string; [key: string]: unknown } | null> {
-  const parts = jwt.split(".");
-  if (parts.length !== 3) return null;
-  const [headerB64, payloadB64, signatureB64] = parts;
+// Vérifie le JWT en le faisant valider par le service Auth de Supabase
+// lui-même (GET /auth/v1/user) plutôt qu'en réimplémentant la
+// cryptographie de vérification. La passerelle Edge Functions a un bug
+// connu qui rejette à tort les JWT signés en ES256 quand verify_jwt=true
+// est réglé au niveau plateforme (github.com/supabase/supabase/issues/42244)
+// — d'où verify_jwt=false dans supabase/config.toml pour cette fonction :
+// ce code est maintenant la seule vérification, et s'appuie sur l'API
+// Auth de Supabase, qui elle gère ES256 correctement.
+async function verifySupabaseJwt(jwt: string, supabaseUrl: string): Promise<{ sub: string; [key: string]: unknown } | null> {
+  if (!jwt) return null;
   try {
-    const header = JSON.parse(new TextDecoder().decode(base64UrlToBytes(headerB64)));
-    const signingInput = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
-    const signature = base64UrlToBytes(signatureB64);
-
-    let valid = false;
-    if (header.alg === "HS256") {
-      if (!jwtSecret) { console.error("jwt_verify: hs256_no_secret_configured"); return null; }
-      const key = await crypto.subtle.importKey(
-        "raw",
-        new TextEncoder().encode(jwtSecret),
-        { name: "HMAC", hash: "SHA-256" },
-        false,
-        ["verify"],
-      );
-      valid = await crypto.subtle.verify("HMAC", key, signature, signingInput);
-      if (!valid) console.error("jwt_verify: hs256_signature_mismatch");
-    } else if (header.alg === "ES256") {
-      // Supabase signe désormais les nouveaux JWT avec une clé
-      // asymétrique ECC (P-256) par défaut — on vérifie via la clé
-      // publique exposée sur /auth/v1/jwks plutôt qu'un secret partagé.
-      // Le HS256 ci-dessus reste supporté pour les projets encore sur
-      // l'ancien secret JWT legacy (les deux peuvent coexister pendant
-      // une migration Supabase).
-      const jwks = await getSupabaseJwks(supabaseUrl);
-      console.error("jwt_verify: jwks_fetched", "keys_count=" + jwks.keys.length, "want_kid=" + header.kid, "available_kids=" + jwks.keys.map((k: any) => k.kid).join(","));
-      const jwk = jwks.keys.find((k: any) => k.kid === header.kid && k.kty === "EC");
-      if (!jwk) { console.error("jwt_verify: no_matching_jwk_for_kid", header.kid); return null; }
-      try {
-        const publicKey = await crypto.subtle.importKey(
-          "jwk",
-          { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
-          { name: "ECDSA", namedCurve: "P-256" },
-          false,
-          ["verify"],
-        );
-        valid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, publicKey, signature, signingInput);
-        if (!valid) console.error("jwt_verify: es256_signature_mismatch");
-      } catch (importErr) {
-        console.error("jwt_verify: es256_import_or_verify_threw", String(importErr));
-        return null;
-      }
-    } else {
-      console.error("jwt_verify: unsupported_alg", header.alg);
-      return null;
-    }
-
-    if (!valid) return null;
-    const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payloadB64)));
-    if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) { console.error("jwt_verify: token_expired"); return null; }
-    return payload;
-  } catch (outerErr) {
-    console.error("jwt_verify: outer_exception", String(outerErr));
+    const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      },
+    });
+    if (!res.ok) return null;
+    const user = await res.json().catch(() => null);
+    if (!user?.id) return null;
+    return { sub: user.id, ...user };
+  } catch {
     return null;
   }
-}
-
-// Cache en mémoire du trousseau de clés publiques (JWKS) du projet —
-// évite un appel réseau à chaque requête ; réutilisé tant que l'instance
-// de la fonction edge reste "chaude", et rafraîchi après 10 minutes pour
-// suivre une éventuelle rotation de clé côté Supabase.
-let cachedJwks: { keys: any[] } | null = null;
-let cachedJwksAt = 0;
-async function getSupabaseJwks(supabaseUrl: string): Promise<{ keys: any[] }> {
-  const now = Date.now();
-  if (cachedJwks && now - cachedJwksAt < 10 * 60 * 1000) return cachedJwks;
-  const res = await fetch(`${supabaseUrl}/auth/v1/jwks`, {
-    headers: { apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "" },
-  });
-  const data = await res.json().catch(() => ({ keys: [] }));
-  cachedJwks = { keys: Array.isArray(data?.keys) ? data.keys : [] };
-  cachedJwksAt = now;
-  return cachedJwks;
-}
-
-function base64UrlToBytes(b64url: string): Uint8Array {
-  let b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
-  while (b64.length % 4 !== 0) b64 += "=";
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
 }
 
 Deno.serve(async (req) => {
@@ -121,8 +59,7 @@ Deno.serve(async (req) => {
     if (!jwt) {
       return new Response(JSON.stringify({ error: "Non authentifié" }), { status: 401, headers: corsHeaders });
     }
-    const jwtSecret = Deno.env.get("SUPABASE_JWT_SECRET") ?? "";
-    const claims = await verifySupabaseJwt(jwt, jwtSecret, Deno.env.get("SUPABASE_URL") ?? "");
+    const claims = await verifySupabaseJwt(jwt, Deno.env.get("SUPABASE_URL") ?? "");
     if (!claims) {
       return new Response(JSON.stringify({ error: "Jeton invalide ou expiré" }), { status: 401, headers: corsHeaders });
     }

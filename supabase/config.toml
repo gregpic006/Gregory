@@ -6,42 +6,45 @@
 # déploiement (voir ce fichier), jamais commités sous cette forme.
 #
 # verify_jwt = true  → Supabase rejette la requête AVANT même d'exécuter
-#   la fonction si le token n'est pas un JWT Supabase valide. Réservé
-#   aux fonctions où TOUT appel légitime vient d'un utilisateur connecté
-#   (propriétaire/locataire/admin/travailleur/prospecteur).
-# verify_jwt = false → la fonction gère elle-même l'authentification
-#   (lien à token unique, secret partagé, appel système/cron, ou aucune
-#   auth requise pour un formulaire public). Les 13 fonctions
-#   "admin-authentifiées" vérifient de toute façon la signature JWT en
-#   code (voir README, section Sécurité) — ce réglage plateforme est une
-#   couche additionnelle, pas la seule.
+#   la fonction si le token n'est pas un JWT Supabase valide. RÉGLÉ À
+#   FALSE PARTOUT actuellement — la passerelle Edge Functions a un bug
+#   connu qui rejette à tort les JWT signés en ES256 (clés asymétriques,
+#   le mode par défaut du projet) quand ce réglage est à true, voir
+#   github.com/supabase/supabase/issues/42244. Contournement officiel
+#   Supabase : verify_jwt=false + vérification manuelle dans le code.
+# verify_jwt = false → la fonction gère elle-même l'authentification.
+#   Les 13 fonctions "admin-authentifiées" vérifient le JWT en code en
+#   appelant GET /auth/v1/user (voir README, section Sécurité) — c'est
+#   la SEULE vérification pour ces fonctions tant que le bug Supabase
+#   ci-dessus n'est pas corrigé côté plateforme. Repasser ces 12
+#   fonctions à true seulement après confirmation que ce bug est réglé.
 
 project_id = "kdmwfbcziokygfcmjxeq"
 
 [functions.admin-api]
-verify_jwt = true
+verify_jwt = false
 [functions.ask-documents]
-verify_jwt = true
+verify_jwt = false
 [functions.ask-finances]
-verify_jwt = true
+verify_jwt = false
 [functions.caller-api]
-verify_jwt = true
+verify_jwt = false
 [functions.crm-api]
-verify_jwt = true
+verify_jwt = false
 [functions.handle-lease-renewal-notice]
-verify_jwt = true
+verify_jwt = false
 [functions.onboarding-api]
-verify_jwt = true
+verify_jwt = false
 [functions.ops-api]
-verify_jwt = true
+verify_jwt = false
 [functions.parse-expense-receipt]
-verify_jwt = true
+verify_jwt = false
 [functions.privacy-api]
-verify_jwt = true
+verify_jwt = false
 [functions.reconcile-bank-transactions]
-verify_jwt = true
+verify_jwt = false
 [functions.worker-api]
-verify_jwt = true
+verify_jwt = false
 
 # ---- Fonctions publiques, à token, ou système/cron (verify_jwt = false) ----
 [functions.analyze-satisfaction-signal]
