@@ -804,6 +804,23 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ health }), { status: 200, headers: corsHeaders });
     }
 
+    // Observabilité — historique des vérifications de santé (une par 15
+    // minutes, voir system_health_log dans les migrations) pour voir une
+    // tendance se dégrader plutôt qu'un seul instantané "en ce moment".
+    if (action === "get_health_history") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/system_health_log?select=checked_at,healthy,issue_count,issues&order=checked_at.desc&limit=200`, { headers: adminHeaders });
+      return new Response(JSON.stringify({ history: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Erreurs IA récentes détaillées (ai_run_log.error) — check_system_health
+    // ne remonte qu'un compte agrégé au-delà de 10 en 24h, utile pour
+    // l'alerte mais pas pour diagnostiquer ; ceci donne le détail ligne
+    // par ligne pour investiguer.
+    if (action === "get_recent_ai_errors") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/ai_run_log?error=not.is.null&select=function_name,error,entity_type,entity_id,created_at&order=created_at.desc&limit=50`, { headers: adminHeaders });
+      return new Response(JSON.stringify({ errors: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });

@@ -1,0 +1,27 @@
+name: Test de charge
+
+on:
+  workflow_dispatch:
+    inputs:
+      concurrency:
+        description: "Requêtes concurrentes"
+        default: "10"
+      duration_seconds:
+        description: "Durée (secondes)"
+        default: "30"
+  # Déclenchement manuel uniquement — même prudence que security-check.yml,
+  # on ne veut pas de charge artificielle non supervisée contre la prod.
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Lancer le test de charge
+        env:
+          LOAD_TEST_CONCURRENCY: ${{ github.event.inputs.concurrency }}
+          LOAD_TEST_DURATION_SECONDS: ${{ github.event.inputs.duration_seconds }}
+        run: node scripts/load-test.mjs

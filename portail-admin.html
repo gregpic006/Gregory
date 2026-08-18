@@ -188,6 +188,19 @@
     <div id="seed-demo-body" style="margin-top:14px;"></div>
   </div>
 
+  <h1 style="margin-top:40px;font-size:22px;">Observabilité</h1>
+  <p class="subtitle" style="margin-bottom:16px;">Historique des vérifications de santé (une aux 15 minutes) et détail des erreurs IA récentes — pour voir une tendance se dégrader avant que ça devienne une alerte, et diagnostiquer sans passer par les logs Supabase.</p>
+  <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:32px;">
+    <div style="flex:1;min-width:320px;">
+      <h3 style="font-size:13px;margin-bottom:8px;">Historique de santé (200 dernières vérifications)</h3>
+      <div id="health-history-body" style="max-height:340px;overflow-y:auto;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+    </div>
+    <div style="flex:1;min-width:320px;">
+      <h3 style="font-size:13px;margin-bottom:8px;">Erreurs IA récentes</h3>
+      <div id="ai-errors-body" style="max-height:340px;overflow-y:auto;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+    </div>
+  </div>
+
   <h1 style="margin-top:40px;font-size:22px;">Journal d'audit</h1>
   <p class="subtitle" style="margin-bottom:16px;">Dernières décisions et actions sensibles — 100 plus récentes, classées par catégorie</p>
   <div id="audit-log-groups"><p class="subtitle">Chargement...</p></div>
@@ -552,6 +565,8 @@ async function loadAdminDashboard(){
   const { totals, clients, anomalies, command_center } = data;
   renderCommandCenter(command_center);
   await loadSystemHealth();
+  await loadHealthHistory();
+  await loadAiErrors();
   document.getElementById('m-clients').textContent = totals.clients_count;
   document.getElementById('m-buildings').textContent = totals.buildings_count;
   document.getElementById('m-units').textContent = totals.units_count;
@@ -747,6 +762,38 @@ async function loadSystemHealth(){
   banner.innerHTML = `<b>État du système — ${health.issues.length} problème(s) détecté(s)</b><ul style="margin:8px 0 0 18px;padding:0;">` +
     health.issues.map(i => `<li><span style="color:${healthSeverityColor[i.severity] || 'inherit'};">${healthSeverityLabel[i.severity] || i.severity}</span> — ${esc(i.detail)}</li>`).join('') +
     `</ul>`;
+}
+
+async function loadHealthHistory(){
+  const container = document.getElementById('health-history-body');
+  const res = await callOpsApi({ action: 'get_health_history' });
+  const history = res?.history || [];
+  if(!history.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun historique pour l\'instant.</p>';
+    return;
+  }
+  container.innerHTML = '<table><thead><tr><th>Vérifié le</th><th>État</th><th># problèmes</th></tr></thead><tbody>' +
+    history.map(h => `<tr>
+      <td>${new Date(h.checked_at).toLocaleString('fr-CA')}</td>
+      <td>${h.healthy ? '<span style="color:var(--sage);">🟢 Sain</span>' : '<span style="color:var(--rust);">🔴 Problème</span>'}</td>
+      <td class="num">${h.issue_count}</td>
+    </tr>`).join('') + '</tbody></table>';
+}
+
+async function loadAiErrors(){
+  const container = document.getElementById('ai-errors-body');
+  const res = await callOpsApi({ action: 'get_recent_ai_errors' });
+  const errors = res?.errors || [];
+  if(!errors.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune erreur IA récente.</p>';
+    return;
+  }
+  container.innerHTML = errors.map(e => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:10px 14px;margin-bottom:6px;font-size:12.5px;">
+      <b>${esc(e.function_name)}</b> — ${new Date(e.created_at).toLocaleString('fr-CA')}
+      <div style="color:var(--rust);margin-top:2px;">${esc(e.error)}</div>
+      ${e.entity_type ? `<div style="color:var(--muted);font-size:11.5px;margin-top:2px;">${esc(e.entity_type)}${e.entity_id ? ' — ' + esc(e.entity_id) : ''}</div>` : ''}
+    </div>`).join('');
 }
 
 function renderCommandCenter(cc){
