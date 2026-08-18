@@ -163,6 +163,23 @@
     <p id="ob-tenant-msg" style="font-size:12.5px;margin-top:8px;"></p>
   </div>
 
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:32px;">
+    <h3 style="font-size:14px;margin-bottom:10px;">5. Import massif (immeubles + unités + locataires)</h3>
+    <p style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">Pour ajouter 50 à 500 portes d'un coup au lieu de remplir le formulaire ci-dessus une unité à la fois. Fichier CSV avec ces colonnes (dans cet ordre) : <code>address,unit_number,unit_type,rent,tenant_full_name,tenant_email,tenant_phone,lease_start_date,monthly_rent</code>. Seules <code>address</code> et <code>unit_number</code> sont obligatoires — laisse les colonnes locataire vides pour une unité vacante. Les immeubles/unités déjà existants (même adresse, même numéro) ne sont jamais dupliqués — relancer le même fichier deux fois est sans danger.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Propriétaire</label>
+        <select id="bulk-import-owner" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir —</option></select>
+      </div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fichier CSV</label>
+        <input type="file" id="bulk-import-file" accept=".csv" style="padding:6px;border:1px solid var(--line);">
+      </div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);"><input type="checkbox" id="bulk-import-send-emails"> Envoyer un courriel de bienvenue aux locataires avec un courriel renseigné</label></div>
+      <button onclick="obBulkImport()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Importer</button>
+    </div>
+    <p id="bulk-import-msg" style="font-size:12.5px;margin-top:8px;"></p>
+    <div id="bulk-import-results" style="margin-top:10px;max-height:400px;overflow-y:auto;"></div>
+  </div>
+
   <h1 style="margin-top:40px;font-size:22px;">Comptes de démonstration</h1>
   <p class="subtitle" style="margin-bottom:16px;">Un accès de connexion permanent à chacun des 4 portails (propriétaire, locataire, prospecteur téléphonique, travailleur) sur un immeuble/unité fictifs partagés — pour tester sans repasser par les formulaires ci-dessus à chaque fois. Le travailleur démo est auto-vérifié et couvre la même zone que l'immeuble démo, pour que le dispatch automatique trouve un candidat tout de suite.</p>
   <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:32px;">
@@ -811,8 +828,72 @@ async function callOnboardingApi(payload){
 
 async function obInit(){
   const data = await callOnboardingApi({ action: 'list_owners' });
-  const select = document.getElementById('ob-building-owner');
-  select.innerHTML = '<option value="">— Choisir —</option>' + (data?.owners || []).map(o => `<option value="${o.id}">${esc(o.full_name)}${o.company_name ? ' — ' + esc(o.company_name) : ''}</option>`).join('');
+  const options = '<option value="">— Choisir —</option>' + (data?.owners || []).map(o => `<option value="${o.id}">${esc(o.full_name)}${o.company_name ? ' — ' + esc(o.company_name) : ''}</option>`).join('');
+  document.getElementById('ob-building-owner').innerHTML = options;
+  document.getElementById('bulk-import-owner').innerHTML = options;
+}
+
+// Parseur CSV léger avec support des champs entre guillemets (ex: une
+// adresse contenant une virgule, "123 rue Principale, app. 4") — le
+// simple split(',') utilisé ailleurs dans ce fichier (rapprochement
+// bancaire) ne convient pas ici car les adresses ont presque toujours
+// une virgule.
+function parseQuotedCsv(text){
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i = 0; i < text.length; i++){
+    const c = text[i], next = text[i+1];
+    if(inQuotes){
+      if(c === '"' && next === '"'){ field += '"'; i++; }
+      else if(c === '"'){ inQuotes = false; }
+      else field += c;
+    } else {
+      if(c === '"') inQuotes = true;
+      else if(c === ','){ row.push(field); field = ''; }
+      else if(c === '\n' || c === '\r'){
+        if(c === '\r' && next === '\n') i++;
+        row.push(field); field = '';
+        if(row.some(f => f.trim() !== '')) rows.push(row);
+        row = [];
+      } else field += c;
+    }
+  }
+  if(field !== '' || row.length){ row.push(field); if(row.some(f => f.trim() !== '')) rows.push(row); }
+  return rows;
+}
+
+async function obBulkImport(){
+  const msg = document.getElementById('bulk-import-msg');
+  const resultsEl = document.getElementById('bulk-import-results');
+  const owner_id = document.getElementById('bulk-import-owner').value;
+  const fileInput = document.getElementById('bulk-import-file');
+  const send_tenant_emails = document.getElementById('bulk-import-send-emails').checked;
+  if(!owner_id){ msg.textContent = 'Choisis un propriétaire.'; return; }
+  if(!fileInput.files.length){ msg.textContent = 'Choisis un fichier CSV.'; return; }
+
+  const text = await fileInput.files[0].text();
+  const csvRows = parseQuotedCsv(text);
+  if(!csvRows.length){ msg.textContent = 'Fichier vide.'; return; }
+  const header = csvRows[0].map(h => h.trim().toLowerCase());
+  const expected = ['address','unit_number','unit_type','rent','tenant_full_name','tenant_email','tenant_phone','lease_start_date','monthly_rent'];
+  const rows = csvRows.slice(1).map(cols => {
+    const r = {};
+    header.forEach((key, i) => { if(expected.includes(key)) r[key] = (cols[i] || '').trim(); });
+    return r;
+  }).filter(r => r.address && r.unit_number);
+
+  if(!rows.length){ msg.textContent = "Aucune ligne valide trouvée — vérifie les en-têtes de colonnes."; return; }
+
+  msg.textContent = `Import de ${rows.length} ligne(s) en cours...`;
+  resultsEl.innerHTML = '';
+  const res = await callOnboardingApi({ action: 'bulk_import_units', owner_id, rows, send_tenant_emails });
+  if(res?.error){ msg.textContent = 'Erreur : ' + res.error; return; }
+
+  const s = res.summary || {};
+  msg.textContent = `Terminé — ${s.created || 0} bail(s) créé(s), ${s.unit_created || 0} unité(s) créée(s) sans locataire, ${s.unit_already_existed || 0} unité(s) déjà existante(s), ${s.skipped || 0} ignorée(s), ${s.error || 0} erreur(s).`;
+  resultsEl.innerHTML = '<table><thead><tr><th>Ligne</th><th>Adresse</th><th>Unité</th><th>Résultat</th><th>Détail</th></tr></thead><tbody>' +
+    res.results.map(r => `<tr><td>${r.row}</td><td>${esc(r.address)}</td><td>${esc(r.unit_number)}</td><td>${esc(r.status)}</td><td>${esc(r.detail || '')}</td></tr>`).join('') +
+    '</tbody></table>';
 }
 
 async function obCreateOwner(){

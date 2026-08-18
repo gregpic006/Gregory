@@ -236,6 +236,13 @@
 
       <section id="approvals" class="section">
         <div class="toolbar"><h2>Travaux à approuver</h2></div>
+        <p style="color:var(--muted);font-size:13.5px;">
+          Plafond d'approbation automatique :
+          <input type="number" id="spending-cap-input" min="0" max="50000" step="10" style="width:100px;">
+          $ — au-delà, on te demande toujours ton approbation avant d'envoyer un travailleur.
+          <button class="btn-small" onclick="saveSpendingCap()">Enregistrer</button>
+          <span id="spending-cap-status"></span>
+        </p>
         <div id="approvals-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
       </section>
 
@@ -666,6 +673,8 @@ async function loadWorkOrders(){
 }
 
 async function loadApprovals(){
+  document.getElementById('spending-cap-input').value = ownerRecord.spending_cap;
+
   const { data } = await supabaseClient
     .from('approvals')
     .select('*, work_orders(description, unit_id, units(unit_number))')
@@ -692,6 +701,20 @@ async function loadApprovals(){
         <button onclick="askApprovalQuestion('${a.id}')">Poser une question</button>
       </div>
     </div>`).join('');
+}
+
+async function saveSpendingCap(){
+  const statusEl = document.getElementById('spending-cap-status');
+  const newCap = Number(document.getElementById('spending-cap-input').value);
+  statusEl.textContent = 'Enregistrement...';
+  const { data, error } = await supabaseClient.functions.invoke('owner-api', { body: { action: 'update_spending_cap', spending_cap: newCap } });
+  if(error || data?.error){
+    statusEl.textContent = data?.error || "Erreur — réessaie.";
+    return;
+  }
+  ownerRecord.spending_cap = data.spending_cap;
+  statusEl.textContent = 'Enregistré ✓';
+  setTimeout(() => { statusEl.textContent = ''; }, 3000);
 }
 
 async function decideApproval(id, decision){

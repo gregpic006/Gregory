@@ -169,32 +169,39 @@ async function submitCompletion(){
   const [before_photos, after_photos] = await Promise.all([filesToPayload(beforeFiles), filesToPayload(afterFiles)]);
   const { ok, data } = await callResponseApi({ action: 'submit_completion', message, before_photos, after_photos });
 
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   const result = document.getElementById('result');
   if(!ok){
+    btn.disabled = false;
+    btn.textContent = 'Envoyer';
     result.className = 'result error active';
-    result.textContent = data?.error || "Une erreur est survenue. Merci de contacter l'équipe Portail.";
+    result.textContent = data?.error || "Une erreur est survenue — réessaie, ou contacte l'équipe Portail si ça persiste.";
     return;
   }
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   result.className = 'result active';
   result.textContent = "Merci ! Le travail a été signalé comme terminé avec tes photos. L'équipe Portail va confirmer la fermeture du dossier.";
+  if(data?.skipped_photos){
+    result.textContent += ` Attention : ${data.skipped_photos} photo(s) n'ont pas pu être envoyée(s) — contacte l'équipe Portail si c'est important.`;
+  }
 }
 
 async function respond(action){
   const messageEl = document.getElementById(action + '-message');
   const message = messageEl ? messageEl.value.trim() : undefined;
-  document.querySelectorAll('button').forEach(b => b.disabled = true);
+  const buttons = Array.from(document.querySelectorAll('button'));
+  buttons.forEach(b => b.disabled = true);
 
   const { ok, data } = await callResponseApi({ action, message });
   const result = document.getElementById('result');
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
 
   if(!ok){
+    buttons.forEach(b => b.disabled = false);
     result.className = 'result error active';
-    result.textContent = data?.error || "Une erreur est survenue. Merci de contacter l'équipe Portail.";
+    result.textContent = data?.error || "Une erreur est survenue — réessaie, ou contacte l'équipe Portail si ça persiste.";
     return;
   }
 
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   const messages = {
     accept: "Merci ! Ta disponibilité est confirmée pour ce travail.",
     decline: data.reassigned ? "Compris, ce travail a été réassigné à un autre travailleur." : "Compris. L'équipe Portail a été avisée qu'aucun autre travailleur n'est disponible.",

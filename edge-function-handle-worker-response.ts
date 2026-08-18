@@ -87,6 +87,7 @@ Deno.serve(async (req) => {
       }
 
       const { before_photos, after_photos } = body;
+      let skippedPhotoCount = 0;
       const uploadPhotos = async (photos: Array<{ base64: string; filename?: string; content_type?: string }> | undefined, subfolder: string) => {
         const paths: string[] = [];
         for (const p of (Array.isArray(photos) ? photos : []).slice(0, 5)) {
@@ -102,7 +103,12 @@ Deno.serve(async (req) => {
             },
             body: bytes,
           });
+          // Une photo qui échoue à téléverser était jusqu'ici abandonnée en
+          // silence — le travailleur n'avait aucune façon de savoir qu'une
+          // partie de ses photos n'avait pas été envoyée. On compte les
+          // échecs pour le signaler dans la réponse (voir skipped_photos).
           if (uploadRes.ok) paths.push(path);
+          else skippedPhotoCount++;
         }
         return paths;
       };
@@ -130,7 +136,7 @@ Deno.serve(async (req) => {
         `${wo.workers?.name || "Le travailleur"} a signalé avoir terminé : ${wo.description}\n${message ? "Note : " + message + "\n" : ""}Photos avant : ${beforeUrls.length}, après : ${afterUrls.length}\n\nEntre le coût final dans le portail admin pour clore le dossier et aviser le locataire.`,
       );
 
-      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+      return new Response(JSON.stringify({ ok: true, skipped_photos: skippedPhotoCount || undefined }), { status: 200, headers: corsHeaders });
     }
 
     if (wo.worker_response !== "pending") {

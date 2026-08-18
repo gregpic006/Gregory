@@ -35,6 +35,8 @@ verify_jwt = false
 verify_jwt = false
 [functions.onboarding-api]
 verify_jwt = false
+[functions.owner-api]
+verify_jwt = false
 [functions.ops-api]
 verify_jwt = false
 [functions.parse-expense-receipt]

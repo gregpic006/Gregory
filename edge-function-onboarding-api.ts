@@ -459,6 +459,32 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, owner_id: owner?.id, temp_password: password }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    if (action === "update_owner") {
+      const { owner_id, full_name, phone, company_name, management_rate, spending_cap } = body;
+      if (!owner_id) {
+        return new Response(JSON.stringify({ error: "owner_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      const patch: Record<string, unknown> = {};
+      if (full_name !== undefined) patch.full_name = full_name;
+      if (phone !== undefined) patch.phone = phone || null;
+      if (company_name !== undefined) patch.company_name = company_name || null;
+      if (management_rate !== undefined) patch.management_rate = management_rate;
+      if (spending_cap !== undefined) patch.spending_cap = spending_cap;
+      if (Object.keys(patch).length === 0) {
+        return new Response(JSON.stringify({ error: "Aucun champ à mettre à jour" }), { status: 400, headers: corsHeaders });
+      }
+      const res = await fetch(`${supabaseUrl}/rest/v1/owners?id=eq.${owner_id}`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        return new Response(JSON.stringify({ error: "Impossible de mettre à jour le propriétaire" }), { status: 500, headers: corsHeaders });
+      }
+      await logAudit("owner.update", "owners", owner_id, patch);
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (action === "add_building") {
       const { owner_id, address, unit_count, year_built } = body;
       if (!owner_id || !address) {
@@ -856,6 +882,176 @@ Deno.serve(async (req) => {
 
       await logAudit("admin.impersonate", config.table, target_id, { target_role, target_email: userRow.email, target_name: target[config.nameColumn] });
       return new Response(JSON.stringify({ ok: true, action_link: actionLink }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Import massif de portes (50-500 lignes typiquement) — une ligne par
+    // unité, avec immeuble/locataire/bail optionnels sur la même ligne.
+    // Traite les lignes en lots parallèles plutôt qu'une par une en
+    // séquence (500 requêtes séquentielles dépasseraient facilement le
+    // temps de réponse d'une fonction edge). Ne bloque jamais tout
+    // l'import sur une ligne en erreur — chaque ligne rapporte son propre
+    // résultat, comme reconcile-bank-transactions.ts le fait déjà pour le
+    // CSV bancaire.
+    if (action === "bulk_import_units") {
+      const { owner_id, rows, send_tenant_emails } = body;
+      if (!owner_id) {
+        return new Response(JSON.stringify({ error: "owner_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      if (!Array.isArray(rows) || !rows.length) {
+        return new Response(JSON.stringify({ error: "Aucune ligne à importer" }), { status: 400, headers: corsHeaders });
+      }
+      if (rows.length > 500) {
+        return new Response(JSON.stringify({ error: "Maximum 500 lignes par import — divise le fichier en plusieurs lots" }), { status: 400, headers: corsHeaders });
+      }
+      const ownerCheckRes = await fetch(`${supabaseUrl}/rest/v1/owners?id=eq.${owner_id}&select=id`, { headers: adminHeaders });
+      const [ownerRow] = await ownerCheckRes.json().catch(() => [null]);
+      if (!ownerRow) {
+        return new Response(JSON.stringify({ error: "Propriétaire introuvable" }), { status: 404, headers: corsHeaders });
+      }
+
+      const normalizeAddress = (s: string) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
+
+      // Étape 1 — résoudre/créer les immeubles (peu nombreux même pour 500
+      // unités : typiquement quelques dizaines maximum), séquentiellement
+      // pour éviter de créer deux fois le même immeuble en parallèle.
+      const existingBuildingsRes = await fetch(`${supabaseUrl}/rest/v1/buildings?owner_id=eq.${owner_id}&select=id,address`, { headers: adminHeaders });
+      const existingBuildings = await existingBuildingsRes.json().catch(() => []);
+      const buildingByAddress = new Map<string, string>();
+      for (const b of Array.isArray(existingBuildings) ? existingBuildings : []) {
+        buildingByAddress.set(normalizeAddress(b.address), b.id);
+      }
+      const uniqueAddresses = [...new Set(rows.map((r: any) => normalizeAddress(r.address)).filter(Boolean))];
+      for (const addrKey of uniqueAddresses) {
+        if (buildingByAddress.has(addrKey)) continue;
+        const originalAddress = rows.find((r: any) => normalizeAddress(r.address) === addrKey)?.address;
+        const createRes = await fetch(`${supabaseUrl}/rest/v1/buildings`, {
+          method: "POST",
+          headers: { ...adminHeaders, Prefer: "return=representation" },
+          body: JSON.stringify({ owner_id, address: originalAddress }),
+        });
+        const [newBuilding] = await createRes.json().catch(() => [null]);
+        if (newBuilding?.id) buildingByAddress.set(addrKey, newBuilding.id);
+      }
+
+      // Étape 2 — unités et baux actifs déjà existants, pour ne rien
+      // dupliquer si l'import est relancé (ex: fichier corrigé et
+      // re-téléversé après une première passe partielle).
+      const buildingIds = [...new Set(buildingByAddress.values())];
+      const existingUnitsRes = buildingIds.length
+        ? await fetch(`${supabaseUrl}/rest/v1/units?building_id=in.(${buildingIds.join(",")})&select=id,unit_number,building_id`, { headers: adminHeaders })
+        : null;
+      const existingUnits = existingUnitsRes ? await existingUnitsRes.json().catch(() => []) : [];
+      const unitByKey = new Map<string, string>();
+      for (const u of Array.isArray(existingUnits) ? existingUnits : []) {
+        unitByKey.set(`${u.building_id}::${String(u.unit_number).trim().toLowerCase()}`, u.id);
+      }
+      const unitIds = [...unitByKey.values()];
+      const existingLeasesRes = unitIds.length
+        ? await fetch(`${supabaseUrl}/rest/v1/leases?unit_id=in.(${unitIds.join(",")})&status=eq.active&select=unit_id`, { headers: adminHeaders })
+        : null;
+      const existingLeases = existingLeasesRes ? await existingLeasesRes.json().catch(() => []) : [];
+      const unitsWithActiveLease = new Set((Array.isArray(existingLeases) ? existingLeases : []).map((l: any) => l.unit_id));
+
+      // Étape 3 — traite chaque ligne, avec une limite de concurrence pour
+      // rester rapide sans surcharger PostgREST/Auth de 500 requêtes
+      // simultanées.
+      const CONCURRENCY = 8;
+      const results: Array<{ row: number; address: string; unit_number: string; status: string; detail?: string }> = new Array(rows.length);
+
+      const processRow = async (row: any, index: number) => {
+        const address = String(row.address || "").trim();
+        const unitNumber = String(row.unit_number || "").trim();
+        if (!address || !unitNumber) {
+          results[index] = { row: index + 1, address, unit_number: unitNumber, status: "error", detail: "Adresse et numéro d'unité requis" };
+          return;
+        }
+        const buildingId = buildingByAddress.get(normalizeAddress(address));
+        if (!buildingId) {
+          results[index] = { row: index + 1, address, unit_number: unitNumber, status: "error", detail: "Immeuble introuvable/non créé" };
+          return;
+        }
+        const unitKey = `${buildingId}::${unitNumber.toLowerCase()}`;
+        let unitId = unitByKey.get(unitKey);
+        let unitCreated = false;
+        if (!unitId) {
+          const rent = row.rent != null && row.rent !== "" ? Number(row.rent) : null;
+          const createUnitRes = await fetch(`${supabaseUrl}/rest/v1/units`, {
+            method: "POST",
+            headers: { ...adminHeaders, Prefer: "return=representation" },
+            body: JSON.stringify({
+              building_id: buildingId, unit_number: unitNumber, unit_type: row.unit_type || null,
+              rent: Number.isFinite(rent) ? rent : null, status: row.tenant_full_name ? "occupied" : "available",
+            }),
+          });
+          const [newUnit] = await createUnitRes.json().catch(() => [null]);
+          if (!newUnit?.id) {
+            results[index] = { row: index + 1, address, unit_number: unitNumber, status: "error", detail: "Échec de création de l'unité" };
+            return;
+          }
+          unitId = newUnit.id;
+          unitByKey.set(unitKey, unitId);
+          unitCreated = true;
+        }
+
+        if (!row.tenant_full_name) {
+          results[index] = { row: index + 1, address, unit_number: unitNumber, status: unitCreated ? "unit_created" : "unit_already_existed" };
+          return;
+        }
+        if (unitsWithActiveLease.has(unitId)) {
+          results[index] = { row: index + 1, address, unit_number: unitNumber, status: "skipped", detail: "Unité déjà louée (bail actif existant) — locataire ignoré" };
+          return;
+        }
+        const monthlyRent = row.monthly_rent != null && row.monthly_rent !== "" ? Number(row.monthly_rent) : Number(row.rent);
+        const startDate = row.lease_start_date || new Date().toISOString().slice(0, 10);
+        if (!Number.isFinite(monthlyRent)) {
+          results[index] = { row: index + 1, address, unit_number: unitNumber, status: "error", detail: "Loyer manquant/invalide pour créer le bail" };
+          return;
+        }
+
+        let authUserId: string | null = null;
+        if (row.tenant_email && send_tenant_emails) {
+          const tempPassword = randomPassword();
+          const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+            method: "POST", headers: adminHeaders,
+            body: JSON.stringify({ email: row.tenant_email, password: tempPassword, email_confirm: true }),
+          });
+          const authData = await authRes.json().catch(() => ({}));
+          if (authRes.ok && authData.id) {
+            authUserId = authData.id;
+            await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${authUserId}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ role: "tenant" }) });
+            await sendEmail(row.tenant_email, "Bienvenue sur Portail — ton accès locataire",
+              `Bonjour ${row.tenant_full_name},\n\nTon compte locataire Portail est prêt.\n\nPortail : ${TENANT_PORTAL_URL}\nCourriel : ${row.tenant_email}\nMot de passe temporaire : ${tempPassword}\n\nConnecte-toi pour voir ton bail, tes paiements et faire une demande de service.\n\nL'équipe Portail`);
+          }
+        }
+
+        const tenantRes = await fetch(`${supabaseUrl}/rest/v1/tenants`, {
+          method: "POST",
+          headers: { ...adminHeaders, Prefer: "return=representation" },
+          body: JSON.stringify({ user_id: authUserId, full_name: row.tenant_full_name, email: row.tenant_email || null, phone: row.tenant_phone || null }),
+        });
+        const [tenant] = await tenantRes.json().catch(() => [null]);
+        if (!tenant?.id) {
+          results[index] = { row: index + 1, address, unit_number: unitNumber, status: "error", detail: "Échec de création du locataire" };
+          return;
+        }
+
+        await fetch(`${supabaseUrl}/rest/v1/leases`, {
+          method: "POST", headers: adminHeaders,
+          body: JSON.stringify({ unit_id: unitId, tenant_id: tenant.id, start_date: startDate, monthly_rent: monthlyRent, status: "active" }),
+        });
+        await fetch(`${supabaseUrl}/rest/v1/units?id=eq.${unitId}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "occupied" }) });
+        unitsWithActiveLease.add(unitId);
+
+        results[index] = { row: index + 1, address, unit_number: unitNumber, status: "created", detail: `Locataire ${row.tenant_full_name} + bail créés` };
+      };
+
+      for (let i = 0; i < rows.length; i += CONCURRENCY) {
+        await Promise.all(rows.slice(i, i + CONCURRENCY).map((row: any, offset: number) => processRow(row, i + offset)));
+      }
+
+      const summary = results.reduce((acc: Record<string, number>, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
+      await logAudit("owner.bulk_import_units", "owners", owner_id, { total_rows: rows.length, summary });
+      return new Response(JSON.stringify({ ok: true, summary, results }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
