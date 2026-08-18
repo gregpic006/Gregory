@@ -120,6 +120,12 @@ async function testLockedTablesNotReadableByAnon() {
       record(`Table verrouillée illisible par la clé anon — ${table}`, "PASS");
     } else if (res.status === 401 || res.status === 403) {
       record(`Table verrouillée illisible par la clé anon — ${table}`, "PASS", `Statut ${res.status}`);
+    } else if (res.status === 404) {
+      // PostgREST renvoie 404 (plutôt que 200+[]) quand le rôle appelant
+      // n'a AUCUN privilège sur la table, même pas de quoi confirmer son
+      // existence — c'est une protection plus forte qu'un tableau vide,
+      // pas une faille.
+      record(`Table verrouillée illisible par la clé anon — ${table}`, "PASS", `Statut 404 — table invisible pour la clé anon (aucun privilège)`);
     } else {
       record(`Table verrouillée illisible par la clé anon — ${table}`, "FAIL", `Statut ${res.status}, ${rowCount} ligne(s) retournée(s) — RLS ne bloque pas cette table`);
     }

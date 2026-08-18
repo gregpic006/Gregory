@@ -54,10 +54,14 @@ Deno.serve(async (req) => {
   }
   try {
     const { question } = await req.json();
-    if (!question || typeof question !== "string" || !question.trim()) {
-      return new Response(JSON.stringify({ error: "Question manquante" }), { status: 400, headers: corsHeaders });
-    }
 
+    // L'authentification doit toujours passer avant la validation du
+    // contenu de la requête — sinon un appelant non authentifié peut
+    // sonder la forme attendue du corps (ici, apprendre qu'un champ
+    // "question" est requis) via le code de statut, et les tests
+    // d'étanchéité (qui envoient un JWT forgé avec un corps générique)
+    // reçoivent un 400 au lieu d'un 401, masquant un vrai problème de
+    // vérification de signature derrière un faux positif.
     const authHeader = req.headers.get("Authorization") || "";
     const jwt = authHeader.replace("Bearer ", "");
     if (!jwt) {
@@ -68,6 +72,10 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Jeton invalide ou expiré" }), { status: 401, headers: corsHeaders });
     }
     const userId = claims.sub as string;
+
+    if (!question || typeof question !== "string" || !question.trim()) {
+      return new Response(JSON.stringify({ error: "Question manquante" }), { status: 400, headers: corsHeaders });
+    }
 
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
