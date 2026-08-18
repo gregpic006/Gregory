@@ -495,6 +495,30 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ inquiries: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Demandes "devenir client" (type mandat) — avant ce correctif,
+    // aucun écran admin ne permettait de les consulter (voir
+    // handle-inquiry.ts pour la notification par courriel ajoutée en
+    // même temps que cette action).
+    if (action === "list_mandat_inquiries") {
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/inquiries?type=eq.mandat&status=eq.new&select=id,full_name,email,phone,message,sector,num_doors,avg_rent,ownership,current_management,services_needed,main_problem,desired_start_date,best_call_time,ai_category,ai_summary,created_at&order=created_at.desc`,
+        { headers: adminHeaders },
+      );
+      return new Response(JSON.stringify({ inquiries: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "mark_inquiry_handled") {
+      const { inquiry_id } = body;
+      if (!inquiry_id) {
+        return new Response(JSON.stringify({ error: "inquiry_id manquant" }), { status: 400, headers: corsHeaders });
+      }
+      // "contacted" — valeurs valides : new/contacted/closed (voir schema.sql).
+      await fetch(`${supabaseUrl}/rest/v1/inquiries?id=eq.${inquiry_id}`, {
+        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "contacted" }),
+      });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     if (action === "list_visits") {
       const res = await fetch(
         `${supabaseUrl}/rest/v1/visits?status=neq.cancelled&select=*,units(unit_number,buildings(address))&order=proposed_at.asc`,

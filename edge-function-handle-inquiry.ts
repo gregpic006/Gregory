@@ -82,6 +82,34 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après), avec ex
       }),
     });
 
+    // Avant ce correctif, une demande "mandat" (devenir client) recevait
+    // une réponse automatique au prospect mais l'équipe n'était jamais
+    // avisée — seul le compteur "Nouvelles demandes" du tableau de bord
+    // bougeait, sans aucun écran pour voir le détail. Un lead pouvait se
+    // perdre en silence. Avise maintenant l'équipe par courriel pour
+    // chaque demande, quel que soit le type.
+    const adminHeaders = {
+      apikey: serviceRoleKey ?? "",
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    };
+    const adminsRes = await fetch(`${supabaseUrl}/rest/v1/users?is_admin=eq.true&select=email`, { headers: adminHeaders });
+    const admins = await adminsRes.json().catch(() => []);
+    const adminEmails = Array.isArray(admins) ? admins.map((a: any) => a.email).filter(Boolean) : [];
+    if (adminEmails.length && resendKey) {
+      const typeLabel = record.type === "visite" ? "Demande de visite" : "Demande de mandat (nouveau client potentiel)";
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: "Portail <onboarding@mail.portailgestion.ca>",
+          to: adminEmails,
+          subject: `${typeLabel} — ${record.full_name}`,
+          text: `${typeLabel}\n\nNom : ${record.full_name}\nCourriel : ${record.email}\nTéléphone : ${record.phone || "non fourni"}\nMessage : ${record.message || "(aucun)"}\n\nCatégorie IA : ${parsed.category}\nRésumé : ${parsed.summary}\n\nUne réponse automatique a déjà été envoyée au prospect. Consulte le portail admin pour le détail complet et faire le suivi.`,
+        }),
+      });
+    }
+
     await fetch(`${supabaseUrl}/rest/v1/inquiries?id=eq.${record.id}`, {
       method: "PATCH",
       headers: {

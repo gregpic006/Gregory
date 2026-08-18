@@ -110,6 +110,7 @@
       <button class="tab-btn" data-tab="anomalies" onclick="showTab('anomalies')">Anomalies financières</button>
       <button class="tab-btn" data-tab="supplier-invoices" onclick="showTab('supplier-invoices')">Factures fournisseurs</button>
       <div class="nav-group-label">CROISSANCE</div>
+      <button class="tab-btn" data-tab="mandat-inquiries" onclick="showTab('mandat-inquiries')">Demandes de mandat</button>
       <button class="tab-btn" data-tab="crm" onclick="showTab('crm')">CRM propriétaires</button>
       <button class="tab-btn" data-tab="callers" onclick="showTab('callers')">Prospecteurs</button>
       <button class="tab-btn" data-tab="marketplace" onclick="showTab('marketplace')">Annonces Marketplace</button>
@@ -430,6 +431,12 @@
       </div>
     </div>
 
+      </section>
+
+      <section id="mandat-inquiries" class="section">
+    <h1 style="margin-top:40px;font-size:22px;">Demandes de mandat (site public)</h1>
+    <p class="subtitle" style="margin-bottom:16px;">Propriétaires ayant rempli le formulaire "devenir client" — une réponse automatique leur a déjà été envoyée, à toi de faire le suivi</p>
+    <div id="mandat-inquiries-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
       </section>
 
       <section id="crm" class="section">
@@ -1448,6 +1455,7 @@ async function loadOps(){
   await loadWorkersAdmin();
   await loadServiceCatalog();
   await loadVisitInquiries();
+  await loadMandatInquiries();
   await loadVisitsAdmin();
   await loadServiceRequestsAdmin();
   await loadWorkOrdersAdmin();
@@ -1694,6 +1702,42 @@ async function loadVisitInquiries(){
         <button onclick="proposeVisit('${i.id}', '${i.unit_id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Proposer cette visite</button>
       </div>
     </div>`).join('');
+}
+
+async function loadMandatInquiries(){
+  const data = await callOpsApi({ action: 'list_mandat_inquiries' });
+  const container = document.getElementById('mandat-inquiries-body');
+  const inquiries = data?.inquiries || [];
+  if(!inquiries.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune demande de mandat en attente.</p>';
+    return;
+  }
+  const ownershipLabel = { personnel: 'Personnel', societe: 'Société' };
+  const managementLabel = { autogere: 'Autogéré', sous_gestion: 'Déjà sous gestion' };
+  container.innerHTML = inquiries.map(i => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${esc(i.full_name)}</b>
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">${esc(i.email)} · ${esc(i.phone) || '—'} · reçu le ${new Date(i.created_at).toLocaleDateString('fr-CA')}</span>
+      <div style="font-size:12.5px;margin-bottom:8px;">
+        ${i.sector ? `Secteur : ${esc(i.sector)}<br>` : ''}
+        ${i.num_doors != null ? `Portes : ${i.num_doors}<br>` : ''}
+        ${i.avg_rent != null ? `Loyer moyen : ${Number(i.avg_rent).toLocaleString('fr-CA')} $<br>` : ''}
+        ${i.ownership ? `Propriété : ${ownershipLabel[i.ownership] || esc(i.ownership)}<br>` : ''}
+        ${i.current_management ? `Gestion actuelle : ${managementLabel[i.current_management] || esc(i.current_management)}<br>` : ''}
+        ${i.services_needed ? `Services souhaités : ${esc(i.services_needed)}<br>` : ''}
+        ${i.main_problem ? `Problème principal : ${esc(i.main_problem)}<br>` : ''}
+        ${i.desired_start_date ? `Début souhaité : ${esc(i.desired_start_date)}<br>` : ''}
+        ${i.best_call_time ? `Meilleur moment pour appeler : ${esc(i.best_call_time)}<br>` : ''}
+        ${i.message ? `Message : ${esc(i.message)}<br>` : ''}
+        ${i.ai_summary ? `<span style="color:var(--muted);">Résumé IA : ${esc(i.ai_summary)}</span>` : ''}
+      </div>
+      <button onclick="markInquiryHandled('${i.id}')" style="border:1px solid var(--ink);background:none;padding:6px 12px;font-size:11.5px;cursor:pointer;">Marquer comme contacté</button>
+    </div>`).join('');
+}
+
+async function markInquiryHandled(inquiry_id){
+  await callOpsApi({ action: 'mark_inquiry_handled', inquiry_id });
+  await loadMandatInquiries();
 }
 
 async function proposeVisit(inquiry_id, unit_id){
