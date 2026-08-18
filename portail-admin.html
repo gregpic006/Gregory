@@ -329,6 +329,30 @@
   <p id="pad-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
   <div id="pad-authorizations-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 
+  <h2 style="font-size:16px;margin-bottom:8px;">Prélèvement automatique des loyers (PAD locataire)</h2>
+  <p class="subtitle" style="margin-bottom:12px;">Distinct de la section ci-dessus (qui concerne les honoraires de gestion). Ceci concerne le loyer, prélevé auprès du locataire. Structure prête, branchement du processeur de paiement à venir (équipe TWIM) — en attendant, consigne le consentement manuellement.</p>
+  <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Bail</label>
+      <select id="tpad-lease" style="padding:8px;border:1px solid var(--line);min-width:260px;"><option value="">— Choisir —</option></select>
+    </div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Statut</label>
+      <select id="tpad-status" style="padding:8px;border:1px solid var(--line);">
+        <option value="pending">En attente de signature</option>
+        <option value="active">Actif (autorisation signée)</option>
+        <option value="revoked">Révoqué</option>
+      </select>
+    </div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Méthode de consentement</label>
+      <input type="text" id="tpad-method" placeholder="Ex: formulaire papier signé" style="padding:8px;border:1px solid var(--line);width:200px;">
+    </div>
+    <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fournisseur (une fois choisi)</label>
+      <input type="text" id="tpad-processor" placeholder="Ex: Stripe" style="padding:8px;border:1px solid var(--line);width:120px;">
+    </div>
+    <button onclick="saveTenantPadAuthorization()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Enregistrer</button>
+  </div>
+  <p id="tpad-msg" style="font-size:12.5px;margin-bottom:10px;"></p>
+  <div id="tpad-authorizations-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
   <h1 style="margin-top:40px;font-size:22px;">Factures fournisseurs (lecture IA)</h1>
   <p class="subtitle" style="margin-bottom:16px;">Téléverse une facture ou un reçu (PDF/photo) — l'IA propose le fournisseur, le montant, les taxes et la catégorie. Rien n'est enregistré tant que tu n'as pas confirmé.</p>
   <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
@@ -578,6 +602,8 @@ async function loadAdminDashboard(){
   padOwnerSelect.innerHTML = '<option value="">— Choisir —</option>' + clients.map(c => `<option value="${c.id}">${esc(c.full_name)}</option>`).join('');
   if(currentPadOwner) padOwnerSelect.value = currentPadOwner;
   await loadPadAuthorizations();
+  await loadTenantPadLeaseOptions();
+  await loadTenantPadAuthorizations();
 
   await loadOps();
   await loadCallers();
@@ -1311,6 +1337,50 @@ async function savePadAuthorization(){
   const res = await callOpsApi({ action: 'update_pad_authorization', owner_id, status, consent_method, processor });
   msg.textContent = res?.ok ? 'Enregistré.' : 'Erreur.';
   await loadPadAuthorizations();
+}
+
+async function loadTenantPadLeaseOptions(){
+  const res = await callOpsApi({ action: 'list_active_leases' });
+  const select = document.getElementById('tpad-lease');
+  select.innerHTML = '<option value="">— Choisir —</option>' + (res?.leases || []).map(l =>
+    `<option value="${l.id}" data-tenant-id="${l.tenant_id}">${esc(l.tenants?.full_name) || '?'} — ${esc(l.units?.buildings?.address) || ''} unité ${esc(l.units?.unit_number) || ''}</option>`
+  ).join('');
+}
+
+async function loadTenantPadAuthorizations(){
+  const res = await callOpsApi({ action: 'list_tenant_pad_authorizations' });
+  const container = document.getElementById('tpad-authorizations-body');
+  const authorizations = res?.authorizations || [];
+  if(!authorizations.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune autorisation enregistrée pour l\'instant.</p>';
+    return;
+  }
+  const padStatusLabel = { pending: 'En attente de signature', active: 'Active', revoked: 'Révoquée' };
+  const padStatusColor = { pending: 'var(--muted)', active: 'var(--sage)', revoked: 'var(--rust)' };
+  container.innerHTML = authorizations.map(a => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:12px 16px;margin-bottom:8px;font-size:13px;">
+      <b>${esc(a.tenants?.full_name) || ''}</b> — ${esc(a.leases?.units?.buildings?.address) || ''} unité ${esc(a.leases?.units?.unit_number) || ''}
+      — <span style="color:${padStatusColor[a.status] || 'var(--muted)'};font-weight:600;">${padStatusLabel[a.status] || esc(a.status)}</span>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">
+        ${a.consent_method ? esc(a.consent_method) + ' — ' : ''}${a.consented_at ? 'consenti le ' + new Date(a.consented_at).toLocaleDateString('fr-CA') : ''}
+        ${a.processor ? ' · Fournisseur : ' + esc(a.processor) : ''}
+      </div>
+    </div>`).join('');
+}
+
+async function saveTenantPadAuthorization(){
+  const leaseSelect = document.getElementById('tpad-lease');
+  const lease_id = leaseSelect.value;
+  const tenant_id = leaseSelect.selectedOptions[0]?.dataset.tenantId;
+  const status = document.getElementById('tpad-status').value;
+  const consent_method = document.getElementById('tpad-method').value;
+  const processor = document.getElementById('tpad-processor').value;
+  const msg = document.getElementById('tpad-msg');
+  if(!lease_id || !tenant_id){ msg.textContent = 'Choisis un bail d\'abord.'; return; }
+  msg.textContent = 'Enregistrement...';
+  const res = await callOpsApi({ action: 'update_tenant_pad_authorization', lease_id, tenant_id, status, consent_method, processor });
+  msg.textContent = res?.ok ? 'Enregistré.' : 'Erreur.';
+  await loadTenantPadAuthorizations();
 }
 
 async function loadVisitInquiries(){

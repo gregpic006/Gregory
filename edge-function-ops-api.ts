@@ -643,6 +643,40 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
+    // Distinct de pad_authorizations (frais de gestion Portail→propriétaire) :
+    // ceci concerne le PAD du loyer, locataire→propriétaire, rattaché au
+    // bail. Voir supabase/migrations/20260818073900_pad_locataire_squelette.sql —
+    // squelette en attente du branchement du processeur par l'équipe TWIM.
+    if (action === "list_active_leases") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/leases?status=eq.active&select=id,tenant_id,monthly_rent,tenants(full_name),units(unit_number,buildings(address))&order=created_at.desc`, { headers: adminHeaders });
+      return new Response(JSON.stringify({ leases: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "list_tenant_pad_authorizations") {
+      const res = await fetch(`${supabaseUrl}/rest/v1/tenant_pad_authorizations?select=*,leases(monthly_rent,units(unit_number,buildings(address))),tenants(full_name)&order=created_at.desc`, { headers: adminHeaders });
+      return new Response(JSON.stringify({ authorizations: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "update_tenant_pad_authorization") {
+      const { lease_id, tenant_id, status, consent_method, processor, processor_customer_id, processor_mandate_id, notes } = body;
+      if (!lease_id || !tenant_id || !status) {
+        return new Response(JSON.stringify({ error: "lease_id, tenant_id et status requis" }), { status: 400, headers: corsHeaders });
+      }
+      const patch: Record<string, unknown> = {
+        status, consent_method: consent_method || null, processor: processor || null,
+        processor_customer_id: processor_customer_id || null, processor_mandate_id: processor_mandate_id || null, notes: notes || null,
+      };
+      if (status === "active") patch.consented_at = new Date().toISOString();
+      if (status === "revoked") patch.revoked_at = new Date().toISOString();
+      await fetch(`${supabaseUrl}/rest/v1/tenant_pad_authorizations?on_conflict=lease_id`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify({ lease_id, tenant_id, ...patch }),
+      });
+      await logAudit("tenant_pad_authorization.updated", "tenant_pad_authorizations", null, { lease_id, status });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     if (action === "mark_invoice_collected") {
       const { invoice_id } = body;
       if (!invoice_id) {
