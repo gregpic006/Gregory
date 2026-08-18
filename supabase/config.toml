@@ -73,6 +73,8 @@ verify_jwt = false
 verify_jwt = false
 [functions.handle-payment-reminder]
 verify_jwt = false
+[functions.handle-public-faq]
+verify_jwt = false
 [functions.handle-public-inquiry]
 verify_jwt = false
 [functions.handle-service-request]

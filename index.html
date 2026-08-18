@@ -125,6 +125,14 @@
   .msg.user{background:var(--ink);color:var(--paper);padding:9px 12px;border-radius:2px;margin-left:auto;}
   .chat-q{display:block;width:100%;text-align:left;background:none;border:1px solid var(--line);padding:9px 10px;font-size:12px;margin-bottom:6px;cursor:pointer;font-family:'Inter',sans-serif;}
   .chat-q:hover{border-color:var(--brass);}
+  .chat-hint{color:var(--muted);font-size:11.5px;margin-bottom:10px;}
+  .chat-form{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;}
+  .chat-form input{flex:1;padding:9px 10px;border:1px solid var(--line);background:var(--paper-2);font-size:12.5px;font-family:'Inter',sans-serif;}
+  .chat-form input:focus{outline:none;border-color:var(--brass);}
+  .chat-form button{background:var(--ink);color:var(--paper);border:none;padding:0 14px;font-size:12.5px;cursor:pointer;}
+  .chat-form button:hover{background:var(--brass-dark);}
+  .chat-form button:disabled{opacity:0.6;cursor:default;}
+  .msg.bot.typing{color:var(--muted);font-style:italic;}
 </style>
 </head>
 <body>
@@ -304,9 +312,14 @@
     <span class="status">● en ligne</span>
   </div>
   <div id="chat-body">
-    <div class="msg bot">Bonjour ! Comment puis-je vous aider aujourd'hui ?</div>
+    <div class="msg bot">Bonjour ! Posez votre question ci-dessous, ou choisissez-en une parmi les plus fréquentes.</div>
+    <div class="chat-hint">Réponses générées par IA à partir des informations du site — pour un mandat ou une visite, utilisez nos formulaires.</div>
     <div id="chat-questions"></div>
   </div>
+  <form class="chat-form" id="chat-form" onsubmit="return submitFaqQuestion(event);">
+    <input type="text" id="chat-input" placeholder="Écrivez votre question..." maxlength="500" autocomplete="off">
+    <button type="submit" id="chat-send">Envoyer</button>
+  </form>
 </div>
 
 <script>
@@ -382,11 +395,55 @@ faq.forEach(item=>{
   b.textContent = item.q;
   b.onclick = ()=>{
     const body = document.getElementById('chat-body');
-    body.innerHTML += `<div class="msg user">${item.q}</div><div class="msg bot">${item.a}</div>`;
+    body.innerHTML += `<div class="msg user">${esc(item.q)}</div><div class="msg bot">${esc(item.a)}</div>`;
     body.scrollTop = body.scrollHeight;
   };
   qWrap.appendChild(b);
 });
+
+async function submitFaqQuestion(event){
+  event.preventDefault();
+  const input = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('chat-send');
+  const body = document.getElementById('chat-body');
+  const question = input.value.trim();
+  if(!question) return false;
+
+  body.innerHTML += `<div class="msg user">${esc(question)}</div>`;
+  const typingEl = document.createElement('div');
+  typingEl.className = 'msg bot typing';
+  typingEl.textContent = 'Je réfléchis...';
+  body.appendChild(typingEl);
+  body.scrollTop = body.scrollHeight;
+
+  input.value = '';
+  input.disabled = true;
+  sendBtn.disabled = true;
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/handle-public-faq`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({ question, website: '' }),
+    });
+    const result = await res.json();
+    typingEl.remove();
+    if(!res.ok || result.error){
+      body.innerHTML += `<div class="msg bot">${esc(result.error || "Une erreur est survenue, réessaie dans un instant.")}</div>`;
+    } else {
+      body.innerHTML += `<div class="msg bot">${esc(result.answer)}</div>`;
+    }
+  } catch(e) {
+    typingEl.remove();
+    body.innerHTML += `<div class="msg bot">Une erreur est survenue, réessaie dans un instant.</div>`;
+  }
+
+  body.scrollTop = body.scrollHeight;
+  input.disabled = false;
+  sendBtn.disabled = false;
+  input.focus();
+  return false;
+}
 </script>
 </body>
 </html>
