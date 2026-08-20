@@ -224,6 +224,16 @@
         <h1>Décisions automatisées</h1>
         <p class="subtitle">Certaines décisions te concernant sont prises automatiquement par le système, selon des règles fixes (ex. : un mandat retiré et réassigné après un délai de non-réponse). Voici l'historique — tu peux demander qu'un humain la révise.</p>
         <div id="decisions-body"><p class="empty-note">Chargement...</p></div>
+
+        <h2 style="margin-top:32px;">Mes renseignements personnels</h2>
+        <p class="subtitle">Demande d'accès à tes renseignements, de rectification ou d'effacement — conformément à la Loi 25. Une réponse te sera communiquée sous 30 jours.</p>
+        <div class="f"><label>Type de demande</label>
+          <select id="pdr-type"><option value="access">Accès à mes renseignements</option><option value="rectification">Rectification</option><option value="deletion">Effacement</option></select>
+        </div>
+        <div class="f"><label>Précisions (optionnel)</label><input type="text" id="pdr-details" placeholder="Ex. : préciser ce qui doit être corrigé"></div>
+        <button class="submit" onclick="submitPersonalDataRequest()">Envoyer la demande</button>
+        <p class="msg" id="pdr-error"></p>
+        <div id="pdr-body" style="margin-top:14px;"><p class="empty-note">Chargement...</p></div>
       </section>
     </main>
   </div>
@@ -337,6 +347,7 @@ async function loadWorkerDashboard(userId){
   await loadOffers();
   await loadJobs();
   await loadAutomatedDecisions();
+  await loadPersonalDataRequests();
 }
 
 function statusNote(){
@@ -490,6 +501,47 @@ async function requestDecisionReview(id){
   const note = prompt("Explique brièvement pourquoi tu demandes une révision de cette décision (optionnel) :") || null;
   await supabaseClient.from('automated_decisions').update({ review_requested_at: new Date().toISOString(), review_note: note }).eq('id', id);
   await loadAutomatedDecisions();
+}
+
+async function loadPersonalDataRequests(){
+  const { data } = await supabaseClient
+    .from('personal_data_requests')
+    .select('*')
+    .eq('subject_type', 'worker')
+    .eq('subject_id', workerRecord.id)
+    .order('created_at', { ascending: false });
+
+  const container = document.getElementById('pdr-body');
+  if(!data || !data.length){
+    container.innerHTML = '<p class="empty-note">Aucune demande envoyée.</p>';
+    return;
+  }
+  const typeLabel = { access: 'Accès', rectification: 'Rectification', deletion: 'Effacement' };
+  const statusLabel = { received: 'Reçue', in_progress: 'En cours', fulfilled: 'Traitée', rejected: 'Refusée' };
+  container.innerHTML = data.map(r => `
+    <div class="job-card">
+      <div class="desc">${esc(typeLabel[r.request_type] || r.request_type)}</div>
+      <div class="meta">Envoyée le ${new Date(r.created_at).toLocaleDateString('fr-CA')} — Statut : ${esc(statusLabel[r.status] || r.status)}${r.resolution_note ? ' — ' + esc(r.resolution_note) : ''}</div>
+    </div>`).join('');
+}
+
+async function submitPersonalDataRequest(){
+  const errorEl = document.getElementById('pdr-error');
+  errorEl.textContent = '';
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const request_type = document.getElementById('pdr-type').value;
+  const request_details = document.getElementById('pdr-details').value || null;
+  const { error } = await supabaseClient.from('personal_data_requests').insert({
+    request_type, subject_type: 'worker', subject_id: workerRecord.id,
+    requester_name: workerRecord.name, requester_email: session?.user?.email || null,
+    request_details,
+  });
+  if(error){
+    errorEl.textContent = "Erreur — réessaie.";
+    return;
+  }
+  document.getElementById('pdr-details').value = '';
+  await loadPersonalDataRequests();
 }
 
 function filesToPayload(fileList){
