@@ -80,12 +80,12 @@ Deno.serve(async (req) => {
     const history = await historyRes.json().catch(() => []);
     const sequenceNumber = (Array.isArray(history) ? history.length : 0) + 1;
 
+    // Minimisation (Loi 25) : rédiger un rappel générique n'exige pas le
+    // nom ni l'adresse du locataire — le destinataire les connaît déjà.
     const prompt = `Tu es l'assistant du service à la clientèle de "Portail", une entreprise de gestion immobilière résidentielle au Québec. Rédige un courriel de rappel de paiement de loyer à un locataire.
 
 Type de rappel: ${reminder_type === "late" ? "Le paiement est EN RETARD (déjà passé la date d'échéance)" : "Le paiement arrive bientôt à échéance (rappel préventif)"}
 Numéro de ce rappel pour ce paiement: ${sequenceNumber}
-Nom du locataire: ${tenant.full_name}
-Adresse: ${address || ""} — Unité ${unit?.unit_number || ""}
 Montant: ${payment.amount} $
 Date d'échéance: ${payment.due_date}
 

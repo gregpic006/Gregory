@@ -71,9 +71,9 @@ Deno.serve(async (req) => {
     }
 
     const gapsLabel = gaps.map((g) => `- ${g}`).join("\n");
+    // Minimisation (Loi 25) : rédiger le rappel n'exige pas le nom du
+    // client — le destinataire se sait déjà lui-même.
     const prompt = `Tu es l'assistant de gestion locative de "Portail". Rédige un courriel amical et bref à un client (propriétaire) pour lui rappeler de compléter son dossier dans le portail. Utilise UNIQUEMENT les éléments manquants listés ci-dessous — n'invente rien d'autre et ne donne aucun conseil hors de cette liste.
-
-Client : ${owner.full_name}
 
 Éléments manquants dans son dossier :
 ${gapsLabel}

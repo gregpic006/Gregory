@@ -140,10 +140,10 @@ Deno.serve(async (req) => {
         ? `Le bail ne sera pas renouvelé à son échéance (${lease.end_date}).`
         : `Renouvellement du bail aux mêmes conditions (loyer inchangé à ${lease.monthly_rent} $), à compter du ${lease.end_date}.`;
 
+      // Minimisation (Loi 25) : rédiger l'avis n'exige pas le nom ni
+      // l'adresse du locataire — le destinataire les connaît déjà.
       const prompt = `Tu es l'assistant de gestion locative de "Portail", au Québec. Rédige un avis à un locataire à propos de son bail. Utilise UNIQUEMENT les faits fournis ci-dessous — n'invente aucune date, aucun montant, aucune règle légale.
 
-Locataire : ${tenant.full_name}
-Adresse : ${lease.units?.buildings?.address || ""} — Unité ${lease.units?.unit_number || ""}
 Fin du bail actuel : ${lease.end_date}
 Décision : ${factsLabel}
 ${message ? `Message additionnel du gestionnaire : ${message}` : ""}

@@ -46,11 +46,11 @@ Deno.serve(async (req) => {
             : `l'équipe Portail va obtenir une autre soumission ou évaluer une solution alternative, avec un suivi prévu d'ici le ${reassessmentDue || "prochains jours"}.`
         }${ownerNote ? ` Note du propriétaire à transmettre si pertinente pour le locataire : "${ownerNote}"` : ""}`;
 
+    // Minimisation (Loi 25) : rédiger l'avis n'exige pas le nom ni
+    // l'adresse du locataire — le destinataire les connaît déjà.
     const prompt = `Tu es l'assistant du service à la clientèle de "Portail", une entreprise de gestion immobilière résidentielle au Québec. Un propriétaire vient de prendre une décision au sujet d'une réparation demandée par un locataire. Rédige un courriel informant le locataire du résultat.
 
 Décision: ${decisionContext}
-Nom du locataire: ${tenant.full_name}
-Adresse: ${address || ""} — Unité ${unit?.unit_number || ""}
 Description des travaux demandés: ${workOrder?.description || ""}
 
 RÈGLES STRICTES :

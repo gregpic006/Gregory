@@ -8,12 +8,14 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
+    // Minimisation (Loi 25) : catégoriser, résumer et rédiger une réponse
+    // n'exige pas de savoir QUI a écrit — seulement CE QUI est écrit. Le
+    // nom/courriel/téléphone ne sont donc jamais envoyés à l'IA ; ils
+    // restent disponibles pour le courriel à l'équipe et l'écran admin,
+    // construits localement plus bas à partir de `record` directement.
     const prompt = `Tu es l'assistant du service à la clientèle de "Portail", une entreprise de gestion immobilière résidentielle au Québec. Un formulaire a été soumis sur le site public. Ce courriel est envoyé AUTOMATIQUEMENT, sans relecture humaine avant l'envoi.
 
 Type de demande: ${record.type === "visite" ? "Demande de visite pour un logement" : "Propriétaire souhaitant confier son immeuble en gestion"}
-Nom: ${record.full_name}
-Courriel: ${record.email}
-Téléphone: ${record.phone || "non fourni"}
 Message: ${record.message || "(aucun message)"}
 
 RÈGLES STRICTES (ce courriel part sans relecture humaine — ne jamais les enfreindre) :
