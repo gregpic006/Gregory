@@ -178,10 +178,14 @@ Deno.serve(async (req) => {
         .filter((o: any) => o?.name)
         .map((o: any) => `${prefix}/${o.name}`);
       if (!names.length) return 0;
-      await fetch(`${supabaseUrl}/storage/v1/object/${bucket}`, {
+      const deleteRes = await fetch(`${supabaseUrl}/storage/v1/object/${bucket}`, {
         method: "DELETE", headers: adminHeaders,
         body: JSON.stringify({ prefixes: names }),
       });
+      if (!deleteRes.ok) {
+        console.error("deleteStorageByPrefix failed", bucket, prefix, deleteRes.status, await deleteRes.text().catch(() => ""));
+        return 0;
+      }
       return names.length;
     }
 
@@ -240,6 +244,17 @@ Deno.serve(async (req) => {
           filesDeleted += await deleteStorageByPrefix("service-request-photos", subject_id);
         } else if (subject_type === "worker") {
           filesDeleted += await deleteStorageByPrefix("documents", `workers/${subject_id}`);
+          // documents n'a pas de colonne worker_id — le document
+          // d'assurance d'un travailleur est référencé depuis
+          // workers.insurance_document_id, pas l'inverse.
+          const workerRes = await fetch(`${supabaseUrl}/rest/v1/workers?id=eq.${subject_id}&select=insurance_document_id`, { headers: adminHeaders });
+          const [workerRow] = await workerRes.json().catch(() => [null]);
+          if (workerRow?.insurance_document_id) {
+            await fetch(`${supabaseUrl}/rest/v1/documents?id=eq.${workerRow.insurance_document_id}`, {
+              method: "PATCH", headers: adminHeaders,
+              body: JSON.stringify({ title: "Document supprimé (demande d'effacement)", file_url: null, ai_summary: null, ai_parties: null, ai_key_amount: null, ai_expiry_date: null, ai_extracted: null }),
+            });
+          }
         }
 
         await fetch(`${supabaseUrl}/rest/v1/personal_data_requests?id=eq.${request_id}`, {

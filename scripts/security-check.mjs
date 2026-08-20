@@ -123,7 +123,7 @@ async function testFlinksSyncAllProtected() {
 // vraiment public, plutôt que de faire échouer le test sur un
 // comportement voulu.
 const ALL_TABLES = [
-  "ai_run_log", "approvals", "audit_log", "automation_rule_runs", "automation_rules",
+  "ai_run_log", "approvals", "audit_log", "automated_decisions", "automation_rule_runs", "automation_rules",
   "bank_connections", "bank_transactions", "cold_callers", "company_settings",
   "dissatisfaction_signals", "documents", "expenses", "financial_anomalies", "inquiries",
   "invoice_number_counters", "invoices", "job_offers", "lease_signatures", "leases",
