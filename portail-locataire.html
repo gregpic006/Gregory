@@ -180,6 +180,22 @@
         <div class="toolbar"><h2>Décisions automatisées</h2></div>
         <p style="color:var(--muted);font-size:13.5px;margin-bottom:14px;">Certaines décisions vous concernant sont prises automatiquement par le système, selon des règles fixes. Voici l'historique et les facteurs qui ont mené à chacune — tu peux demander qu'un humain la révise.</p>
         <div id="decisions-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
+        <h3 style="font-family:'Fraunces',serif;font-size:17px;font-weight:600;margin:24px 0 14px;">Mes renseignements personnels</h3>
+        <p style="color:var(--muted);font-size:13.5px;margin-bottom:14px;">Demande d'accès à tes renseignements, de rectification ou d'effacement — conformément à la Loi 25. Une réponse te sera communiquée sous 30 jours.</p>
+        <div class="card-box">
+          <div class="f">
+            <label>Type de demande</label>
+            <select id="pdr-type"><option value="access">Accès à mes renseignements</option><option value="rectification">Rectification</option><option value="deletion">Effacement</option></select>
+          </div>
+          <div class="f">
+            <label>Précisions (optionnel)</label>
+            <textarea id="pdr-details" placeholder="Ex. : préciser ce qui doit être corrigé"></textarea>
+          </div>
+          <button class="submit" onclick="submitPersonalDataRequest()">Envoyer la demande</button>
+          <p class="form-note" id="pdr-error"></p>
+        </div>
+        <div id="pdr-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
       </section>
     </main>
   </div>
@@ -294,6 +310,7 @@ async function loadTenantDashboard(userId){
   renderPayments(currentLease);
   await loadRequests();
   await loadAutomatedDecisions();
+  await loadPersonalDataRequests();
 }
 
 const leaseStatusLabel = { active: 'Actif', renewed: 'Renouvelé', ended: 'Terminé' };
@@ -388,6 +405,48 @@ async function requestDecisionReview(id){
   const note = prompt("Explique brièvement pourquoi tu demandes une révision de cette décision (optionnel) :") || null;
   await supabaseClient.from('automated_decisions').update({ review_requested_at: new Date().toISOString(), review_note: note }).eq('id', id);
   await loadAutomatedDecisions();
+}
+
+async function loadPersonalDataRequests(){
+  const { data } = await supabaseClient
+    .from('personal_data_requests')
+    .select('*')
+    .eq('subject_type', 'tenant')
+    .eq('subject_id', tenantRecord.id)
+    .order('created_at', { ascending: false });
+
+  const container = document.getElementById('pdr-body');
+  if(!data || !data.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune demande envoyée.</p>';
+    return;
+  }
+  const typeLabel = { access: 'Accès', rectification: 'Rectification', deletion: 'Effacement' };
+  const statusLabel = { received: 'Reçue', in_progress: 'En cours', fulfilled: 'Traitée', rejected: 'Refusée' };
+  container.innerHTML = data.map(r => `
+    <div class="card-box">
+      <p style="font-size:14px;margin-bottom:6px;">${esc(typeLabel[r.request_type] || r.request_type)}</p>
+      <p style="font-size:12.5px;color:var(--muted);">Envoyée le ${new Date(r.created_at).toLocaleDateString('fr-CA')} — Statut : ${esc(statusLabel[r.status] || r.status)}${r.resolution_note ? ' — ' + esc(r.resolution_note) : ''}</p>
+    </div>`).join('');
+}
+
+async function submitPersonalDataRequest(){
+  const errorEl = document.getElementById('pdr-error');
+  errorEl.style.display = 'none';
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const request_type = document.getElementById('pdr-type').value;
+  const request_details = document.getElementById('pdr-details').value || null;
+  const { error } = await supabaseClient.from('personal_data_requests').insert({
+    request_type, subject_type: 'tenant', subject_id: tenantRecord.id,
+    requester_name: tenantRecord.full_name, requester_email: session?.user?.email || null,
+    request_details,
+  });
+  if(error){
+    errorEl.textContent = "Erreur — réessaie.";
+    errorEl.style.display = 'block';
+    return;
+  }
+  document.getElementById('pdr-details').value = '';
+  await loadPersonalDataRequests();
 }
 
 async function submitServiceRequest(event){

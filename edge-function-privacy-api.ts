@@ -164,6 +164,27 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
+    // Efface tous les fichiers d'un bucket sous un préfixe donné (ex.
+    // "workers/<id>" ou l'UUID du propriétaire) — sans ça, l'effacement
+    // ne touchait que les colonnes texte des tables, jamais les fichiers
+    // réels (baux, reçus, photos) qui restaient dans le stockage.
+    async function deleteStorageByPrefix(bucket: string, prefix: string): Promise<number> {
+      const listRes = await fetch(`${supabaseUrl}/storage/v1/object/list/${bucket}`, {
+        method: "POST", headers: adminHeaders,
+        body: JSON.stringify({ prefix, limit: 1000 }),
+      });
+      const objects = await listRes.json().catch(() => []);
+      const names = (Array.isArray(objects) ? objects : [])
+        .filter((o: any) => o?.name)
+        .map((o: any) => `${prefix}/${o.name}`);
+      if (!names.length) return 0;
+      await fetch(`${supabaseUrl}/storage/v1/object/${bucket}`, {
+        method: "DELETE", headers: adminHeaders,
+        body: JSON.stringify({ prefixes: names }),
+      });
+      return names.length;
+    }
+
     if (action === "fulfill_data_request") {
       const { request_id } = body;
       if (!request_id) {
@@ -177,10 +198,19 @@ Deno.serve(async (req) => {
       const { request_type, subject_type, subject_id } = dataRequest;
 
       if (request_type === "deletion") {
+        // Effacement en cascade — pas seulement le nom/courriel/téléphone
+        // sur la fiche elle-même, mais aussi les fichiers réels dans le
+        // stockage et le contenu textuel libre des enregistrements liés
+        // (susceptible de contenir des renseignements personnels écrits
+        // par la personne elle-même). Les registres de sécurité/traçabilité
+        // (audit_log, ai_run_log, automated_decisions) sont volontairement
+        // préservés — leur conservation répond à une autre obligation
+        // légale (imputabilité) ; leur durée de rétention propre est une
+        // question distincte, à trancher avec un conseiller juridique.
         const anonymizeMap: Record<string, { table: string; patch: Record<string, unknown> }> = {
           tenant: { table: "tenants", patch: { full_name: "Locataire anonymisé", email: null, phone: null, anonymized_at: new Date().toISOString() } },
           prospect: { table: "prospects", patch: { full_name: "Prospect anonymisé", email: null, phone: null, company_name: null, notes: null, call_history: [], anonymized_at: new Date().toISOString() } },
-          owner: { table: "owners", patch: { full_name: "Propriétaire anonymisé", phone: null } },
+          owner: { table: "owners", patch: { full_name: "Propriétaire anonymisé", phone: null, company_name: null } },
           worker: { table: "workers", patch: { name: "Travailleur anonymisé", phone: null, email: null } },
         };
         const target = anonymizeMap[subject_type];
@@ -190,12 +220,34 @@ Deno.serve(async (req) => {
         await fetch(`${supabaseUrl}/rest/v1/${target.table}?id=eq.${subject_id}`, {
           method: "PATCH", headers: adminHeaders, body: JSON.stringify(target.patch),
         });
+
+        let filesDeleted = 0;
+        if (subject_type === "owner") {
+          filesDeleted += await deleteStorageByPrefix("documents", subject_id);
+          // Les lignes "documents" elles-mêmes ne sont pas supprimées
+          // (elles restent la trace qu'un bail/mandat a existé et à quelle
+          // date), mais tout champ dérivé du contenu réel est effacé en
+          // même temps que le fichier source.
+          await fetch(`${supabaseUrl}/rest/v1/documents?owner_id=eq.${subject_id}`, {
+            method: "PATCH", headers: adminHeaders,
+            body: JSON.stringify({ title: "Document supprimé (demande d'effacement)", file_url: null, ai_summary: null, ai_parties: null, ai_key_amount: null, ai_expiry_date: null, ai_extracted: null }),
+          });
+          await fetch(`${supabaseUrl}/rest/v1/messages?owner_id=eq.${subject_id}`, {
+            method: "PATCH", headers: adminHeaders,
+            body: JSON.stringify({ body: "[message supprimé — demande d'effacement]" }),
+          });
+        } else if (subject_type === "tenant") {
+          filesDeleted += await deleteStorageByPrefix("service-request-photos", subject_id);
+        } else if (subject_type === "worker") {
+          filesDeleted += await deleteStorageByPrefix("documents", `workers/${subject_id}`);
+        }
+
         await fetch(`${supabaseUrl}/rest/v1/personal_data_requests?id=eq.${request_id}`, {
           method: "PATCH", headers: adminHeaders,
-          body: JSON.stringify({ status: "fulfilled", handled_by: userId, handled_at: new Date().toISOString(), resolution_note: "Anonymisation appliquée" }),
+          body: JSON.stringify({ status: "fulfilled", handled_by: userId, handled_at: new Date().toISOString(), resolution_note: `Anonymisation appliquée, ${filesDeleted} fichier(s) supprimé(s) du stockage` }),
         });
-        await logAudit("data_request.fulfilled", "personal_data_requests", request_id, { request_type, subject_type, subject_id });
-        return new Response(JSON.stringify({ ok: true, action_taken: "anonymized" }), { status: 200, headers: corsHeaders });
+        await logAudit("data_request.fulfilled", "personal_data_requests", request_id, { request_type, subject_type, subject_id, files_deleted: filesDeleted });
+        return new Response(JSON.stringify({ ok: true, action_taken: "anonymized", files_deleted: filesDeleted }), { status: 200, headers: corsHeaders });
       }
 
       if (request_type === "access") {

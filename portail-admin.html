@@ -873,16 +873,22 @@ async function loadDataRequests(){
   const typeLabel = { access: 'Accès', rectification: 'Rectification', deletion: 'Suppression' };
   const subjectLabel = { tenant: 'Locataire', prospect: 'Prospect', owner: 'Propriétaire', worker: 'Travailleur' };
   const statusLabel = { received: 'Reçue', in_progress: 'En cours', fulfilled: 'Traitée', rejected: 'Refusée' };
-  container.innerHTML = requests.map(r => `
-    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+  const DEADLINE_DAYS = 30;
+  container.innerHTML = requests.map(r => {
+    const open = r.status === 'received' || r.status === 'in_progress';
+    const daysElapsed = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000);
+    const overdue = open && daysElapsed > DEADLINE_DAYS;
+    return `
+    <div style="background:var(--paper-2);border:1px solid var(--line);${overdue ? 'border-left:3px solid var(--rust);' : ''}padding:14px 16px;margin-bottom:10px;">
       <b style="display:block;margin-bottom:4px;">${esc(typeLabel[r.request_type] || r.request_type)} — ${esc(subjectLabel[r.subject_type] || r.subject_type)} ${esc(r.subject_id)}</b>
-      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">Demandeur : ${esc(r.requester_name)} (${esc(r.requester_email) || '—'}) — Statut : ${statusLabel[r.status] || esc(r.status)}${r.resolution_note ? ' — ' + esc(r.resolution_note) : ''}</span>
-      ${r.status === 'received' || r.status === 'in_progress' ? `
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">Demandeur : ${esc(r.requester_name)} (${esc(r.requester_email) || '—'}) — Statut : ${statusLabel[r.status] || esc(r.status)}${r.resolution_note ? ' — ' + esc(r.resolution_note) : ''}${open ? ` — reçue il y a ${daysElapsed} jour(s)${overdue ? ` <b style="color:var(--rust);">— DÉLAI DE ${DEADLINE_DAYS} JOURS DÉPASSÉ</b>` : ''}` : ''}</span>
+      ${open ? `
       <div style="display:flex;flex-wrap:wrap;gap:8px;">
         ${r.request_type !== 'rectification' ? `<button onclick="fulfillDataRequest('${r.id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Traiter automatiquement</button>` : ''}
         <button onclick="closeDataRequestManually('${r.id}')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Marquer traitée manuellement</button>
       </div>` : ''}
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 async function logDataRequest(){
