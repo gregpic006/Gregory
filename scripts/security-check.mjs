@@ -109,25 +109,39 @@ async function testFlinksSyncAllProtected() {
   }
 }
 
-// ---- 4. Tables sensibles verrouillées service_role : clé anon seule ne doit rien lire ----
-const LOCKED_TABLES = ["prospects", "automation_rules", "financial_anomalies", "job_offers", "worker_ratings", "public_submission_log", "ai_run_log"];
+// ---- 4. Aucune des 41 tables ne doit exposer de vraies données à la clé anon seule ----
+// Couvre à la fois les tables verrouillées service_role (RLS activée,
+// aucune policy) et les tables "propres à un rôle" (owners, units,
+// leases, payments, documents...) : dans les deux cas, la clé anon
+// seule — sans JWT d'un usager authentifié — ne doit jamais recevoir
+// une ligne réelle. Liste extraite de schema.sql (`create table`).
+const ALL_TABLES = [
+  "ai_run_log", "approvals", "audit_log", "automation_rule_runs", "automation_rules",
+  "bank_connections", "bank_transactions", "buildings", "cold_callers", "company_settings",
+  "dissatisfaction_signals", "documents", "expenses", "financial_anomalies", "inquiries",
+  "invoice_number_counters", "invoices", "job_offers", "lease_signatures", "leases",
+  "messages", "owners", "pad_authorizations", "payment_reminders", "payments",
+  "personal_data_requests", "privacy_incidents", "prospects", "public_submission_log",
+  "reports", "service_catalog", "service_requests", "sms_log", "system_health_alert_state",
+  "tenants", "units", "users", "visits", "work_orders", "worker_ratings", "workers",
+];
 
-async function testLockedTablesNotReadableByAnon() {
-  for (const table of LOCKED_TABLES) {
+async function testNoRealDataReadableByAnon() {
+  for (const table of ALL_TABLES) {
     const res = await restRequestAnon(table);
     const rowCount = Array.isArray(res.data) ? res.data.length : -1;
     if (res.status === 200 && rowCount === 0) {
-      record(`Table verrouillée illisible par la clé anon — ${table}`, "PASS");
+      record(`Aucune donnée réelle exposée à la clé anon — ${table}`, "PASS");
     } else if (res.status === 401 || res.status === 403) {
-      record(`Table verrouillée illisible par la clé anon — ${table}`, "PASS", `Statut ${res.status}`);
+      record(`Aucune donnée réelle exposée à la clé anon — ${table}`, "PASS", `Statut ${res.status}`);
     } else if (res.status === 404) {
       // PostgREST renvoie 404 (plutôt que 200+[]) quand le rôle appelant
       // n'a AUCUN privilège sur la table, même pas de quoi confirmer son
       // existence — c'est une protection plus forte qu'un tableau vide,
       // pas une faille.
-      record(`Table verrouillée illisible par la clé anon — ${table}`, "PASS", `Statut 404 — table invisible pour la clé anon (aucun privilège)`);
+      record(`Aucune donnée réelle exposée à la clé anon — ${table}`, "PASS", `Statut 404 — table invisible pour la clé anon (aucun privilège)`);
     } else {
-      record(`Table verrouillée illisible par la clé anon — ${table}`, "FAIL", `Statut ${res.status}, ${rowCount} ligne(s) retournée(s) — RLS ne bloque pas cette table`);
+      record(`Aucune donnée réelle exposée à la clé anon — ${table}`, "FAIL", `Statut ${res.status}, ${rowCount} ligne(s) retournée(s) — RLS ne bloque pas cette table`);
     }
   }
 }
@@ -146,11 +160,36 @@ async function testHealthCheckReachable() {
   }
 }
 
+// ---- 6. Stockage (documents, photos) : la clé anon ne doit lister aucun fichier ----
+const STORAGE_BUCKETS = ["documents", "service-request-photos"];
+
+async function testStorageBucketsNotListableByAnon() {
+  for (const bucket of STORAGE_BUCKETS) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/storage/v1/object/list/${bucket}`, {
+        method: "POST",
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ prefix: "", limit: 10 }),
+      });
+      const data = await res.json().catch(() => []);
+      const count = Array.isArray(data) ? data.length : -1;
+      if ((res.status === 200 && count === 0) || [400, 401, 403, 404].includes(res.status)) {
+        record(`Aucun fichier listé par la clé anon — ${bucket}`, "PASS", `Statut ${res.status}`);
+      } else {
+        record(`Aucun fichier listé par la clé anon — ${bucket}`, "FAIL", `Statut ${res.status}, ${count} fichier(s) listé(s) — RLS storage ne bloque pas ce bucket`);
+      }
+    } catch (e) {
+      record(`Aucun fichier listé par la clé anon — ${bucket}`, "FAIL", String(e.message || e));
+    }
+  }
+}
+
 async function main() {
   await testForgedJwtRejected();
   await testNoAuthRejected();
   await testFlinksSyncAllProtected();
-  await testLockedTablesNotReadableByAnon();
+  await testNoRealDataReadableByAnon();
+  await testStorageBucketsNotListableByAnon();
   await testHealthCheckReachable();
 
   const failed = results.filter((r) => r.status === "FAIL");
