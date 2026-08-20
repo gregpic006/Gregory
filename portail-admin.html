@@ -84,6 +84,25 @@
     <div class="f"><label>Mot de passe</label><input type="password" id="login-password"></div>
     <button onclick="handleLogin()">Se connecter</button>
     <p class="login-error" id="login-error"></p>
+    <p style="text-align:center;margin-top:12px;"><a href="#" onclick="showResetForm();return false;" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Mot de passe oublié ?</a></p>
+  </div>
+
+  <div class="login-box" id="reset-box" style="display:none;">
+    <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
+    <div class="sub">Réinitialiser le mot de passe</div>
+    <div class="f"><label>Courriel</label><input type="email" id="reset-email"></div>
+    <button onclick="sendResetLink()">Envoyer le lien</button>
+    <p class="login-error" id="reset-error"></p>
+    <p class="login-error" id="reset-success" style="color:var(--sage);"></p>
+    <p style="text-align:center;margin-top:12px;"><a href="#" onclick="showLoginForm();return false;" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Retour à la connexion</a></p>
+  </div>
+
+  <div class="login-box" id="newpw-box" style="display:none;">
+    <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
+    <div class="sub">Choisir un nouveau mot de passe</div>
+    <div class="f"><label>Nouveau mot de passe</label><input type="password" id="newpw-value"></div>
+    <button onclick="confirmNewPassword()">Confirmer</button>
+    <p class="login-error" id="newpw-error"></p>
   </div>
 </div>
 
@@ -697,8 +716,53 @@ function esc(str){
 }
 
 async function init(){
+  supabaseClient.auth.onAuthStateChange((event) => {
+    if(event === 'PASSWORD_RECOVERY'){
+      document.getElementById('login-screen').style.display = 'flex';
+      document.getElementById('app-shell').style.display = 'none';
+      showNewPasswordForm();
+    }
+  });
   const { data: { session } } = await supabaseClient.auth.getSession();
   if(session) await loadAdminDashboard();
+}
+
+function showResetForm(){
+  document.querySelector('#login-screen .login-box').style.display = 'none';
+  document.getElementById('reset-box').style.display = 'block';
+}
+function showLoginForm(){
+  document.getElementById('reset-box').style.display = 'none';
+  document.getElementById('newpw-box').style.display = 'none';
+  document.querySelector('#login-screen .login-box').style.display = 'block';
+}
+function showNewPasswordForm(){
+  document.querySelector('#login-screen .login-box').style.display = 'none';
+  document.getElementById('reset-box').style.display = 'none';
+  document.getElementById('newpw-box').style.display = 'block';
+}
+
+async function sendResetLink(){
+  const email = document.getElementById('reset-email').value;
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.href.split('#')[0].split('?')[0],
+  });
+  const errEl = document.getElementById('reset-error');
+  const okEl = document.getElementById('reset-success');
+  if(error){ errEl.textContent = error.message; errEl.style.display = 'block'; okEl.style.display = 'none'; return; }
+  errEl.style.display = 'none';
+  okEl.textContent = 'Lien envoyé ! Vérifie ta boîte courriel.';
+  okEl.style.display = 'block';
+}
+
+async function confirmNewPassword(){
+  const newPassword = document.getElementById('newpw-value').value;
+  const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+  const errEl = document.getElementById('newpw-error');
+  if(error){ errEl.textContent = error.message; errEl.style.display = 'block'; return; }
+  await supabaseClient.auth.signOut();
+  showLoginForm();
+  showLoginError('Mot de passe mis à jour — reconnecte-toi.');
 }
 
 async function handleLogin(){
