@@ -297,7 +297,7 @@ async function loadStats(){
   const data = await callCallerApi({ action: 'my_stats' });
   const grid = document.getElementById('stats-grid');
   if(data?.error){ grid.innerHTML = `<div class="stat-box"><div class="num">—</div><div class="label">${esc(data.error)}</div></div>`; return; }
-  const stageAbbrev = { new:'nouveau', contacted:'contacté', interested:'intéressé' };
+  const stageAbbrev = { new:'nouveau', contacted:'contacté', interested:'intéressé', proposal_sent:'proposition', signed:'signé', lost:'perdu' };
   const stageBreakdown = Object.entries(data.by_stage || {}).map(([k,v]) => `${stageAbbrev[k] || esc(k)}: ${v}`).join(' · ') || '—';
   grid.innerHTML = `
     <div class="stat-box"><div class="num">${data.total_assigned ?? 0}</div><div class="label">Prospects assignés</div></div>

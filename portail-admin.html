@@ -870,7 +870,7 @@ async function loadDataRequests(){
     container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune demande enregistrée.</p>';
     return;
   }
-  const typeLabel = { access: 'Accès', rectification: 'Rectification', deletion: 'Suppression' };
+  const typeLabel = { access: 'Accès', rectification: 'Rectification', deletion: 'Effacement' };
   const subjectLabel = { tenant: 'Locataire', prospect: 'Prospect', owner: 'Propriétaire', worker: 'Travailleur' };
   const statusLabel = { received: 'Reçue', in_progress: 'En cours', fulfilled: 'Traitée', rejected: 'Refusée' };
   const DEADLINE_DAYS = 30;
