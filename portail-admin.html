@@ -2141,6 +2141,7 @@ async function loadServiceRequestsAdmin(){
           <input type="text" id="sr-billing-${sr.id}" placeholder="Ex: net 15 jours" style="padding:8px;border:1px solid var(--line);width:150px;">
         </div>
         <button onclick="assignServiceRequest('${sr.id}', '${sr.unit_id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Assigner</button>
+        <button onclick="dispatchServiceRequestAuto('${sr.id}', '${sr.unit_id}')" title="Sollicite les travailleurs admissibles par ordre de score (Portail Pro), sans choix manuel" style="background:var(--paper);color:var(--ink);border:1px solid var(--ink);padding:9px 16px;font-size:12.5px;cursor:pointer;">Assigner automatiquement</button>
       </div>
     </div>`;
   }).join('');
@@ -2166,6 +2167,27 @@ async function assignServiceRequest(serviceRequestId, unitId){
     billing_terms: billing_terms || null,
   });
   if(res?.ok){ await loadOps(); }
+}
+
+// Portail Pro : au lieu de choisir un travailleur, on laisse le moteur
+// de dispatch (dispatch-work-order.ts, action "dispatch_work_order_auto"
+// de ops-api.ts) solliciter les travailleurs admissibles par paliers de
+// score — le work order reste "open" jusqu'à ce qu'un travailleur
+// accepte une offre. Contrairement à assignServiceRequest(), aucun
+// worker_id n'est envoyé.
+async function dispatchServiceRequestAuto(serviceRequestId, unitId){
+  const description = document.getElementById('sr-desc-' + serviceRequestId).value;
+  const worker_pay = document.getElementById('sr-pay-' + serviceRequestId).value;
+  if(!description){
+    alert('Ajoute une description du travail avant de lancer le dispatch automatique.');
+    return;
+  }
+  if(!confirm('Le dispatch automatique va solliciter des travailleurs admissibles par ordre de score, sans que tu en choisisses un toi-même. Continuer ?')) return;
+  const res = await callOpsApi({
+    action: 'dispatch_work_order_auto', service_request_id: serviceRequestId, unit_id: unitId, description,
+    worker_pay: worker_pay ? Number(worker_pay) : null,
+  });
+  if(res?.ok){ await loadOps(); } else { alert(res?.error || 'Échec du dispatch automatique.'); }
 }
 
 async function loadWorkOrdersAdmin(){
