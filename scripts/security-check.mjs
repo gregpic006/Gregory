@@ -125,9 +125,10 @@ async function testFlinksSyncAllProtected() {
 const ALL_TABLES = [
   "ai_run_log", "approvals", "audit_log", "automated_decisions", "automation_rule_runs", "automation_rules",
   "bank_connections", "bank_transactions", "cold_callers", "company_settings",
-  "dissatisfaction_signals", "documents", "expenses", "financial_anomalies", "inquiries",
+  "dissatisfaction_signals", "documents", "expenses", "external_disbursements", "financial_anomalies",
+  "gl_accounts", "gl_journal_entries", "gl_journal_lines", "inquiries",
   "invoice_number_counters", "invoices", "job_offers", "lease_signatures", "leases",
-  "messages", "owners", "pad_authorizations", "payment_reminders", "payments",
+  "messages", "owners", "pad_authorizations", "payables", "payment_reminders", "payments",
   "personal_data_requests", "privacy_incidents", "prospects", "public_submission_log",
   "reports", "service_catalog", "service_requests", "sms_log", "system_health_alert_state",
   "tenants", "users", "visits", "work_orders", "worker_ratings", "workers",
