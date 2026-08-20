@@ -8,16 +8,16 @@ Ce document pose le plan. L'exécution se fait par étapes séparées, chacune v
 
 ## État actuel (référence pour mesurer l'ampleur du changement)
 
-- 9 portails/pages en HTML statique avec JavaScript inline (`<script>` dans la page), aucune étape de build, aucun bundler, aucun système de types.
-- `portail-admin.html` à lui seul fait 2682 lignes (le plus gros morceau — normal, c'est lui qui contient le plus d'actions).
-- 37 fonctions edge Supabase (Deno, TypeScript déjà) — celles-ci n'ont **pas** besoin d'être réécrites en Next.js ; Next.js est un framework frontend/serveur web, pas un remplacement pour des edge functions Deno.
+- 13 portails/pages en HTML statique avec JavaScript inline (`<script>` dans la page), aucune étape de build, aucun bundler, aucun système de types.
+- `portail-admin.html` à lui seul fait 2930 lignes (le plus gros morceau — normal, c'est lui qui contient le plus d'actions).
+- 38 fonctions edge Supabase (Deno, TypeScript déjà) — celles-ci n'ont **pas** besoin d'être réécrites en Next.js ; Next.js est un framework frontend/serveur web, pas un remplacement pour des edge functions Deno.
 - Hébergement statique actuel (CNAME → `portailgestion.ca`), pas de serveur Node en production aujourd'hui.
 - Aucun `package.json`, aucune dépendance npm dans le repo actuellement.
 - Chaque portail appelle Supabase directement via le client JS (`@supabase/supabase-js` chargé par CDN), sans couche d'abstraction ni de types partagés.
 
 ## Recommandation : migration "strangler fig", pas une réécriture big-bang
 
-Ne pas réécrire les 9 portails d'un coup. À la place :
+Ne pas réécrire les 13 portails d'un coup. À la place :
 
 1. **Un seul nouveau projet Next.js**, déployé à côté de l'existant (ex: sous-domaine `app.portailgestion.ca` ou un chemin distinct), qui ne remplace RIEN au départ.
 2. **Migrer un portail à la fois**, en commençant par l'admin (`portail-admin.html`) puisque c'est explicitement "refonte admin" dans la roadmap, et que c'est le portail interne (pas client-facing) — le risque d'une régression y est moins grave qu'un bris du portail locataire ou propriétaire.
@@ -34,7 +34,7 @@ Ne pas réécrire les 9 portails d'un coup. À la place :
 - **Livrable de cette phase : un déploiement Next.js vide accessible, sans aucun impact sur les portails existants.**
 
 ### Phase 1 — Portail admin, section par section
-Ne pas migrer les 2682 lignes de `portail-admin.html` d'un coup. Découper par section déjà existante (Onboarding, Travaux, Comptabilité, Observabilité, etc. — les sections qu'on vient de construire) et migrer une section à la fois, chacune déployée et testée avant la suivante. Commencer par une section peu utilisée à faible risque (ex: "Observabilité", qu'on vient de construire) pour valider tout le pipeline (auth, appel aux edge functions, déploiement) avant de toucher aux sections critiques (Travaux, Approbations).
+Ne pas migrer les 2930 lignes de `portail-admin.html` d'un coup. Découper par section déjà existante (Onboarding, Travaux, Comptabilité, Observabilité, etc. — les sections qu'on vient de construire) et migrer une section à la fois, chacune déployée et testée avant la suivante. Commencer par une section peu utilisée à faible risque (ex: "Observabilité", qu'on vient de construire) pour valider tout le pipeline (auth, appel aux edge functions, déploiement) avant de toucher aux sections critiques (Travaux, Approbations).
 
 ### Phase 2 — Bascule progressive du trafic admin
 Une fois toutes les sections migrées et validées, rediriger l'accès admin vers la nouvelle version. Garder `portail-admin.html` disponible (non lié dans la navigation, mais accessible directement) comme filet de sécurité pendant au moins 2-4 semaines d'usage réel avant suppression.
@@ -44,7 +44,7 @@ Une fois le portail admin stable en Next.js, répéter pour les autres portails 
 
 ## Ce qui NE change PAS dans ce plan
 
-- Les 37 edge functions Deno restent telles quelles — Next.js les appelle, ne les remplace pas.
+- Les 38 edge functions Deno restent telles quelles — Next.js les appelle, ne les remplace pas.
 - Le schéma Supabase (`schema.sql` + `supabase/migrations/`) ne change pas à cause de cette migration.
 - Les formulaires publics non authentifiés (`formulaires-gestion-immobiliere.html`, `confirmer-visite.html`, `signer-bail.html`, etc.) ne sont pas dans la portée immédiate — ce sont des pages simples, peu de logique, faible priorité de migration.
 
