@@ -16,12 +16,12 @@ SaaS de gestion immobilière résidentielle, construit sur Supabase (Postgres + 
 - Tables consultées directement par le navigateur (`owners`, `buildings`, `units`, `tenants`, `leases`, `payments`, `work_orders`, etc.) : policies scopées via des fonctions `security definer` (`auth_owner_id()`, `auth_tenant_id()`, `owned_unit_ids()`, `tenant_unit_ids()`, `auth_is_admin()`, définies vers la ligne 555 de `schema.sql`).
 - Tables sensibles (`prospects`, `job_offers`, `worker_ratings`, `financial_anomalies`, `public_submission_log`, `ai_run_log`...) : RLS activé avec **zéro policy** — verrouillées au `service_role` uniquement. Tout accès passe obligatoirement par une edge function.
 
-**Backend** : 34 Supabase Edge Functions (Deno/TypeScript), chacune un fichier `edge-function-<nom>.ts` à la racine — le nom de la fonction déployée sur Supabase est `<nom>` (sans le préfixe `edge-function-` ni le `.ts`). Deux familles :
-- Fonctions **admin/rôle-authentifiées** (`ops-api`, `onboarding-api`, `admin-api`, `crm-api`, `caller-api`, `worker-api`, `privacy-api`, `parse-expense-receipt`...) : décodent le JWT du header `Authorization` (base64, sans vérification de signature côté fonction — repose sur le réglage `verify_jwt` de Supabase), vérifient `users.is_admin` (ou l'équivalent propriétaire/locataire/travailleur) via une requête `service_role`, puis exécutent l'action demandée (`body.action`).
-- Fonctions **publiques** (`handle-public-inquiry`, `handle-worker-registration`, `handle-mandat-inquiry`...) : pas de JWT requis, protégées par un honeypot (champ caché `website`) + limite de débit par IP (table `public_submission_log`).
-- Fonctions **système/cron** (`handle-payment-reminder`, `handle-worker-job-assigned`, `generate-owner-report`, `send-onboarding-reminder`...) : déclenchées par des `cron.schedule(...)` définis dans `schema.sql` via `pg_net`.
+**Backend** : 38 Supabase Edge Functions (Deno/TypeScript), chacune un fichier `edge-function-<nom>.ts` à la racine — le nom de la fonction déployée sur Supabase est `<nom>` (sans le préfixe `edge-function-` ni le `.ts`). Trois familles :
+- Fonctions **admin/rôle-authentifiées** (`ops-api`, `onboarding-api`, `admin-api`, `crm-api`, `caller-api`, `worker-api`, `owner-api`, `privacy-api`, `ask-documents`, `ask-finances`, `flinks-api`, `parse-expense-receipt`, `reconcile-bank-transactions`, `handle-lease-renewal-notice`) : vérifient le JWT en code via `verifySupabaseJwt()` (voir section Sécurité ci-dessous — pas le réglage plateforme `verify_jwt`), vérifient `users.is_admin` (ou l'équivalent propriétaire/locataire/travailleur) via une requête `service_role`, puis exécutent l'action demandée (`body.action`).
+- Fonctions **publiques** (`handle-public-inquiry`, `handle-worker-registration`, `handle-mandat-inquiry`, `handle-public-faq`...) : pas de JWT requis, protégées par un honeypot (champ caché `website`) + limite de débit par IP (table `public_submission_log`).
+- Fonctions **système/cron** (`handle-payment-reminder`, `handle-worker-job-assigned`, `generate-owner-report`, `send-onboarding-reminder`, `dispatch-work-order`...) : déclenchées par des `cron.schedule(...)` définis dans `schema.sql` via `pg_net`.
 
-**Frontend** : 12 fichiers HTML statiques (vanilla JS, aucun framework/bundler) à la racine :
+**Frontend** : 13 fichiers HTML statiques (vanilla JS, aucun framework/bundler) à la racine :
 - `portail-admin.html` — interne, accès complet
 - `portail-proprietaire.html`, `portail-locataire.html`, `portail-cold-caller.html`, `portail-travailleur.html` — un portail par rôle, connectés via Supabase Auth (client JS direct + RLS pour la plupart des lectures/écritures)
 - `index.html`, `pro.html`, `formulaires-gestion-immobiliere.html` — pages publiques
@@ -52,7 +52,6 @@ FLINKS_SECRET_KEY
 FLINKS_CUSTOMER_ID
 FLINKS_IFRAME_BASE_URL
 FLINKS_SYNC_SECRET
-SUPABASE_JWT_SECRET      (requis — vérification de signature JWT, voir section Sécurité ci-dessous)
 TWILIO_ACCOUNT_SID       (optionnel — SMS Portail Concierge, repli automatique par courriel tant qu'absent)
 TWILIO_AUTH_TOKEN        (optionnel — idem)
 TWILIO_FROM_NUMBER       (optionnel — idem)
@@ -75,15 +74,17 @@ Ce monitoring reste volontairement minimal (checks applicatifs de base, pas d'ob
 
 ## Sécurité — vérification JWT
 
-Chaque fonction admin-authentifiée vérifie maintenant elle-même la **signature** du JWT (HS256, `SUPABASE_JWT_SECRET`) via `verifySupabaseJwt()` — inlinée dans chaque fichier (pas de module partagé tant que le déploiement reste manuel par copier-coller, voir CI/CD ci-dessous). Avant ce correctif, les fonctions décodaient seulement le payload (base64) sans vérifier qu'il avait été signé par Supabase, reposant entièrement sur le réglage "Verify JWT" de la plateforme (Dashboard → Edge Functions → chaque fonction → Settings) — un réglage par fonction, jamais audité, donc source d'erreur humaine facile. La vérification en code est maintenant la garantie réelle ; le réglage plateforme reste une deuxième couche, pas la seule.
+Chaque fonction admin-authentifiée vérifie le JWT en appelant `GET {SUPABASE_URL}/auth/v1/user` avec le token — `verifySupabaseJwt()`, inlinée dans chaque fichier (pas de module partagé tant que le déploiement reste manuel par copier-coller, voir CI/CD ci-dessous). Un token invalide, expiré ou forgé fait échouer cet appel (Supabase répond autre chose que 200), donc la fonction refuse la requête (401).
 
-**Configuration requise** : Supabase Dashboard → Project Settings → API → JWT Settings → copie le "JWT Secret" → ajoute-le comme secret d'edge function nommé `SUPABASE_JWT_SECRET`.
+**Ce n'est PAS une vérification de signature locale (pas de HS256/`SUPABASE_JWT_SECRET`)** — c'est délibéré : la passerelle Edge Functions a un bug connu qui rejette à tort les JWT signés en ES256 (le mode par défaut du projet, clés asymétriques) quand le réglage plateforme `verify_jwt=true` est actif (github.com/supabase/supabase/issues/42244). Le contournement officiel Supabase est `verify_jwt=false` partout (voir `supabase/config.toml`) + vérification manuelle dans le code via l'API Auth elle-même, qui gère ES256 correctement. Cette vérification réseau est donc la SEULE protection pour ces fonctions — pas une deuxième couche par-dessus un réglage plateforme. Repasser `verify_jwt` à `true` pour ces fonctions seulement après confirmation que le bug Supabase ci-dessus est réglé côté plateforme.
 
-Fonctions concernées : `ops-api`, `worker-api`, `caller-api`, `onboarding-api`, `reconcile-bank-transactions`, `crm-api`, `admin-api`, `privacy-api`, `ask-documents`, `ask-finances`, `handle-lease-renewal-notice`, `flinks-api`, `parse-expense-receipt`.
+**Aucune configuration de secret requise** pour ce mécanisme — `verifySupabaseJwt()` réutilise `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY`, déjà nécessaires par ailleurs.
+
+Fonctions concernées : `admin-api`, `ask-documents`, `ask-finances`, `caller-api`, `crm-api`, `flinks-api`, `handle-lease-renewal-notice`, `onboarding-api`, `ops-api`, `owner-api`, `parse-expense-receipt`, `privacy-api`, `reconcile-bank-transactions`, `worker-api`.
 
 ## Tests d'étanchéité
 
-`scripts/security-check.mjs` tente en conditions réelles (contre la prod) des accès qui doivent échouer : JWT forgé contre les 13 fonctions admin, requêtes sans authentification, `flinks-api sync_all` sans le secret partagé, lecture des tables verrouillées (`prospects`, `automation_rules`, etc.) avec la seule clé anon. Aucune action destructive ni coûteuse.
+`scripts/security-check.mjs` tente en conditions réelles (contre la prod) des accès qui doivent échouer : JWT forgé contre les 14 fonctions admin, requêtes sans authentification, `flinks-api sync_all` sans le secret partagé, lecture des tables verrouillées (`prospects`, `automation_rules`, etc.) avec la seule clé anon. Aucune action destructive ni coûteuse.
 
 À lancer depuis l'onglet **Actions** du repo → "Tests d'étanchéité" → "Run workflow" (déclenchement manuel volontairement — pas de cron automatique contre la prod). Ou en local : `node scripts/security-check.mjs` (aucun secret requis, tout est en lecture/rejet).
 
@@ -95,7 +96,7 @@ Fonctions concernées : `ops-api`, `worker-api`, `caller-api`, `onboarding-api`,
 - `SUPABASE_ACCESS_TOKEN` — Supabase Dashboard → ton compte (icône en haut à droite) → Access Tokens → génère-en un nouveau (accès complet à tous tes projets, à garder secret).
 - `SUPABASE_PROJECT_REF` — l'identifiant du projet, visible dans l'URL du dashboard (`kdmwfbcziokygfcmjxeq` pour ce projet — déjà public dans le code client, mais gardé en secret ici par cohérence).
 
-`supabase/config.toml` déclare le réglage `verify_jwt` de chaque fonction (`true` pour les 12 fonctions admin-authentifiées, `false` pour les fonctions publiques/à token/système) — **important** : sans ce fichier, un déploiement automatisé réinitialiserait ce réglage à sa valeur par défaut et casserait potentiellement les fonctions publiques.
+`supabase/config.toml` déclare le réglage `verify_jwt` de chaque fonction — actuellement `false` pour TOUTES les fonctions (voir section Sécurité ci-dessus : bug de plateforme sur les JWT ES256, contournement officiel Supabase) — **important** : sans ce fichier, un déploiement automatisé réinitialiserait ce réglage à sa valeur par défaut et casserait potentiellement les fonctions publiques.
 
 **Schéma SQL — semi-automatisé, en transition.** `schema.sql` reste l'historique figé (référence de lecture, ne plus y ajouter). Toute nouvelle modification de schéma va dans un nouveau fichier sous `supabase/migrations/` (nommage `YYYYMMDDHHMMSS_description.sql`, généré par `supabase migration new <description>` en local). Il n'y a pas encore de workflow automatique pour ces migrations — **étape manuelle unique restante** pour l'activer : quelqu'un avec la CLI Supabase installée en local doit faire un `supabase link --project-ref <ref>` puis `supabase db pull` une fois, pour établir la base "déjà appliquée" avant de brancher `supabase db push` en CI. Tant que ce n'est pas fait, applique les fichiers de `supabase/migrations/` manuellement dans le SQL Editor, comme avant.
 

@@ -72,7 +72,7 @@ const ADMIN_FUNCTIONS = [
   "ops-api", "worker-api", "caller-api", "onboarding-api",
   "reconcile-bank-transactions", "crm-api", "admin-api", "privacy-api",
   "ask-documents", "ask-finances", "handle-lease-renewal-notice", "flinks-api",
-  "parse-expense-receipt",
+  "parse-expense-receipt", "owner-api",
 ];
 
 async function testForgedJwtRejected() {

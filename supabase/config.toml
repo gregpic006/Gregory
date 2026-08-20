@@ -13,10 +13,10 @@
 #   github.com/supabase/supabase/issues/42244. Contournement officiel
 #   Supabase : verify_jwt=false + vérification manuelle dans le code.
 # verify_jwt = false → la fonction gère elle-même l'authentification.
-#   Les 13 fonctions "admin-authentifiées" vérifient le JWT en code en
+#   Les 14 fonctions "admin-authentifiées" vérifient le JWT en code en
 #   appelant GET /auth/v1/user (voir README, section Sécurité) — c'est
 #   la SEULE vérification pour ces fonctions tant que le bug Supabase
-#   ci-dessus n'est pas corrigé côté plateforme. Repasser ces 12
+#   ci-dessus n'est pas corrigé côté plateforme. Repasser ces 14
 #   fonctions à true seulement après confirmation que ce bug est réglé.
 
 project_id = "kdmwfbcziokygfcmjxeq"
