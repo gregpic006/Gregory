@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /confirmer-reparation.html
+Disallow: /confirmer-visite.html
+Disallow: /reponse-travailleur.html
+Disallow: /signer-bail.html
+
+Sitemap: https://portailgestion.ca/sitemap.xml
