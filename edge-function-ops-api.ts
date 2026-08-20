@@ -934,6 +934,44 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ errors: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Loi 25 (art. 12.1) : journal des décisions automatisées + demandes
+    // de révision humaine en attente. Par défaut ne montre que les
+    // demandes de révision non traitées ; only_pending_review=false pour
+    // tout voir.
+    if (action === "list_automated_decisions") {
+      const onlyPending = body.only_pending_review !== false;
+      const filter = onlyPending
+        ? "review_requested_at=not.is.null&review_outcome=is.null"
+        : "";
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/automated_decisions?${filter}${filter ? "&" : ""}select=*&order=decided_at.desc&limit=200`,
+        { headers: adminHeaders },
+      );
+      return new Response(JSON.stringify({ decisions: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "respond_decision_review") {
+      const { decision_id, outcome, response_text } = body;
+      if (!decision_id || !["maintenue", "annulee"].includes(outcome)) {
+        return new Response(JSON.stringify({ error: "decision_id et outcome ('maintenue'|'annulee') requis" }), { status: 400, headers: corsHeaders });
+      }
+      const patchRes = await fetch(`${supabaseUrl}/rest/v1/automated_decisions?id=eq.${decision_id}`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({
+          review_outcome: outcome,
+          review_response: response_text || null,
+          reviewed_at: new Date().toISOString(),
+          reviewed_by: userId,
+        }),
+      });
+      if (!patchRes.ok) {
+        return new Response(JSON.stringify({ error: "Échec de l'enregistrement de la révision" }), { status: 500, headers: corsHeaders });
+      }
+      await logAudit("admin.respond_decision_review", "automated_decisions", decision_id, { outcome, response_text });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     return new Response(JSON.stringify({ error: "action inconnue" }), { status: 400, headers: corsHeaders });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });

@@ -121,6 +121,7 @@
       <button class="tab-btn" data-tab="observability" onclick="showTab('observability')">Observabilité</button>
       <button class="tab-btn" data-tab="automations" onclick="showTab('automations')">Automatisations</button>
       <button class="tab-btn" data-tab="privacy" onclick="showTab('privacy')">Confidentialité (Loi 25)</button>
+      <button class="tab-btn" data-tab="automated-decisions" onclick="showTab('automated-decisions')">Décisions automatisées</button>
       <div class="signout">
         <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
       </div>
@@ -675,6 +676,13 @@
     </div>
     <div id="data-requests-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
       </section>
+
+      <section id="automated-decisions" class="section">
+    <h1 style="font-size:22px;">Décisions automatisées</h1>
+    <p class="subtitle" style="margin-bottom:16px;">Journal des décisions prises exclusivement par un traitement automatisé (Loi 25, art. 12.1) et demandes de révision humaine reçues des portails propriétaire/locataire/travailleur.</p>
+    <label style="display:block;font-size:12.5px;margin-bottom:14px;"><input type="checkbox" id="ad-only-pending" checked onchange="loadAutomatedDecisionsAdmin()"> N'afficher que les révisions demandées, non encore traitées</label>
+    <div id="automated-decisions-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+      </section>
     </main>
   </div>
 </div>
@@ -797,6 +805,7 @@ async function loadAdminDashboard(){
   await loadAuditLog();
   await loadPrivacyIncidents();
   await loadDataRequests();
+  await loadAutomatedDecisionsAdmin();
   await obInit();
 }
 
@@ -906,6 +915,39 @@ async function closeDataRequestManually(request_id){
   const resolution_note = prompt('Note de résolution (ex: correction appliquée manuellement) :') || '';
   const res = await callPrivacyApi({ action: 'update_data_request', request_id, status: 'fulfilled', resolution_note });
   if(res?.ok){ await loadDataRequests(); }
+}
+
+const decisionSubjectLabel = { owner: 'Propriétaire', tenant: 'Locataire', worker: 'Travailleur' };
+
+async function loadAutomatedDecisionsAdmin(){
+  const onlyPending = document.getElementById('ad-only-pending').checked;
+  const data = await callOpsApi({ action: 'list_automated_decisions', only_pending_review: onlyPending });
+  const container = document.getElementById('automated-decisions-body');
+  const decisions = data?.decisions || [];
+  if(!decisions.length){
+    container.innerHTML = `<p style="color:var(--muted);font-size:13.5px;">${onlyPending ? 'Aucune révision en attente.' : 'Aucune décision automatisée enregistrée.'}</p>`;
+    return;
+  }
+  container.innerHTML = decisions.map(d => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <b style="display:block;margin-bottom:4px;">${esc(decisionSubjectLabel[d.subject_type] || d.subject_type)} ${esc(d.subject_id)} — ${esc(d.decision_type)}</b>
+      <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px;">${esc(d.summary)} — ${new Date(d.decided_at).toLocaleString('fr-CA')}</span>
+      <pre style="font-size:11.5px;color:var(--muted);white-space:pre-wrap;margin-bottom:8px;">${esc(JSON.stringify(d.factors, null, 2))}</pre>
+      ${d.review_requested_at ? `
+      <div style="font-size:12.5px;margin-bottom:8px;">Révision demandée le ${new Date(d.review_requested_at).toLocaleDateString('fr-CA')}${d.review_note ? ' — note : ' + esc(d.review_note) : ''}</div>
+      ${!d.review_outcome ? `
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        <button onclick="respondDecisionReview('${d.id}','maintenue')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Maintenir la décision</button>
+        <button onclick="respondDecisionReview('${d.id}','annulee')" style="border:1px solid var(--ink);background:none;padding:6px 10px;font-size:11.5px;cursor:pointer;">Annuler la décision</button>
+      </div>` : `<span style="font-size:12.5px;color:var(--muted);">Réponse envoyée : ${esc(d.review_outcome === 'annulee' ? 'décision annulée' : 'décision maintenue')}${d.review_response ? ' — ' + esc(d.review_response) : ''}</span>`}
+      ` : ''}
+    </div>`).join('');
+}
+
+async function respondDecisionReview(decision_id, outcome){
+  const response_text = prompt('Explication envoyée à la personne concernée (optionnel) :') || '';
+  const res = await callOpsApi({ action: 'respond_decision_review', decision_id, outcome, response_text });
+  if(res?.ok){ await loadAutomatedDecisionsAdmin(); }
 }
 
 const healthSeverityColor = { critical: 'var(--rust)', warning: 'var(--brass)' };

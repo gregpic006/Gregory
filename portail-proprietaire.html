@@ -159,6 +159,7 @@
       <button class="tab-btn" data-tab="documents" onclick="showTab('documents')">Documents</button>
       <button class="tab-btn" data-tab="messages" onclick="showTab('messages')">Messages</button>
       <button class="tab-btn" data-tab="reports" onclick="showTab('reports')">Rapports mensuels</button>
+      <button class="tab-btn" data-tab="decisions" onclick="showTab('decisions')">Décisions automatisées</button>
       <button class="tab-btn" data-tab="copilot" onclick="showTab('copilot')">Copilot</button>
       <div class="signout">
         <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
@@ -295,6 +296,12 @@
         <div class="toolbar" style="margin-top:32px;"><h2>Factures — frais de gestion Portail</h2></div>
         <p style="color:var(--muted);font-size:13.5px;margin-bottom:14px;">Frais de gestion et de coordination des travaux, déjà déduits du montant net qui te revient chaque mois — voici le détail formel pour ta comptabilité.</p>
         <div id="invoices-body-owner"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+      </section>
+
+      <section id="decisions" class="section">
+        <div class="toolbar"><h2>Décisions automatisées</h2></div>
+        <p style="color:var(--muted);font-size:13.5px;margin-bottom:14px;">Certaines décisions vous concernant sont prises automatiquement par le système, selon des règles fixes (ex. : réparation lancée sans approbation parce que son coût respecte votre plafond). Voici l'historique et les facteurs qui ont mené à chacune — tu peux demander qu'un humain la révise.</p>
+        <div id="decisions-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
       </section>
 
       <section id="copilot" class="section">
@@ -447,6 +454,7 @@ async function loadBuildings(){
   await loadReports();
   await loadOwnerInvoices();
   await loadRentals();
+  await loadAutomatedDecisions();
 }
 
 async function renderOverview(buildings){
@@ -724,6 +732,39 @@ async function decideApproval(id, decision){
   }
   await supabaseClient.from('approvals').update({ status: decision, decided_at: new Date().toISOString(), rejection_note }).eq('id', id);
   await loadApprovals();
+}
+
+async function loadAutomatedDecisions(){
+  const { data } = await supabaseClient
+    .from('automated_decisions')
+    .select('*')
+    .eq('subject_type', 'owner')
+    .eq('subject_id', ownerRecord.id)
+    .order('decided_at', { ascending: false })
+    .limit(100);
+
+  const container = document.getElementById('decisions-body');
+  if(!data || !data.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune décision automatisée enregistrée pour le moment.</p>';
+    return;
+  }
+  container.innerHTML = data.map(d => `
+    <div class="approve-row">
+      <div class="desc">
+        <b>${esc(d.summary)}</b>
+        <span>${new Date(d.decided_at).toLocaleString('fr-CA')}${d.factors && Object.keys(d.factors).length ? ' — ' + esc(JSON.stringify(d.factors)) : ''}</span>
+        ${d.review_requested_at ? `<span>Révision demandée le ${new Date(d.review_requested_at).toLocaleDateString('fr-CA')}${d.review_outcome ? ` — réponse de l'équipe : ${esc(d.review_outcome === 'annulee' ? 'décision annulée' : 'décision maintenue')}${d.review_response ? ' — ' + esc(d.review_response) : ''}` : ' — en attente de traitement'}</span>` : ''}
+      </div>
+      <div class="approve-actions">
+        ${!d.review_requested_at ? `<button onclick="requestDecisionReview('${d.id}')">Demander une révision humaine</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+async function requestDecisionReview(id){
+  const note = prompt("Explique brièvement pourquoi tu demandes une révision de cette décision (optionnel) :") || null;
+  await supabaseClient.from('automated_decisions').update({ review_requested_at: new Date().toISOString(), review_note: note }).eq('id', id);
+  await loadAutomatedDecisions();
 }
 
 async function requestAnotherQuote(approvalId){

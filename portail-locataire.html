@@ -128,6 +128,7 @@
       <button class="tab-btn active" data-tab="overview" onclick="showTab('overview')">Mon logement</button>
       <button class="tab-btn" data-tab="payments" onclick="showTab('payments')">Mes paiements</button>
       <button class="tab-btn" data-tab="requests" onclick="showTab('requests')">Signaler un problème</button>
+      <button class="tab-btn" data-tab="decisions" onclick="showTab('decisions')">Décisions automatisées</button>
       <div class="signout">
         <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
       </div>
@@ -173,6 +174,12 @@
         <table><thead><tr><th>Description</th><th>Statut</th></tr></thead>
           <tbody id="requests-body"><tr class="empty-row"><td colspan="2">Chargement...</td></tr></tbody>
         </table>
+      </section>
+
+      <section id="decisions" class="section">
+        <div class="toolbar"><h2>Décisions automatisées</h2></div>
+        <p style="color:var(--muted);font-size:13.5px;margin-bottom:14px;">Certaines décisions vous concernant sont prises automatiquement par le système, selon des règles fixes. Voici l'historique et les facteurs qui ont mené à chacune — tu peux demander qu'un humain la révise.</p>
+        <div id="decisions-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
       </section>
     </main>
   </div>
@@ -286,6 +293,7 @@ async function loadTenantDashboard(userId){
   renderOverview(currentLease);
   renderPayments(currentLease);
   await loadRequests();
+  await loadAutomatedDecisions();
 }
 
 const leaseStatusLabel = { active: 'Actif', renewed: 'Renouvelé', ended: 'Terminé' };
@@ -350,6 +358,36 @@ async function loadRequests(){
     <td>${esc(r.description)}</td>
     <td><span class="tag ${tagClass[r.status]}">${tagLabel[r.status]}</span></td>
   </tr>`).join('');
+}
+
+async function loadAutomatedDecisions(){
+  const { data } = await supabaseClient
+    .from('automated_decisions')
+    .select('*')
+    .eq('subject_type', 'tenant')
+    .eq('subject_id', tenantRecord.id)
+    .order('decided_at', { ascending: false })
+    .limit(100);
+
+  const container = document.getElementById('decisions-body');
+  if(!data || !data.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune décision automatisée enregistrée pour le moment.</p>';
+    return;
+  }
+  container.innerHTML = data.map(d => `
+    <div class="card-box">
+      <p style="font-size:14px;margin-bottom:6px;">${esc(d.summary)}</p>
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:8px;">${new Date(d.decided_at).toLocaleString('fr-CA')}</p>
+      ${d.review_requested_at
+        ? `<p style="font-size:12.5px;color:var(--muted);">Révision demandée le ${new Date(d.review_requested_at).toLocaleDateString('fr-CA')}${d.review_outcome ? ` — réponse de l'équipe : ${esc(d.review_outcome === 'annulee' ? 'décision annulée' : 'décision maintenue')}${d.review_response ? ' — ' + esc(d.review_response) : ''}` : ' — en attente de traitement'}</p>`
+        : `<button class="submit" style="padding:9px 16px;font-size:13px;" onclick="requestDecisionReview('${d.id}')">Demander une révision humaine</button>`}
+    </div>`).join('');
+}
+
+async function requestDecisionReview(id){
+  const note = prompt("Explique brièvement pourquoi tu demandes une révision de cette décision (optionnel) :") || null;
+  await supabaseClient.from('automated_decisions').update({ review_requested_at: new Date().toISOString(), review_note: note }).eq('id', id);
+  await loadAutomatedDecisions();
 }
 
 async function submitServiceRequest(event){

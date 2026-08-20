@@ -127,6 +127,21 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         method: "POST", headers: adminHeaders,
         body: JSON.stringify({ actor_type: "system", action: "dissatisfaction.escalated", entity_type: "dissatisfaction_signals", entity_id: signal?.id ?? null, details: { source, subject_type, subject_id, sentiment } }),
       });
+      // Loi 25 (art. 12.1) : le seuil qui déclenche l'escalade est
+      // déterministe (voir ESCALATION_WINDOW_DAYS/NEGATIVE_PATTERN_THRESHOLD
+      // ci-dessus) — seule la classification de ton vient de l'IA. Journalisé
+      // comme décision automatisée : la personne peut la consulter et en
+      // demander la révision depuis son portail.
+      await fetch(`${supabaseUrl}/rest/v1/automated_decisions`, {
+        method: "POST", headers: adminHeaders,
+        body: JSON.stringify({
+          decision_type: "dissatisfaction_escalated",
+          subject_type, subject_id,
+          entity_type: "dissatisfaction_signals", entity_id: signal?.id ?? null,
+          summary: "Un message que vous avez écrit a été signalé automatiquement comme signe d'insatisfaction et transmis à l'équipe.",
+          factors: { sentiment, confidence: parsed.confidence ?? null, prior_negative_count: priorNegativeCount, threshold: NEGATIVE_PATTERN_THRESHOLD },
+        }),
+      }).catch((e) => console.error("Failed to log automated_decisions", e));
       try {
         const adminsRes = await fetch(`${supabaseUrl}/rest/v1/users?is_admin=eq.true&select=email`, { headers: adminHeaders });
         const admins = await adminsRes.json().catch(() => []);
