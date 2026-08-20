@@ -434,9 +434,19 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
       }
       const paymentRes = await fetch(`${supabaseUrl}/rest/v1/payments?id=eq.${payment_id}&select=amount,amount_received`, { headers: adminHeaders });
       const [payment] = await paymentRes.json();
-      const totalReceived = Number(payment?.amount_received || 0) + Number(tx.amount);
+      if (!payment) {
+        return new Response(JSON.stringify({ error: "Paiement introuvable" }), { status: 404, headers: corsHeaders });
+      }
+      const totalReceived = Number(payment.amount_received || 0) + Number(tx.amount);
+      const owed = Number(payment.amount) - totalReceived;
+      // Même règle que le rapprochement automatique (≥95%) : une
+      // confirmation à 75-94% ne doit pas non plus marquer "paid" un
+      // paiement qui n'est que partiellement couvert — sinon un manque
+      // réel (ex: colocataires qui paient séparément) disparaît
+      // silencieusement du suivi des loyers en retard.
+      const paymentStatus = Math.abs(owed) <= AMOUNT_TOLERANCE || owed < -AMOUNT_TOLERANCE ? "paid" : "pending";
       await fetch(`${supabaseUrl}/rest/v1/payments?id=eq.${payment_id}`, {
-        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "paid", paid_date: tx.transaction_date, amount_received: totalReceived }),
+        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: paymentStatus, paid_date: paymentStatus === "paid" ? tx.transaction_date : null, amount_received: totalReceived }),
       });
       await fetch(`${supabaseUrl}/rest/v1/bank_transactions?id=eq.${transaction_id}`, {
         method: "PATCH", headers: adminHeaders,

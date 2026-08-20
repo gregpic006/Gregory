@@ -243,14 +243,38 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
       if (!lease_id) {
         return new Response(JSON.stringify({ error: "lease_id manquant" }), { status: 400, headers: corsHeaders });
       }
+      const leasePatch: Record<string, unknown> = {
+        renewal_response: renewal_response || undefined,
+        renewal_signed: renewal_signed ?? undefined,
+        renewal_response_note: renewal_response_note ?? undefined,
+      };
+      // Même garde-fou que handle-lease-signature.ts : une réponse
+      // "acceptée" consignée manuellement (obtenue verbalement, etc.) doit
+      // aussi propager end_date/monthly_rent/status, sinon
+      // generate_monthly_payments() cesse de générer les loyers de ce bail
+      // dès que l'ancienne end_date est dépassée.
+      if (renewal_response === "accepted") {
+        const leaseRes = await fetch(
+          `${supabaseUrl}/rest/v1/leases?id=eq.${lease_id}&select=start_date,end_date,renewal_notice_type,renewal_notice_amount`,
+          { headers: adminHeaders },
+        );
+        const [lease] = await leaseRes.json();
+        if (lease?.renewal_notice_type && lease.renewal_notice_type !== "non_renouvellement" && lease.end_date && lease.start_date) {
+          const start = new Date(`${lease.start_date}T00:00:00Z`);
+          const oldEnd = new Date(`${lease.end_date}T00:00:00Z`);
+          const termMs = oldEnd.getTime() - start.getTime();
+          const newEnd = new Date(oldEnd.getTime() + termMs);
+          leasePatch.end_date = newEnd.toISOString().slice(0, 10);
+          leasePatch.status = "renewed";
+          if (lease.renewal_notice_type === "augmentation" && lease.renewal_notice_amount) {
+            leasePatch.monthly_rent = lease.renewal_notice_amount;
+          }
+        }
+      }
       await fetch(`${supabaseUrl}/rest/v1/leases?id=eq.${lease_id}`, {
         method: "PATCH",
         headers: adminHeaders,
-        body: JSON.stringify({
-          renewal_response: renewal_response || undefined,
-          renewal_signed: renewal_signed ?? undefined,
-          renewal_response_note: renewal_response_note ?? undefined,
-        }),
+        body: JSON.stringify(leasePatch),
       });
       await logAudit("lease_renewal.response_recorded", lease_id, { renewal_response, renewal_signed, renewal_response_note });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });

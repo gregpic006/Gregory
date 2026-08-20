@@ -143,6 +143,23 @@ Deno.serve(async (req) => {
     );
     const [prevReport] = await prevReportRes.json().catch(() => [null]);
 
+    // Ce champ était auparavant codé en dur à "non_connecte" pour TOUS
+    // les propriétaires, y compris ceux dont le compte bancaire est
+    // effectivement branché via Flinks et synchronisé — le rapport
+    // affichait alors une information fausse. On lit le vrai statut ici.
+    const bankConnRes = await fetch(
+      `${supabaseUrl}/rest/v1/bank_connections?owner_id=eq.${owner_id}&select=status,last_synced_at&order=last_synced_at.desc.nullslast&limit=1`,
+      { headers: adminHeaders },
+    );
+    const [bankConn] = await bankConnRes.json().catch(() => [null]);
+    const bankReconciliationStatus = !bankConn
+      ? "non_connecte"
+      : bankConn.status === "active"
+      ? `connecté — synchronisé le ${bankConn.last_synced_at ? new Date(bankConn.last_synced_at).toLocaleDateString("fr-CA") : "—"}`
+      : bankConn.status === "error"
+      ? "connecté — erreur de synchronisation, vérification requise"
+      : "connexion bancaire interrompue, à reconnecter";
+
     const prompt = `Tu es l'assistant financier de "Portail", une entreprise de gestion immobilière résidentielle au Québec. Rédige un résumé court (3-5 phrases) du rapport mensuel d'un propriétaire, en français, ton clair et factuel, dans le style de cet exemple :
 
 "L'immeuble a encaissé 98 % des loyers ce mois-ci. Une unité présente un retard de cinq jours. Deux réparations ont été complétées pour un coût total de 630 $, incluant les frais de coordination."
@@ -217,7 +234,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         over_estimate_count: overEstimateWorkOrders.length,
         over_estimate_work_orders: overEstimateWorkOrders,
         owner_actions_needed: ownerActionsNeeded,
-        bank_reconciliation_status: "non_connecte",
+        bank_reconciliation_status: bankReconciliationStatus,
         prev_rent_received: prevReport?.rent_received ?? null,
         prev_occupancy_rate: prevReport?.occupancy_rate ?? null,
         prev_expenses_total: prevReport?.expenses_total ?? null,

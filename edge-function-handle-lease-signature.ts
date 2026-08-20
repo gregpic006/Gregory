@@ -108,17 +108,39 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: "Impossible d'enregistrer la signature, réessaie." }), { status: 500, headers: corsHeaders });
       }
 
+      // La signature confirme l'accord, mais elle ne change RIEN au bail
+      // par elle-même si on n'applique pas ses effets : sans mettre à
+      // jour end_date/monthly_rent/status ici, generate_monthly_payments()
+      // (schema.sql) cesse de générer les loyers dès que l'ancienne
+      // end_date est dépassée, et une augmentation acceptée ne serait
+      // jamais reflétée dans monthly_rent. Nouvelle échéance = même durée
+      // que le bail actuel (cohérent avec term_type dans
+      // lease_renewal_tracking) ; non-renouvellement n'a rien à propager,
+      // le bail se termine simplement à l'end_date déjà en place.
+      const leasePatch: Record<string, unknown> = {
+        renewal_signed: true,
+        renewal_response: "accepted",
+        renewal_signed_at: signedAt,
+        renewal_signature_ip: ipAddress,
+        renewal_signature_token: null,
+      };
+      if (lease.renewal_notice_type !== "non_renouvellement" && lease.end_date && lease.start_date) {
+        const start = new Date(`${lease.start_date}T00:00:00Z`);
+        const oldEnd = new Date(`${lease.end_date}T00:00:00Z`);
+        const termMs = oldEnd.getTime() - start.getTime();
+        const newEnd = new Date(oldEnd.getTime() + termMs);
+        leasePatch.end_date = newEnd.toISOString().slice(0, 10);
+        leasePatch.status = "renewed";
+        if (lease.renewal_notice_type === "augmentation" && lease.renewal_notice_amount) {
+          leasePatch.monthly_rent = lease.renewal_notice_amount;
+        }
+      }
+
       // renewal_signature_token remis à null : invalide définitivement ce lien.
       await fetch(`${supabaseUrl}/rest/v1/leases?id=eq.${lease_id}`, {
         method: "PATCH",
         headers: adminHeaders,
-        body: JSON.stringify({
-          renewal_signed: true,
-          renewal_response: "accepted",
-          renewal_signed_at: signedAt,
-          renewal_signature_ip: ipAddress,
-          renewal_signature_token: null,
-        }),
+        body: JSON.stringify(leasePatch),
       });
 
       await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
