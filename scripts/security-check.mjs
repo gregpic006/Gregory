@@ -111,19 +111,26 @@ async function testFlinksSyncAllProtected() {
 
 // ---- 4. Aucune des 41 tables ne doit exposer de vraies données à la clé anon seule ----
 // Couvre à la fois les tables verrouillées service_role (RLS activée,
-// aucune policy) et les tables "propres à un rôle" (owners, units,
-// leases, payments, documents...) : dans les deux cas, la clé anon
-// seule — sans JWT d'un usager authentifié — ne doit jamais recevoir
-// une ligne réelle. Liste extraite de schema.sql (`create table`).
+// aucune policy) et les tables "propres à un rôle" (owners, leases,
+// payments, documents...) : dans les deux cas, la clé anon seule —
+// sans JWT d'un usager authentifié — ne doit jamais recevoir une
+// ligne réelle. Liste extraite de schema.sql (`create table`).
+//
+// buildings et units sont volontairement exclues d'ici : elles ont
+// une policy de lecture publique assumée (annonces de logements sur
+// le site, voir index.html loadLogements()) — testées séparément
+// ci-dessous pour vérifier que l'exposition reste bornée à ce qui est
+// vraiment public, plutôt que de faire échouer le test sur un
+// comportement voulu.
 const ALL_TABLES = [
   "ai_run_log", "approvals", "audit_log", "automation_rule_runs", "automation_rules",
-  "bank_connections", "bank_transactions", "buildings", "cold_callers", "company_settings",
+  "bank_connections", "bank_transactions", "cold_callers", "company_settings",
   "dissatisfaction_signals", "documents", "expenses", "financial_anomalies", "inquiries",
   "invoice_number_counters", "invoices", "job_offers", "lease_signatures", "leases",
   "messages", "owners", "pad_authorizations", "payment_reminders", "payments",
   "personal_data_requests", "privacy_incidents", "prospects", "public_submission_log",
   "reports", "service_catalog", "service_requests", "sms_log", "system_health_alert_state",
-  "tenants", "units", "users", "visits", "work_orders", "worker_ratings", "workers",
+  "tenants", "users", "visits", "work_orders", "worker_ratings", "workers",
 ];
 
 async function testNoRealDataReadableByAnon() {
@@ -160,6 +167,28 @@ async function testHealthCheckReachable() {
   }
 }
 
+// ---- 5b. buildings/units : la lecture publique doit rester bornée aux logements affichables ----
+async function testPublicListingsScopedCorrectly() {
+  const unitsRes = await restRequestAnon("units?select=id,status,building_id");
+  const units = Array.isArray(unitsRes.data) ? unitsRes.data : [];
+  const leaked = units.filter((u) => !["available", "soon_available"].includes(u.status));
+  if (unitsRes.status === 200 && leaked.length === 0) {
+    record("Annonces publiques (units) bornées aux logements disponibles", "PASS", `${units.length} unité(s) visible(s)`);
+  } else {
+    record("Annonces publiques (units) bornées aux logements disponibles", "FAIL", `${leaked.length} unité(s) avec un statut non public exposée(s) à la clé anon`);
+  }
+
+  const buildingIds = new Set(units.map((u) => u.building_id));
+  const buildingsRes = await restRequestAnon("buildings?select=id");
+  const buildings = Array.isArray(buildingsRes.data) ? buildingsRes.data : [];
+  const extraBuildings = buildings.filter((b) => !buildingIds.has(b.id));
+  if (buildingsRes.status === 200 && extraBuildings.length === 0) {
+    record("Annonces publiques (buildings) bornées aux immeubles avec logement disponible", "PASS", `${buildings.length} immeuble(s) visible(s)`);
+  } else {
+    record("Annonces publiques (buildings) bornées aux immeubles avec logement disponible", "FAIL", `${extraBuildings.length} immeuble(s) exposé(s) sans logement disponible correspondant`);
+  }
+}
+
 // ---- 6. Stockage (documents, photos) : la clé anon ne doit lister aucun fichier ----
 const STORAGE_BUCKETS = ["documents", "service-request-photos"];
 
@@ -189,6 +218,7 @@ async function main() {
   await testNoAuthRejected();
   await testFlinksSyncAllProtected();
   await testNoRealDataReadableByAnon();
+  await testPublicListingsScopedCorrectly();
   await testStorageBucketsNotListableByAnon();
   await testHealthCheckReachable();
 
