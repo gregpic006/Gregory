@@ -148,6 +148,7 @@
       <button class="tab-btn active" data-tab="offers" onclick="showTab('offers')">Jobs disponibles</button>
       <button class="tab-btn" data-tab="jobs" onclick="showTab('jobs')">Mes jobs</button>
       <button class="tab-btn" data-tab="profile" onclick="showTab('profile')">Mon profil</button>
+      <button class="tab-btn" data-tab="decisions" onclick="showTab('decisions')">Décisions automatisées</button>
       <div class="signout">
         <button class="tab-btn" onclick="handleSignOut()">Se déconnecter</button>
       </div>
@@ -217,6 +218,12 @@
           <button class="submit" onclick="uploadInsurance()">Téléverser</button>
           <p class="msg" id="doc-msg"></p>
         </div>
+      </section>
+
+      <section id="decisions" class="section">
+        <h1>Décisions automatisées</h1>
+        <p class="subtitle">Certaines décisions te concernant sont prises automatiquement par le système, selon des règles fixes (ex. : un mandat retiré et réassigné après un délai de non-réponse). Voici l'historique — tu peux demander qu'un humain la révise.</p>
+        <div id="decisions-body"><p class="empty-note">Chargement...</p></div>
       </section>
     </main>
   </div>
@@ -329,6 +336,7 @@ async function loadWorkerDashboard(userId){
   await loadStats();
   await loadOffers();
   await loadJobs();
+  await loadAutomatedDecisions();
 }
 
 function statusNote(){
@@ -454,6 +462,34 @@ async function loadJobs(){
 
 function toggleCompletionForm(jobId){
   document.getElementById('completion-' + jobId)?.classList.toggle('active');
+}
+
+async function loadAutomatedDecisions(){
+  const { data } = await supabaseClient
+    .from('automated_decisions')
+    .select('*')
+    .eq('subject_type', 'worker')
+    .eq('subject_id', workerRecord.id)
+    .order('decided_at', { ascending: false })
+    .limit(100);
+
+  const container = document.getElementById('decisions-body');
+  if(!data || !data.length){
+    container.innerHTML = '<p class="empty-note">Aucune décision automatisée enregistrée pour le moment.</p>';
+    return;
+  }
+  container.innerHTML = data.map(d => `
+    <div class="job-card">
+      <div class="desc">${esc(d.summary)}</div>
+      <div class="meta">${new Date(d.decided_at).toLocaleString('fr-CA')}${d.review_requested_at ? ` — révision demandée le ${new Date(d.review_requested_at).toLocaleDateString('fr-CA')}${d.review_outcome ? ` — réponse : ${esc(d.review_outcome === 'annulee' ? 'décision annulée' : 'décision maintenue')}${d.review_response ? ' — ' + esc(d.review_response) : ''}` : ' — en attente de traitement'}` : ''}</div>
+      ${!d.review_requested_at ? `<div class="actions"><button class="primary" onclick="requestDecisionReview('${esc(d.id)}')">Demander une révision humaine</button></div>` : ''}
+    </div>`).join('');
+}
+
+async function requestDecisionReview(id){
+  const note = prompt("Explique brièvement pourquoi tu demandes une révision de cette décision (optionnel) :") || null;
+  await supabaseClient.from('automated_decisions').update({ review_requested_at: new Date().toISOString(), review_note: note }).eq('id', id);
+  await loadAutomatedDecisions();
 }
 
 function filesToPayload(fileList){
