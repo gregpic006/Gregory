@@ -88,6 +88,43 @@ Deno.serve(async (req) => {
         body: JSON.stringify({ actor_type: "admin", actor_id: userId, action, entity_type: entityType, entity_id: entityId, details }),
       });
 
+    // Tarification V1 (brief TWIM) : le taux de coordination des travaux
+    // (10 % par défaut) doit rester configurable par propriétaire, jamais
+    // codé en dur — et un chantier "gros projet" (≥ 10 000 $) ne doit
+    // JAMAIS recevoir le taux par défaut en silence : un taux négocié ou
+    // un forfait doit être explicitement fourni par l'admin.
+    const WORK_COORDINATION_RATE_DEFAULT = 10.0;
+    const LARGE_PROJECT_THRESHOLD = 10000;
+    const resolveCoordinationFee = async (
+      unitId: string,
+      workerPay: number,
+      explicitRate: unknown,
+      explicitForfait: unknown,
+    ): Promise<
+      | { coordinationFee: number; coordinationRate: number | null; coordinationFeeType: "taux" | "forfait" }
+      | { error: string }
+    > => {
+      if (explicitForfait != null && Number(explicitForfait) > 0) {
+        return { coordinationFee: Math.round(Number(explicitForfait) * 100) / 100, coordinationRate: null, coordinationFeeType: "forfait" };
+      }
+      if (workerPay >= LARGE_PROJECT_THRESHOLD && explicitRate == null) {
+        return {
+          error: `Ce chantier (${workerPay} $) atteint ou dépasse le seuil de 10 000 $ — précise un taux de coordination négocié ou un forfait ; aucune valeur par défaut ne s'applique automatiquement à ce montant.`,
+        };
+      }
+      let rate: number = explicitRate != null ? Number(explicitRate) : NaN;
+      if (Number.isNaN(rate)) {
+        const unitRes = await fetch(
+          `${supabaseUrl}/rest/v1/units?id=eq.${unitId}&select=buildings(owners(work_coordination_rate))`,
+          { headers: adminHeaders },
+        );
+        const [unitRow] = await unitRes.json().catch(() => [null]);
+        rate = unitRow?.buildings?.owners?.work_coordination_rate ?? WORK_COORDINATION_RATE_DEFAULT;
+      }
+      const coordinationFee = Math.round(workerPay * (rate / 100) * 100) / 100;
+      return { coordinationFee, coordinationRate: rate, coordinationFeeType: "taux" };
+    };
+
     const body = await req.json().catch(() => ({}));
     const action = body.action || "list_service_requests";
 
@@ -265,7 +302,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === "create_work_order") {
-      const { service_request_id, unit_id, worker_id, description, worker_pay, appointment_at, entry_permission, billing_terms, due_by } = body;
+      const { service_request_id, unit_id, worker_id, description, worker_pay, appointment_at, entry_permission, billing_terms, due_by, coordination_rate, coordination_fee_forfait } = body;
       if (!unit_id || !worker_id || !description || !worker_pay) {
         return new Response(JSON.stringify({ error: "Champs manquants" }), { status: 400, headers: corsHeaders });
       }
@@ -282,7 +319,11 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: `Impossible d'assigner ce travailleur — ${blockingReasons.join(", ")}. Complète sa vérification d'abord.` }), { status: 400, headers: corsHeaders });
       }
 
-      const coordinationFee = Math.round(Number(worker_pay) * 0.10 * 100) / 100;
+      const coordination = await resolveCoordinationFee(unit_id, Number(worker_pay), coordination_rate, coordination_fee_forfait);
+      if ("error" in coordination) {
+        return new Response(JSON.stringify({ error: coordination.error }), { status: 400, headers: corsHeaders });
+      }
+      const { coordinationFee, coordinationRate, coordinationFeeType } = coordination;
       const estimatedCost = Math.round((Number(worker_pay) + coordinationFee) * 100) / 100;
 
       const woInsertRes = await fetch(`${supabaseUrl}/rest/v1/work_orders`, {
@@ -293,6 +334,8 @@ Deno.serve(async (req) => {
           unit_id, worker_id, description,
           worker_pay: Number(worker_pay),
           coordination_fee: coordinationFee,
+          coordination_rate: coordinationRate,
+          coordination_fee_type: coordinationFeeType,
           estimated_cost: estimatedCost,
           status: "assigned",
           appointment_at: appointment_at || null,
@@ -307,7 +350,7 @@ Deno.serve(async (req) => {
           method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "in_progress", pending_reassessment: false, reassessment_due: null }),
         });
       }
-      await logAudit("work_order.create", "work_orders", newWorkOrder?.id ?? null, { worker_id, worker_pay: Number(worker_pay), coordination_fee: coordinationFee, estimated_cost: estimatedCost });
+      await logAudit("work_order.create", "work_orders", newWorkOrder?.id ?? null, { worker_id, worker_pay: Number(worker_pay), coordination_fee: coordinationFee, coordination_rate: coordinationRate, coordination_fee_type: coordinationFeeType, estimated_cost: estimatedCost });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
@@ -317,7 +360,7 @@ Deno.serve(async (req) => {
     // admissibles par paliers de score. Aucun worker_id ici : le work
     // order reste "open" jusqu'à ce qu'un travailleur accepte une offre.
     if (action === "dispatch_work_order_auto") {
-      const { service_request_id, unit_id, description, service_catalog_id, worker_pay } = body;
+      const { service_request_id, unit_id, description, service_catalog_id, worker_pay, coordination_rate, coordination_fee_forfait } = body;
       if (!unit_id || !description) {
         return new Response(JSON.stringify({ error: "Champs manquants" }), { status: 400, headers: corsHeaders });
       }
@@ -328,7 +371,18 @@ Deno.serve(async (req) => {
         const [cat] = await catRes.json().catch(() => [null]);
         resolvedPay = cat?.fixed_worker_pay ?? null;
       }
-      const coordinationFee = resolvedPay !== null ? Math.round(resolvedPay * 0.10 * 100) / 100 : null;
+      let coordinationFee: number | null = null;
+      let coordinationRate: number | null = null;
+      let coordinationFeeType: string | null = null;
+      if (resolvedPay !== null) {
+        const coordination = await resolveCoordinationFee(unit_id, resolvedPay, coordination_rate, coordination_fee_forfait);
+        if ("error" in coordination) {
+          return new Response(JSON.stringify({ error: coordination.error }), { status: 400, headers: corsHeaders });
+        }
+        coordinationFee = coordination.coordinationFee;
+        coordinationRate = coordination.coordinationRate;
+        coordinationFeeType = coordination.coordinationFeeType;
+      }
       const estimatedCost = resolvedPay !== null && coordinationFee !== null ? Math.round((resolvedPay + coordinationFee) * 100) / 100 : null;
 
       const woInsertRes = await fetch(`${supabaseUrl}/rest/v1/work_orders`, {
@@ -339,6 +393,8 @@ Deno.serve(async (req) => {
           unit_id, description,
           worker_pay: resolvedPay,
           coordination_fee: coordinationFee,
+          coordination_rate: coordinationRate,
+          coordination_fee_type: coordinationFeeType,
           estimated_cost: estimatedCost,
           service_catalog_id: service_catalog_id || null,
           dispatch_mode: "auto",
@@ -602,6 +658,91 @@ Deno.serve(async (req) => {
         { headers: adminHeaders },
       );
       return new Response(JSON.stringify({ payments: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ---- Débours externes impayés (TAL/huissier/avocat, brief TWIM V1) ----
+    // "Gestion administrative incluse dans le 6 % [...] les débours
+    // externes restent au propriétaire [...] hors 6 %, sans marge
+    // cachée." Toujours facturé au coût réel exact — jamais de marge.
+    if (action === "list_disbursements") {
+      const { lease_id } = body;
+      const filter = lease_id ? `lease_id=eq.${lease_id}&` : "";
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/external_disbursements?${filter}select=*,leases(tenants(full_name),units(unit_number,buildings(address)))&order=created_at.desc&limit=200`,
+        { headers: adminHeaders },
+      );
+      return new Response(JSON.stringify({ disbursements: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "create_disbursement") {
+      const { lease_id, category, description, amount, receipt_document_id } = body;
+      if (!lease_id || !["depot_tal", "huissier", "avocat", "autre"].includes(category) || !description || !(Number(amount) > 0)) {
+        return new Response(JSON.stringify({ error: "lease_id, category (depot_tal|huissier|avocat|autre), description et amount (> 0) requis" }), { status: 400, headers: corsHeaders });
+      }
+      const leaseRes = await fetch(
+        `${supabaseUrl}/rest/v1/leases?id=eq.${lease_id}&select=tenant_id,units(building_id,buildings(owner_id))`,
+        { headers: adminHeaders },
+      );
+      const [lease] = await leaseRes.json().catch(() => [null]);
+      const buildingId = lease?.units?.building_id;
+      const ownerId = lease?.units?.buildings?.owner_id;
+      if (!lease || !buildingId || !ownerId) {
+        return new Response(JSON.stringify({ error: "Bail introuvable ou propriétaire/immeuble non résolvable" }), { status: 404, headers: corsHeaders });
+      }
+      const insertRes = await fetch(`${supabaseUrl}/rest/v1/external_disbursements`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({
+          owner_id: ownerId, building_id: buildingId, lease_id, tenant_id: lease.tenant_id,
+          category, description, amount: Number(amount), receipt_document_id: receipt_document_id || null,
+        }),
+      });
+      const [disbursement] = await insertRes.json().catch(() => [null]);
+      if (!disbursement?.id) {
+        return new Response(JSON.stringify({ error: "Impossible d'enregistrer le débours" }), { status: 500, headers: corsHeaders });
+      }
+      await logAudit("disbursement.create", "external_disbursements", disbursement.id, { lease_id, category, amount: Number(amount) });
+      return new Response(JSON.stringify({ ok: true, disbursement_id: disbursement.id }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "mark_disbursement_billed") {
+      const { disbursement_id } = body;
+      if (!disbursement_id) {
+        return new Response(JSON.stringify({ error: "disbursement_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      const disbRes = await fetch(`${supabaseUrl}/rest/v1/external_disbursements?id=eq.${disbursement_id}&select=*`, { headers: adminHeaders });
+      const [disb] = await disbRes.json().catch(() => [null]);
+      if (!disb) {
+        return new Response(JSON.stringify({ error: "Débours introuvable" }), { status: 404, headers: corsHeaders });
+      }
+      if (disb.status !== "a_facturer") {
+        return new Response(JSON.stringify({ error: "Ce débours a déjà été facturé" }), { status: 409, headers: corsHeaders });
+      }
+      const categoryLabel: Record<string, string> = { depot_tal: "Dépôt TAL", huissier: "Huissier", avocat: "Avocat/professionnel", autre: "Débours externe" };
+      // Coût réel exact, sans marge — le montant du débours est repris
+      // intégralement, jamais majoré.
+      const expenseRes = await fetch(`${supabaseUrl}/rest/v1/expenses`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({
+          building_id: disb.building_id,
+          description: `${categoryLabel[disb.category] || "Débours externe"} — ${disb.description}`,
+          amount: disb.amount,
+          expense_date: new Date().toISOString().slice(0, 10),
+          category: "debours_externes",
+          receipt_document_id: disb.receipt_document_id || null,
+        }),
+      });
+      const [expense] = await expenseRes.json().catch(() => [null]);
+      if (!expense?.id) {
+        return new Response(JSON.stringify({ error: "Impossible de créer la dépense correspondante" }), { status: 500, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/external_disbursements?id=eq.${disbursement_id}`, {
+        method: "PATCH", headers: adminHeaders,
+        body: JSON.stringify({ status: "facture", expense_id: expense.id }),
+      });
+      await logAudit("disbursement.mark_billed", "external_disbursements", disbursement_id, { expense_id: expense.id, amount: disb.amount });
+      return new Response(JSON.stringify({ ok: true, expense_id: expense.id }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "get_signed_url") {
@@ -902,6 +1043,23 @@ Deno.serve(async (req) => {
       if (Math.abs(totalDebit - totalCredit) > 0.01) {
         return new Response(JSON.stringify({ error: `Débits (${totalDebit}) et crédits (${totalCredit}) ne s'équilibrent pas` }), { status: 400, headers: corsHeaders });
       }
+      if (lines.some((l: any) => Number(l.debit) > 0 && Number(l.credit) > 0)) {
+        return new Response(JSON.stringify({ error: "Une ligne ne peut pas avoir à la fois un débit et un crédit" }), { status: 400, headers: corsHeaders });
+      }
+      // Le grand livre est immuable (voir gl_journal_entries_immutable) —
+      // on ne peut plus supprimer l'en-tête si l'insertion des lignes
+      // échoue ensuite. On valide donc les comptes AVANT de créer
+      // l'en-tête, pour que cet échec ne se produise pas.
+      const accountIds = [...new Set(lines.map((l: any) => l.account_id))];
+      const accountsRes = await fetch(
+        `${supabaseUrl}/rest/v1/gl_accounts?owner_id=eq.${owner_id}&id=in.(${accountIds.join(",")})&select=id`,
+        { headers: adminHeaders },
+      );
+      const validAccounts = await accountsRes.json().catch(() => []);
+      if (!Array.isArray(validAccounts) || validAccounts.length !== accountIds.length) {
+        return new Response(JSON.stringify({ error: "Un ou plusieurs comptes du plan comptable sont invalides pour ce propriétaire" }), { status: 400, headers: corsHeaders });
+      }
+
       const entryRes = await fetch(`${supabaseUrl}/rest/v1/gl_journal_entries`, {
         method: "POST",
         headers: { ...adminHeaders, Prefer: "return=representation" },
@@ -916,14 +1074,129 @@ Deno.serve(async (req) => {
         body: JSON.stringify(lines.map((l: any) => ({ journal_entry_id: entry.id, account_id: l.account_id, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0 }))),
       });
       if (!linesRes.ok) {
-        // Écriture sans lignes = grand livre déséquilibré, contraire à
-        // l'invariant qu'on vient de valider — on retire l'en-tête plutôt
-        // que de laisser une écriture fantôme.
-        await fetch(`${supabaseUrl}/rest/v1/gl_journal_entries?id=eq.${entry.id}`, { method: "DELETE", headers: adminHeaders });
-        return new Response(JSON.stringify({ error: "Impossible d'enregistrer les lignes de l'écriture — annulée" }), { status: 500, headers: corsHeaders });
+        // Ne peut plus être supprimée (grand livre immuable) : les
+        // comptes et l'équilibre ont déjà été validés ci-dessus, donc ce
+        // cas ne devrait survenir qu'en cas de panne transitoire —
+        // laisse une écriture sans lignes (zéro débit = zéro crédit,
+        // toujours équilibrée trivialement) plutôt que de contourner
+        // l'immuabilité.
+        console.error("Failed to insert gl_journal_lines for entry", entry.id, await linesRes.text().catch(() => ""));
+        return new Response(JSON.stringify({ error: "Impossible d'enregistrer les lignes de l'écriture — contacte le support, l'écriture " + entry.id + " est incomplète" }), { status: 500, headers: corsHeaders });
       }
       await logAudit("gl_journal_entry.manual_create", "gl_journal_entries", entry.id, { owner_id, description, total: totalDebit });
       return new Response(JSON.stringify({ ok: true, entry_id: entry.id }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ---- Comptes à payer (A/P, brief TWIM V1) ----
+    // Approbation d'une facture fournisseur AVANT paiement — distincte
+    // de l'approbation "démarrer les travaux" (spending_cap sur les
+    // work_orders). Un travail peut être approuvé pour procéder sans
+    // que sa facture finale soit encore reçue/approuvée pour paiement.
+    if (action === "list_payables") {
+      const onlyPending = body.only_pending_approval !== false;
+      const filter = onlyPending ? "status=eq.pending_approval" : "";
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/payables?${filter}${filter ? "&" : ""}select=*,owners(full_name),buildings(address),work_orders(description)&order=created_at.desc&limit=200`,
+        { headers: adminHeaders },
+      );
+      return new Response(JSON.stringify({ payables: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "create_payable") {
+      const { building_id, work_order_id, vendor_name, description, amount, category, due_date, invoice_document_id } = body;
+      if (!building_id || !vendor_name || !description || !(Number(amount) > 0)) {
+        return new Response(JSON.stringify({ error: "building_id, vendor_name, description et amount (> 0) requis" }), { status: 400, headers: corsHeaders });
+      }
+      const buildingRes = await fetch(`${supabaseUrl}/rest/v1/buildings?id=eq.${building_id}&select=owner_id`, { headers: adminHeaders });
+      const [building] = await buildingRes.json().catch(() => [null]);
+      if (!building?.owner_id) {
+        return new Response(JSON.stringify({ error: "Immeuble introuvable ou sans propriétaire associé" }), { status: 404, headers: corsHeaders });
+      }
+      const owner_id = building.owner_id;
+      const insertRes = await fetch(`${supabaseUrl}/rest/v1/payables`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({
+          owner_id, building_id, work_order_id: work_order_id || null, vendor_name, description,
+          amount: Number(amount), category: category || null, due_date: due_date || null,
+          invoice_document_id: invoice_document_id || null,
+        }),
+      });
+      const [payable] = await insertRes.json().catch(() => [null]);
+      if (!payable?.id) {
+        return new Response(JSON.stringify({ error: "Impossible d'enregistrer la facture" }), { status: 500, headers: corsHeaders });
+      }
+      await logAudit("payable.create", "payables", payable.id, { owner_id, vendor_name, amount: Number(amount) });
+      return new Response(JSON.stringify({ ok: true, payable_id: payable.id }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "respond_payable") {
+      const { payable_id, outcome, rejection_note } = body;
+      if (!payable_id || !["approved", "rejected"].includes(outcome)) {
+        return new Response(JSON.stringify({ error: "payable_id et outcome ('approved'|'rejected') requis" }), { status: 400, headers: corsHeaders });
+      }
+      const payableRes = await fetch(`${supabaseUrl}/rest/v1/payables?id=eq.${payable_id}&select=status`, { headers: adminHeaders });
+      const [payable] = await payableRes.json().catch(() => [null]);
+      if (!payable) {
+        return new Response(JSON.stringify({ error: "Facture introuvable" }), { status: 404, headers: corsHeaders });
+      }
+      if (payable.status !== "pending_approval") {
+        return new Response(JSON.stringify({ error: "Cette facture n'est plus en attente d'approbation" }), { status: 409, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/payables?id=eq.${payable_id}`, {
+        method: "PATCH", headers: adminHeaders,
+        body: JSON.stringify({
+          status: outcome, approved_by: outcome === "approved" ? userId : null,
+          approved_at: outcome === "approved" ? new Date().toISOString() : null,
+          rejection_note: outcome === "rejected" ? (rejection_note || null) : null,
+        }),
+      });
+      await logAudit("payable.respond", "payables", payable_id, { outcome, rejection_note: rejection_note || null });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "mark_payable_paid") {
+      const { payable_id } = body;
+      if (!payable_id) {
+        return new Response(JSON.stringify({ error: "payable_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      const payableRes = await fetch(
+        `${supabaseUrl}/rest/v1/payables?id=eq.${payable_id}&select=*`,
+        { headers: adminHeaders },
+      );
+      const [payable] = await payableRes.json().catch(() => [null]);
+      if (!payable) {
+        return new Response(JSON.stringify({ error: "Facture introuvable" }), { status: 404, headers: corsHeaders });
+      }
+      if (payable.status !== "approved") {
+        return new Response(JSON.stringify({ error: "Cette facture doit être approuvée avant d'être marquée payée" }), { status: 409, headers: corsHeaders });
+      }
+      // Le paiement crée la vraie dépense — c'est cet insert qui déclenche
+      // l'écriture GL (post_expense_to_gl()), pas payables elle-même.
+      const expenseRes = await fetch(`${supabaseUrl}/rest/v1/expenses`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({
+          work_order_id: payable.work_order_id || null,
+          building_id: payable.building_id,
+          description: `${payable.vendor_name} — ${payable.description}`,
+          amount: payable.amount,
+          expense_date: new Date().toISOString().slice(0, 10),
+          vendor_name: payable.vendor_name,
+          category: payable.category || null,
+          receipt_document_id: payable.invoice_document_id || null,
+        }),
+      });
+      const [expense] = await expenseRes.json().catch(() => [null]);
+      if (!expense?.id) {
+        return new Response(JSON.stringify({ error: "Impossible de créer la dépense correspondante" }), { status: 500, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/payables?id=eq.${payable_id}`, {
+        method: "PATCH", headers: adminHeaders,
+        body: JSON.stringify({ status: "paid", paid_at: new Date().toISOString(), expense_id: expense.id }),
+      });
+      await logAudit("payable.mark_paid", "payables", payable_id, { expense_id: expense.id, amount: payable.amount });
+      return new Response(JSON.stringify({ ok: true, expense_id: expense.id }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "get_health_history") {

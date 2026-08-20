@@ -414,6 +414,22 @@
       </section>
 
       <section id="supplier-invoices" class="section">
+    <h1 style="margin-top:40px;font-size:22px;">Comptes à payer</h1>
+    <p class="subtitle" style="margin-bottom:16px;">Une facture fournisseur passe par une approbation dédiée avant paiement — distincte de l'approbation "démarrer les travaux". Le paiement crée la dépense réelle et son écriture comptable.</p>
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Immeuble</label>
+          <select id="pay-building" style="padding:8px;border:1px solid var(--line);min-width:200px;"><option value="">— Choisir —</option></select>
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fournisseur</label><input type="text" id="pay-vendor" style="padding:8px;border:1px solid var(--line);width:160px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description</label><input type="text" id="pay-desc" style="padding:8px;border:1px solid var(--line);width:220px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Montant ($)</label><input type="number" id="pay-amount" min="0" step="0.01" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Échéance</label><input type="date" id="pay-due" style="padding:8px;border:1px solid var(--line);"></div>
+        <button onclick="createPayable()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Loguer la facture</button>
+      </div>
+    </div>
+    <div id="payables-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
+
     <h1 style="margin-top:40px;font-size:22px;">Factures fournisseurs (lecture IA)</h1>
     <p class="subtitle" style="margin-bottom:16px;">Téléverse une facture ou un reçu (PDF/photo) — l'IA propose le fournisseur, le montant, les taxes et la catégorie. Rien n'est enregistré tant que tu n'as pas confirmé.</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
@@ -524,6 +540,12 @@
         <button onclick="obCreateOwner()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Créer le compte + envoyer l'accès</button>
       </div>
       <p id="ob-owner-msg" style="font-size:12.5px;margin-top:8px;"></p>
+    </div>
+
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
+      <h3 style="font-size:14px;margin-bottom:10px;">Propriétaires existants — modifier le contrat</h3>
+      <p class="subtitle" style="margin-bottom:12px;">Taux de gestion et de coordination des travaux — jamais figés, toujours modifiables par propriétaire.</p>
+      <div id="owners-list-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
     </div>
 
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
@@ -1182,10 +1204,46 @@ async function callOnboardingApi(payload){
 
 async function obInit(){
   const data = await callOnboardingApi({ action: 'list_owners' });
-  const options = '<option value="">— Choisir —</option>' + (data?.owners || []).map(o => `<option value="${o.id}">${esc(o.full_name)}${o.company_name ? ' — ' + esc(o.company_name) : ''}</option>`).join('');
+  const owners = data?.owners || [];
+  const options = '<option value="">— Choisir —</option>' + owners.map(o => `<option value="${o.id}">${esc(o.full_name)}${o.company_name ? ' — ' + esc(o.company_name) : ''}</option>`).join('');
   document.getElementById('ob-building-owner').innerHTML = options;
   document.getElementById('bulk-import-owner').innerHTML = options;
   document.getElementById('gl-owner').innerHTML = options;
+  renderOwnersList(owners);
+}
+
+function renderOwnersList(owners){
+  const container = document.getElementById('owners-list-body');
+  if(!container) return;
+  if(!owners.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun propriétaire pour l\'instant.</p>';
+    return;
+  }
+  container.innerHTML = owners.map(o => `
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;padding:10px 0;border-bottom:1px solid var(--line);">
+      <div style="min-width:160px;font-size:13px;font-weight:500;">${esc(o.full_name)}${o.company_name ? '<br><span style="color:var(--muted);font-size:11.5px;font-weight:400;">' + esc(o.company_name) + '</span>' : ''}</div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Taux de gestion (%)</label>
+        <input type="number" id="own-mgmt-${o.id}" value="${o.management_rate ?? 6}" step="0.1" min="0" style="padding:7px;border:1px solid var(--line);width:80px;">
+      </div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Taux coordination travaux (%)</label>
+        <input type="number" id="own-coord-${o.id}" value="${o.work_coordination_rate ?? 10}" step="0.1" min="0" style="padding:7px;border:1px solid var(--line);width:80px;">
+      </div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Plafond de dépenses ($)</label>
+        <input type="number" id="own-cap-${o.id}" value="${o.spending_cap ?? 300}" step="1" min="0" style="padding:7px;border:1px solid var(--line);width:90px;">
+      </div>
+      <button onclick="saveOwnerRates('${o.id}')" style="background:var(--ink);color:var(--paper);border:none;padding:8px 14px;font-size:12.5px;cursor:pointer;">Enregistrer</button>
+      <span id="own-msg-${o.id}" style="font-size:12px;color:var(--sage);"></span>
+    </div>`).join('');
+}
+
+async function saveOwnerRates(ownerId){
+  const management_rate = Number(document.getElementById('own-mgmt-' + ownerId).value);
+  const work_coordination_rate = Number(document.getElementById('own-coord-' + ownerId).value);
+  const spending_cap = Number(document.getElementById('own-cap-' + ownerId).value);
+  const msg = document.getElementById('own-msg-' + ownerId);
+  const res = await callOnboardingApi({ action: 'update_owner', owner_id: ownerId, management_rate, work_coordination_rate, spending_cap });
+  if(res?.ok){ msg.textContent = 'Enregistré ✓'; setTimeout(() => { msg.textContent = ''; }, 2500); }
+  else { msg.textContent = res?.error || 'Échec.'; msg.style.color = 'var(--rust)'; }
 }
 
 // Parseur CSV léger avec support des champs entre guillemets (ex: une
@@ -1572,6 +1630,7 @@ async function loadOps(){
   await loadServiceRequestsAdmin();
   await loadWorkOrdersAdmin();
   await loadLatePaymentsAdmin();
+  await loadPayablesAdmin();
   await loadCompanySettings();
   await loadAutomationRules();
   await loadInvoices();
@@ -2117,10 +2176,19 @@ async function saveWorkerVerification(worker_id){
   if(res?.ok){ await loadWorkersAdmin(); }
 }
 
+const disbursementCategoryLabel = { depot_tal: 'Dépôt TAL', huissier: 'Huissier', avocat: 'Avocat/professionnel', autre: 'Autre' };
+
 async function loadLatePaymentsAdmin(){
-  const data = await callOpsApi({ action: 'list_late_payments' });
+  const [data, disbData] = await Promise.all([
+    callOpsApi({ action: 'list_late_payments' }),
+    callOpsApi({ action: 'list_disbursements' }),
+  ]);
   const container = document.getElementById('late-payments-body');
   const payments = data?.payments || [];
+  const disbursementsByLease = {};
+  (disbData?.disbursements || []).forEach(d => {
+    (disbursementsByLease[d.lease_id] = disbursementsByLease[d.lease_id] || []).push(d);
+  });
   if(!payments.length){
     container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun paiement en retard.</p>';
     return;
@@ -2133,17 +2201,53 @@ async function loadLatePaymentsAdmin(){
       : p.reminder_paused
       ? '<span style="background:#8a8a8a;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">EN PAUSE</span>'
       : `<span style="color:var(--muted);font-size:11.5px;">${p.late_reminder_count || 0}/3 rappel(s) envoyé(s)</span>`;
+    const leaseDisbursements = disbursementsByLease[p.lease_id] || [];
+    const disbursementsHtml = leaseDisbursements.length ? `
+      <div style="margin-top:8px;font-size:12px;">
+        ${leaseDisbursements.map(d => `<div style="padding:4px 0;">${esc(disbursementCategoryLabel[d.category] || d.category)} — ${esc(d.description)} — ${Number(d.amount).toLocaleString('fr-CA')} $ — ${d.status === 'facture' ? '<span style="color:var(--sage);">facturé au propriétaire (coût réel)</span>' : `<button onclick="markDisbursementBilled('${d.id}')" style="background:none;border:1px solid var(--ink);padding:2px 8px;font-size:11px;cursor:pointer;">Facturer au propriétaire</button>`}</div>`).join('')}
+      </div>` : '';
     return `
-    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">
-      <div>
-        <b style="display:block;margin-bottom:4px;">${esc(tenant?.full_name) || ''} — ${esc(unit?.buildings?.address) || ''}, unité ${esc(unit?.unit_number) || ''}</b>
-        <span style="font-size:12.5px;color:var(--muted);">${Number(p.amount).toLocaleString('fr-CA')} $ dû le ${esc(p.due_date)} — ${statusBadge}</span>
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">
+        <div>
+          <b style="display:block;margin-bottom:4px;">${esc(tenant?.full_name) || ''} — ${esc(unit?.buildings?.address) || ''}, unité ${esc(unit?.unit_number) || ''}</b>
+          <span style="font-size:12.5px;color:var(--muted);">${Number(p.amount).toLocaleString('fr-CA')} $ dû le ${esc(p.due_date)} — ${statusBadge}</span>
+        </div>
+        <button onclick="togglePaymentPause('${p.id}', ${!p.reminder_paused})" style="background:${p.reminder_paused ? 'var(--ink)' : 'transparent'};color:${p.reminder_paused ? 'var(--paper)' : 'var(--ink)'};border:1px solid var(--ink);padding:8px 14px;font-size:12.5px;cursor:pointer;">
+          ${p.reminder_paused ? 'Reprendre les rappels' : 'Mettre en pause (entente conclue)'}
+        </button>
       </div>
-      <button onclick="togglePaymentPause('${p.id}', ${!p.reminder_paused})" style="background:${p.reminder_paused ? 'var(--ink)' : 'transparent'};color:${p.reminder_paused ? 'var(--paper)' : 'var(--ink)'};border:1px solid var(--ink);padding:8px 14px;font-size:12.5px;cursor:pointer;">
-        ${p.reminder_paused ? 'Reprendre les rappels' : 'Mettre en pause (entente conclue)'}
-      </button>
+      ${disbursementsHtml}
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px;border-top:1px solid var(--line);padding-top:10px;">
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Débours externe</label>
+          <select id="disb-cat-${p.lease_id}" style="padding:7px;border:1px solid var(--line);font-size:12px;">
+            <option value="depot_tal">Dépôt TAL</option><option value="huissier">Huissier</option><option value="avocat">Avocat/professionnel</option><option value="autre">Autre</option>
+          </select>
+        </div>
+        <input type="text" id="disb-desc-${p.lease_id}" placeholder="Description" style="padding:7px;border:1px solid var(--line);font-size:12px;width:160px;">
+        <input type="number" id="disb-amount-${p.lease_id}" min="0" step="0.01" placeholder="Coût réel $" style="padding:7px;border:1px solid var(--line);font-size:12px;width:100px;">
+        <button onclick="createDisbursement('${p.lease_id}')" style="background:var(--paper);color:var(--ink);border:1px solid var(--ink);padding:7px 12px;font-size:12px;cursor:pointer;">Loguer (coût réel, hors 6%)</button>
+      </div>
     </div>`;
   }).join('');
+}
+
+async function createDisbursement(leaseId){
+  const category = document.getElementById('disb-cat-' + leaseId).value;
+  const description = document.getElementById('disb-desc-' + leaseId).value;
+  const amount = document.getElementById('disb-amount-' + leaseId).value;
+  if(!description || !(Number(amount) > 0)){
+    alert('Description et montant (> 0) requis.');
+    return;
+  }
+  const res = await callOpsApi({ action: 'create_disbursement', lease_id: leaseId, category, description, amount: Number(amount) });
+  if(res?.ok){ await loadLatePaymentsAdmin(); } else { alert(res?.error || 'Échec de l\'enregistrement du débours.'); }
+}
+
+async function markDisbursementBilled(disbursementId){
+  if(!confirm('Facturer ce débours au propriétaire, au coût réel exact (sans marge) ?')) return;
+  const res = await callOpsApi({ action: 'mark_disbursement_billed', disbursement_id: disbursementId });
+  if(res?.ok){ await loadLatePaymentsAdmin(); } else { alert(res?.error || 'Échec.'); }
 }
 
 async function togglePaymentPause(paymentId, paused){
@@ -2192,6 +2296,12 @@ async function loadServiceRequestsAdmin(){
         <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Paie du travailleur ($)</label>
           <input type="number" id="sr-pay-${sr.id}" min="0" step="0.01" style="padding:8px;border:1px solid var(--line);width:110px;">
         </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" title="Laisse vide pour le taux du propriétaire (10 % par défaut). Obligatoire à partir de 10 000 $ — le système n'applique jamais de taux par défaut à un gros projet.">Taux coordination (%)</label>
+          <input type="number" id="sr-coordrate-${sr.id}" min="0" step="0.1" placeholder="10 (défaut)" style="padding:8px;border:1px solid var(--line);width:100px;">
+        </div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" title="Pour un projet majeur avec forfait négocié plutôt qu'un pourcentage — remplace le taux ci-dessus.">ou forfait coordination ($)</label>
+          <input type="number" id="sr-coordforfait-${sr.id}" min="0" step="0.01" placeholder="forfait négocié" style="padding:8px;border:1px solid var(--line);width:120px;">
+        </div>
         <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Rendez-vous proposé</label>
           <input type="datetime-local" id="sr-appt-${sr.id}" style="padding:8px;border:1px solid var(--line);">
         </div>
@@ -2215,6 +2325,8 @@ async function assignServiceRequest(serviceRequestId, unitId){
   const worker_id = document.getElementById('sr-worker-' + serviceRequestId).value;
   const description = document.getElementById('sr-desc-' + serviceRequestId).value;
   const worker_pay = document.getElementById('sr-pay-' + serviceRequestId).value;
+  const coordination_rate = document.getElementById('sr-coordrate-' + serviceRequestId).value;
+  const coordination_fee_forfait = document.getElementById('sr-coordforfait-' + serviceRequestId).value;
   const appointment_at = document.getElementById('sr-appt-' + serviceRequestId).value;
   const due_by = document.getElementById('sr-due-' + serviceRequestId).value;
   const entry_permission = document.getElementById('sr-entry-' + serviceRequestId).value;
@@ -2225,12 +2337,14 @@ async function assignServiceRequest(serviceRequestId, unitId){
   }
   const res = await callOpsApi({
     action: 'create_work_order', service_request_id: serviceRequestId, unit_id: unitId, worker_id, description, worker_pay: Number(worker_pay),
+    coordination_rate: coordination_rate ? Number(coordination_rate) : null,
+    coordination_fee_forfait: coordination_fee_forfait ? Number(coordination_fee_forfait) : null,
     appointment_at: appointment_at ? new Date(appointment_at).toISOString() : null,
     due_by: due_by || null,
     entry_permission: entry_permission || null,
     billing_terms: billing_terms || null,
   });
-  if(res?.ok){ await loadOps(); }
+  if(res?.ok){ await loadOps(); } else { alert(res?.error || 'Échec de l\'assignation.'); }
 }
 
 // Portail Pro : au lieu de choisir un travailleur, on laisse le moteur
@@ -2242,6 +2356,8 @@ async function assignServiceRequest(serviceRequestId, unitId){
 async function dispatchServiceRequestAuto(serviceRequestId, unitId){
   const description = document.getElementById('sr-desc-' + serviceRequestId).value;
   const worker_pay = document.getElementById('sr-pay-' + serviceRequestId).value;
+  const coordination_rate = document.getElementById('sr-coordrate-' + serviceRequestId).value;
+  const coordination_fee_forfait = document.getElementById('sr-coordforfait-' + serviceRequestId).value;
   if(!description){
     alert('Ajoute une description du travail avant de lancer le dispatch automatique.');
     return;
@@ -2250,6 +2366,8 @@ async function dispatchServiceRequestAuto(serviceRequestId, unitId){
   const res = await callOpsApi({
     action: 'dispatch_work_order_auto', service_request_id: serviceRequestId, unit_id: unitId, description,
     worker_pay: worker_pay ? Number(worker_pay) : null,
+    coordination_rate: coordination_rate ? Number(coordination_rate) : null,
+    coordination_fee_forfait: coordination_fee_forfait ? Number(coordination_fee_forfait) : null,
   });
   if(res?.ok){ await loadOps(); } else { alert(res?.error || 'Échec du dispatch automatique.'); }
 }
@@ -2266,7 +2384,7 @@ async function loadWorkOrdersAdmin(){
   container.innerHTML = orders.map(wo => `
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
       <b style="display:block;margin-bottom:4px;">${esc(wo.units?.buildings?.address) || ''}, unité ${esc(wo.units?.unit_number) || ''} — ${esc(wo.description)}</b>
-      <span style="font-size:12.5px;color:var(--muted);">Travailleur : ${wo.workers?.name != null ? esc(wo.workers.name) : '—'} (${wo.workers?.phone != null ? esc(wo.workers.phone) : '—'}) — Paie : ${wo.worker_pay != null ? Number(wo.worker_pay).toLocaleString('fr-CA') + ' $' : '—'} + 10% coordination — Statut : ${statusLabel[wo.status] || esc(wo.status)}</span>
+      <span style="font-size:12.5px;color:var(--muted);">Travailleur : ${wo.workers?.name != null ? esc(wo.workers.name) : '—'} (${wo.workers?.phone != null ? esc(wo.workers.phone) : '—'}) — Paie : ${wo.worker_pay != null ? Number(wo.worker_pay).toLocaleString('fr-CA') + ' $' : '—'} + coordination ${wo.coordination_fee != null ? Number(wo.coordination_fee).toLocaleString('fr-CA') + ' $' : '—'}${wo.coordination_fee_type === 'forfait' ? ' (forfait négocié)' : wo.coordination_rate != null ? ' (' + Number(wo.coordination_rate).toLocaleString('fr-CA') + '%)' : ''} — Statut : ${statusLabel[wo.status] || esc(wo.status)}</span>
       ${wo.worker_reported_done_at ? `<div style="background:#e8f0e6;border-left:2px solid var(--sage);padding:8px 10px;margin-top:8px;font-size:12.5px;">✓ Travailleur : travail signalé terminé le ${new Date(wo.worker_reported_done_at).toLocaleString('fr-CA')}${wo.worker_completion_note ? '<br><b>Note :</b> ' + esc(wo.worker_completion_note) : ''}</div>` : ''}
       ${photoLinksHtml('service-request-photos', wo.photo_before_urls, 'Photos avant')}
       ${photoLinksHtml('service-request-photos', wo.photo_after_urls, 'Photos après')}
@@ -2287,12 +2405,71 @@ async function loadWorkOrdersAdmin(){
 
 async function loadBuildingsForReceipts(){
   const data = await callOpsApi({ action: 'list_all_buildings' });
-  const select = document.getElementById('rv-building');
-  if(!select) return;
   const buildings = data?.buildings || [];
-  select.innerHTML = '<option value="">— Choisir —</option>' + buildings.map(b =>
+  const optionsHtml = '<option value="">— Choisir —</option>' + buildings.map(b =>
     `<option value="${esc(b.id)}">${esc(b.address)}${b.owners?.full_name ? ' — ' + esc(b.owners.full_name) : ''}</option>`
   ).join('');
+  const rvSelect = document.getElementById('rv-building');
+  if(rvSelect) rvSelect.innerHTML = optionsHtml;
+  const paySelect = document.getElementById('pay-building');
+  if(paySelect) paySelect.innerHTML = optionsHtml;
+}
+
+async function loadPayablesAdmin(){
+  const data = await callOpsApi({ action: 'list_payables', only_pending_approval: false });
+  const container = document.getElementById('payables-body');
+  const payables = (data?.payables || []).filter(p => p.status !== 'paid');
+  if(!payables.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune facture en attente.</p>';
+    return;
+  }
+  const statusLabel = { pending_approval: 'En attente d\'approbation', approved: 'Approuvée — à payer', rejected: 'Rejetée' };
+  container.innerHTML = payables.map(p => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">
+      <div>
+        <b style="display:block;margin-bottom:4px;">${esc(p.vendor_name)} — ${esc(p.description)}</b>
+        <span style="font-size:12.5px;color:var(--muted);">${Number(p.amount).toLocaleString('fr-CA')} $ — ${esc(p.buildings?.address) || ''} — ${esc(p.owners?.full_name) || ''} — ${statusLabel[p.status] || esc(p.status)}${p.rejection_note ? ' — ' + esc(p.rejection_note) : ''}</span>
+      </div>
+      <div style="display:flex;gap:8px;">
+        ${p.status === 'pending_approval' ? `
+          <button onclick="respondPayable('${p.id}', 'approved')" style="background:var(--ink);color:var(--paper);border:none;padding:8px 14px;font-size:12.5px;cursor:pointer;">Approuver</button>
+          <button onclick="respondPayable('${p.id}', 'rejected')" style="background:transparent;color:var(--rust);border:1px solid var(--rust);padding:8px 14px;font-size:12.5px;cursor:pointer;">Rejeter</button>
+        ` : p.status === 'approved' ? `
+          <button onclick="markPayablePaid('${p.id}')" style="background:var(--ink);color:var(--paper);border:none;padding:8px 14px;font-size:12.5px;cursor:pointer;">Marquer payée</button>
+        ` : ''}
+      </div>
+    </div>`).join('');
+}
+
+async function createPayable(){
+  const building_id = document.getElementById('pay-building').value;
+  const vendor_name = document.getElementById('pay-vendor').value;
+  const description = document.getElementById('pay-desc').value;
+  const amount = document.getElementById('pay-amount').value;
+  const due_date = document.getElementById('pay-due').value;
+  if(!building_id || !vendor_name || !description || !(Number(amount) > 0)){
+    alert('Immeuble, fournisseur, description et montant (> 0) requis.');
+    return;
+  }
+  const res = await callOpsApi({ action: 'create_payable', building_id, vendor_name, description, amount: Number(amount), due_date: due_date || null });
+  if(res?.ok){
+    document.getElementById('pay-vendor').value = '';
+    document.getElementById('pay-desc').value = '';
+    document.getElementById('pay-amount').value = '';
+    await loadPayablesAdmin();
+  } else { alert(res?.error || 'Échec de l\'enregistrement.'); }
+}
+
+async function respondPayable(payableId, outcome){
+  const rejection_note = outcome === 'rejected' ? (prompt('Raison du rejet (optionnel) :') || null) : null;
+  const res = await callOpsApi({ action: 'respond_payable', payable_id: payableId, outcome, rejection_note });
+  if(res?.ok){ await loadPayablesAdmin(); } else { alert(res?.error || 'Échec.'); }
+}
+
+async function markPayablePaid(payableId){
+  if(!confirm('Marquer cette facture payée ? Une dépense réelle sera créée et postée au grand livre.')) return;
+  const res = await callOpsApi({ action: 'mark_payable_paid', payable_id: payableId });
+  if(res?.ok){ await loadPayablesAdmin(); } else { alert(res?.error || 'Échec.'); }
 }
 
 let lastParsedReceiptDocId = null;

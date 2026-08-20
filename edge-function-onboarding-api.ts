@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
     const action = body.action;
 
     if (action === "list_owners") {
-      const res = await fetch(`${supabaseUrl}/rest/v1/owners?select=id,full_name,company_name&order=full_name.asc`, { headers: adminHeaders });
+      const res = await fetch(`${supabaseUrl}/rest/v1/owners?select=id,full_name,company_name,management_rate,work_coordination_rate,spending_cap&order=full_name.asc`, { headers: adminHeaders });
       return new Response(JSON.stringify({ owners: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -476,7 +476,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === "update_owner") {
-      const { owner_id, full_name, phone, company_name, management_rate, spending_cap } = body;
+      const { owner_id, full_name, phone, company_name, management_rate, work_coordination_rate, spending_cap } = body;
       if (!owner_id) {
         return new Response(JSON.stringify({ error: "owner_id requis" }), { status: 400, headers: corsHeaders });
       }
@@ -485,6 +485,7 @@ Deno.serve(async (req) => {
       if (phone !== undefined) patch.phone = phone || null;
       if (company_name !== undefined) patch.company_name = company_name || null;
       if (management_rate !== undefined) patch.management_rate = management_rate;
+      if (work_coordination_rate !== undefined) patch.work_coordination_rate = work_coordination_rate;
       if (spending_cap !== undefined) patch.spending_cap = spending_cap;
       if (Object.keys(patch).length === 0) {
         return new Response(JSON.stringify({ error: "Aucun champ à mettre à jour" }), { status: 400, headers: corsHeaders });
