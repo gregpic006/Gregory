@@ -90,12 +90,18 @@ Deno.serve(async (req) => {
       method: "POST", headers: adminHeaders, body: JSON.stringify({ ip_address: ip }),
     });
 
+    // Preuve de consentement horodatée (Loi 25) — le consentement était
+    // vérifié ci-dessus mais jamais conservé après coup. La finalité est
+    // déjà scopée à cette seule demande (visite ou évaluation), pas un
+    // consentement générique à du démarchage futur.
     const insertPayload: Record<string, unknown> = {
       type,
       full_name: String(full_name).trim().slice(0, 200),
       email: String(email).trim().slice(0, 200),
       phone: phone ? String(phone).trim().slice(0, 40) : null,
       message: message ? String(message).trim().slice(0, MESSAGE_MAX_LENGTH) : null,
+      consented_at: new Date().toISOString(),
+      consent_purpose: type === "visite" ? "Être contacté au sujet de cette demande de visite" : "Être contacté au sujet de cette demande d'évaluation",
     };
     if (type === "visite" && unit_id) insertPayload.unit_id = unit_id;
 
