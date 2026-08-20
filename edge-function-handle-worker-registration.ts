@@ -6,10 +6,19 @@
 // — aucun mandat ne lui sera envoyé tant qu'un admin n'a pas vérifié son
 // dossier (voir dispatch-work-order.ts, qui ne considère que
 // verification_status='verified').
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// Liste blanche d'origines : évite d'exposer les fonctions à un
+// site tiers qui embarquerait un appel authentifié depuis le
+// navigateur d'un usager (CSRF via fetch). Les appels serveur à
+// serveur (cron, webhooks, autre fonction edge) n'envoient pas
+// d'en-tête Origin et ne sont donc pas affectés par ce contrôle.
+const ALLOWED_ORIGINS = ["https://portailgestion.ca", "https://www.portailgestion.ca"];
+function corsHeadersFor(origin: string | null) {
+  return {
+    "Access-Control-Allow-Origin": origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Vary": "Origin",
+  };
+}
 
 const WORKER_PORTAL_URL = "https://portailgestion.ca/portail-travailleur.html";
 const RATE_LIMIT_PER_HOUR = 5;
@@ -21,6 +30,7 @@ function randomPassword() {
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = corsHeadersFor(req.headers.get("origin"));
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
   }

@@ -5,10 +5,19 @@
 // utilisateur. Protégé par un secret partagé (comme flinks-api sync_all)
 // pour qu'un tiers ne puisse pas spammer les admins avec de fausses
 // alertes.
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// Liste blanche d'origines : évite d'exposer les fonctions à un
+// site tiers qui embarquerait un appel authentifié depuis le
+// navigateur d'un usager (CSRF via fetch). Les appels serveur à
+// serveur (cron, webhooks, autre fonction edge) n'envoient pas
+// d'en-tête Origin et ne sont donc pas affectés par ce contrôle.
+const ALLOWED_ORIGINS = ["https://portailgestion.ca", "https://www.portailgestion.ca"];
+function corsHeadersFor(origin: string | null) {
+  return {
+    "Access-Control-Allow-Origin": origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Vary": "Origin",
+  };
+}
 
 const severityLabel: Record<string, string> = {
   critical: "🔴 CRITIQUE",
@@ -16,6 +25,7 @@ const severityLabel: Record<string, string> = {
 };
 
 Deno.serve(async (req) => {
+  const corsHeaders = corsHeadersFor(req.headers.get("origin"));
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
