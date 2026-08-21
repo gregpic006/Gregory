@@ -12,7 +12,7 @@
   :root{
     --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
     --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
-    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#6E6C61;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;line-height:1.6;}
@@ -84,14 +84,14 @@
 
     <form id="pro-form">
       <div class="row">
-        <div class="f"><label>Nom complet</label><input type="text" name="full_name" required></div>
-        <div class="f"><label>Entreprise (optionnel)</label><input type="text" name="company_name"></div>
+        <div class="f"><label for="full_name">Nom complet</label><input id="full_name" type="text" name="full_name" required></div>
+        <div class="f"><label for="company_name">Entreprise (optionnel)</label><input id="company_name" type="text" name="company_name"></div>
       </div>
       <div class="row">
-        <div class="f"><label>Courriel</label><input type="email" name="email" required></div>
-        <div class="f"><label>Téléphone</label><input type="tel" name="phone"></div>
+        <div class="f"><label for="email">Courriel</label><input id="email" type="email" name="email" required></div>
+        <div class="f"><label for="phone">Téléphone</label><input id="phone" type="tel" name="phone"></div>
       </div>
-      <div class="f"><label>NEQ (si applicable)</label><input type="text" name="neq"></div>
+      <div class="f"><label for="neq">NEQ (si applicable)</label><input id="neq" type="text" name="neq"></div>
 
       <div class="f">
         <label>Tes métiers</label>
@@ -108,14 +108,14 @@
       </div>
 
       <div class="f">
-        <label>Zones desservies</label>
-        <input type="text" name="zones" placeholder="ex. Limoilou, Vieux-Québec, Sainte-Foy">
+        <label for="zones">Zones desservies</label>
+        <input id="zones" type="text" name="zones" placeholder="ex. Limoilou, Vieux-Québec, Sainte-Foy">
         <p class="hint">Sépare par des virgules.</p>
       </div>
 
       <div class="row">
-        <div class="f"><label>Taux horaire ($, optionnel)</label><input type="number" name="hourly_rate" step="0.01"></div>
-        <div class="f"><label>Licence RBQ (si applicable)</label><input type="text" name="rbq_license"></div>
+        <div class="f"><label for="hourly_rate">Taux horaire ($, optionnel)</label><input id="hourly_rate" type="number" name="hourly_rate" step="0.01"></div>
+        <div class="f"><label for="rbq_license">Licence RBQ (si applicable)</label><input id="rbq_license" type="text" name="rbq_license"></div>
       </div>
 
       <div class="checkbox-row">
@@ -124,7 +124,7 @@
       </div>
 
       <div style="position:absolute;left:-9999px;" aria-hidden="true">
-        <label>Site web</label><input type="text" name="website" tabindex="-1" autocomplete="off">
+        <label for="website">Site web</label><input id="website" type="text" name="website" tabindex="-1" autocomplete="off">
       </div>
 
       <div class="checkbox-row">

@@ -13,7 +13,7 @@
   :root{
     --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
     --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
-    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#6E6C61;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;line-height:1.55;}
@@ -59,16 +59,16 @@
     <h1>Demander une visite</h1>
     <p class="subtitle">Remplis ce formulaire et notre équipe te contactera pour proposer des créneaux de visite.</p>
     <form onsubmit="submitInquiry(event, 'visite')">
-      <div class="f"><label>Nom complet</label><input type="text" name="full_name" required></div>
-      <div class="f"><label>Courriel</label><input type="email" name="email" required></div>
-      <div class="f"><label>Téléphone</label><input type="tel" name="phone"></div>
-      <div class="f"><label>Message (optionnel)</label><textarea name="message" placeholder="Dates préférées, questions sur le logement, etc."></textarea></div>
+      <div class="f"><label for="visite-full_name">Nom complet</label><input id="visite-full_name" type="text" name="full_name" required></div>
+      <div class="f"><label for="visite-email">Courriel</label><input id="visite-email" type="email" name="email" required></div>
+      <div class="f"><label for="visite-phone">Téléphone</label><input id="visite-phone" type="tel" name="phone"></div>
+      <div class="f"><label for="visite-message">Message (optionnel)</label><textarea id="visite-message" name="message" placeholder="Dates préférées, questions sur le logement, etc."></textarea></div>
       <div style="position:absolute;left:-9999px;" aria-hidden="true">
-        <label>Site web</label><input type="text" name="website" tabindex="-1" autocomplete="off">
+        <label for="visite-website">Site web</label><input id="visite-website" type="text" name="website" tabindex="-1" autocomplete="off">
       </div>
       <div class="f" style="display:flex;align-items:flex-start;gap:8px;">
-        <input type="checkbox" name="consent" required style="width:auto;margin-top:3px;">
-        <label style="font-weight:400;">J'accepte que mes informations soient utilisées par Portail pour me contacter au sujet de cette demande. Voir notre <a href="politique-de-confidentialite.html" target="_blank">politique de confidentialité</a>.</label>
+        <input type="checkbox" name="consent" id="visite-consent" required style="width:auto;margin-top:3px;">
+        <label for="visite-consent" style="font-weight:400;">J'accepte que mes informations soient utilisées par Portail pour me contacter au sujet de cette demande. Voir notre <a href="politique-de-confidentialite.html" target="_blank">politique de confidentialité</a>.</label>
       </div>
       <button class="submit" type="submit">Envoyer la demande</button>
       <p class="error" id="error-visite"></p>
@@ -82,37 +82,37 @@
     <h1>Obtenir une évaluation gratuite</h1>
     <p class="subtitle">Dis-nous en plus sur ton immeuble — un membre de notre équipe te contactera, sans engagement, pour discuter d'un mandat de gestion.</p>
     <form onsubmit="submitInquiry(event, 'mandat')">
-      <div class="f"><label>Nom complet</label><input type="text" name="full_name" required></div>
-      <div class="f"><label>Courriel</label><input type="email" name="email" required></div>
-      <div class="f"><label>Téléphone</label><input type="tel" name="phone"></div>
-      <div class="f"><label>Adresse ou secteur de l'immeuble</label><input type="text" name="sector" required></div>
-      <div class="f"><label>Nombre de logements</label><input type="number" name="num_doors" min="1"></div>
-      <div class="f"><label>Loyer mensuel moyen approximatif ($)</label><input type="number" name="avg_rent" min="0"></div>
-      <div class="f"><label>L'immeuble est détenu</label>
-        <select name="ownership">
+      <div class="f"><label for="mandat-full_name">Nom complet</label><input id="mandat-full_name" type="text" name="full_name" required></div>
+      <div class="f"><label for="mandat-email">Courriel</label><input id="mandat-email" type="email" name="email" required></div>
+      <div class="f"><label for="mandat-phone">Téléphone</label><input id="mandat-phone" type="tel" name="phone"></div>
+      <div class="f"><label for="sector">Adresse ou secteur de l'immeuble</label><input id="sector" type="text" name="sector" required></div>
+      <div class="f"><label for="num_doors">Nombre de logements</label><input id="num_doors" type="number" name="num_doors" min="1"></div>
+      <div class="f"><label for="avg_rent">Loyer mensuel moyen approximatif ($)</label><input id="avg_rent" type="number" name="avg_rent" min="0"></div>
+      <div class="f"><label for="ownership">L'immeuble est détenu</label>
+        <select id="ownership" name="ownership">
           <option value="">— Choisir —</option>
           <option value="personnel">Personnellement</option>
           <option value="societe">Par une société</option>
         </select>
       </div>
-      <div class="f"><label>Actuellement</label>
-        <select name="current_management">
+      <div class="f"><label for="current_management">Actuellement</label>
+        <select id="current_management" name="current_management">
           <option value="">— Choisir —</option>
           <option value="autogere">Autogéré</option>
           <option value="sous_gestion">Déjà sous gestion (autre entreprise)</option>
         </select>
       </div>
-      <div class="f"><label>Services recherchés</label><input type="text" name="services_needed" placeholder="Ex. : gestion complète, location seulement, coordination des travaux..."></div>
-      <div class="f"><label>Principal problème à résoudre</label><input type="text" name="main_problem" placeholder="Ex. : retards de loyer fréquents, roulement de locataires, manque de temps..."></div>
-      <div class="f"><label>Date souhaitée de début</label><input type="date" name="desired_start_date"></div>
-      <div class="f"><label>Meilleur moment pour t'appeler</label><input type="text" name="best_call_time" placeholder="Ex. : en soirée, jour de semaine en après-midi..."></div>
-      <div class="f"><label>Autre chose à ajouter (optionnel)</label><textarea name="message" placeholder="Tout autre détail utile"></textarea></div>
+      <div class="f"><label for="services_needed">Services recherchés</label><input id="services_needed" type="text" name="services_needed" placeholder="Ex. : gestion complète, location seulement, coordination des travaux..."></div>
+      <div class="f"><label for="main_problem">Principal problème à résoudre</label><input id="main_problem" type="text" name="main_problem" placeholder="Ex. : retards de loyer fréquents, roulement de locataires, manque de temps..."></div>
+      <div class="f"><label for="desired_start_date">Date souhaitée de début</label><input id="desired_start_date" type="date" name="desired_start_date"></div>
+      <div class="f"><label for="best_call_time">Meilleur moment pour t'appeler</label><input id="best_call_time" type="text" name="best_call_time" placeholder="Ex. : en soirée, jour de semaine en après-midi..."></div>
+      <div class="f"><label for="mandat-message">Autre chose à ajouter (optionnel)</label><textarea id="mandat-message" name="message" placeholder="Tout autre détail utile"></textarea></div>
       <div style="position:absolute;left:-9999px;" aria-hidden="true">
-        <label>Site web</label><input type="text" name="website" tabindex="-1" autocomplete="off">
+        <label for="mandat-website">Site web</label><input id="mandat-website" type="text" name="website" tabindex="-1" autocomplete="off">
       </div>
       <div class="f" style="display:flex;align-items:flex-start;gap:8px;">
-        <input type="checkbox" name="consent" required style="width:auto;margin-top:3px;">
-        <label style="font-weight:400;">J'accepte que mes informations soient utilisées par Portail pour me contacter au sujet de cette demande. Voir notre <a href="politique-de-confidentialite.html" target="_blank">politique de confidentialité</a>.</label>
+        <input type="checkbox" name="consent" id="mandat-consent" required style="width:auto;margin-top:3px;">
+        <label for="mandat-consent" style="font-weight:400;">J'accepte que mes informations soient utilisées par Portail pour me contacter au sujet de cette demande. Voir notre <a href="politique-de-confidentialite.html" target="_blank">politique de confidentialité</a>.</label>
       </div>
       <button class="submit" type="submit">Envoyer ma demande</button>
       <p class="error" id="error-mandat"></p>

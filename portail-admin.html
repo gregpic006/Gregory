@@ -14,7 +14,7 @@
   :root{
     --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
     --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
-    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#6E6C61;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;}
@@ -80,8 +80,8 @@
   <div class="login-box">
     <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
     <div class="sub">Admin</div>
-    <div class="f"><label>Courriel</label><input type="email" id="login-email"></div>
-    <div class="f"><label>Mot de passe</label><input type="password" id="login-password"></div>
+    <div class="f"><label for="login-email">Courriel</label><input type="email" id="login-email"></div>
+    <div class="f"><label for="login-password">Mot de passe</label><input type="password" id="login-password"></div>
     <button onclick="handleLogin()">Se connecter</button>
     <p class="login-error" id="login-error"></p>
     <p style="text-align:center;margin-top:12px;"><a href="#" onclick="showResetForm();return false;" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Mot de passe oublié ?</a></p>
@@ -90,7 +90,7 @@
   <div class="login-box" id="reset-box" style="display:none;">
     <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
     <div class="sub">Réinitialiser le mot de passe</div>
-    <div class="f"><label>Courriel</label><input type="email" id="reset-email"></div>
+    <div class="f"><label for="reset-email">Courriel</label><input type="email" id="reset-email"></div>
     <button onclick="sendResetLink()">Envoyer le lien</button>
     <p class="login-error" id="reset-error"></p>
     <p class="login-error" id="reset-success" style="color:var(--sage);"></p>
@@ -100,7 +100,7 @@
   <div class="login-box" id="newpw-box" style="display:none;">
     <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
     <div class="sub">Choisir un nouveau mot de passe</div>
-    <div class="f"><label>Nouveau mot de passe</label><input type="password" id="newpw-value"></div>
+    <div class="f"><label for="newpw-value">Nouveau mot de passe</label><input type="password" id="newpw-value"></div>
     <button onclick="confirmNewPassword()">Confirmer</button>
     <p class="login-error" id="newpw-error"></p>
   </div>
@@ -205,11 +205,11 @@
     <h1 style="margin-top:40px;font-size:22px;">Travailleurs — vérification</h1>
     <p class="subtitle" style="margin-bottom:16px;">Un travailleur non conforme (licence RBQ ou assurance manquante/expirée) ne peut pas être assigné à un travail — blocage automatique en temps réel</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom</label><input type="text" id="wk-name" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Spécialité</label><input type="text" id="wk-specialty" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone</label><input type="text" id="wk-phone" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel</label><input type="email" id="wk-email" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Licence RBQ (si applicable)</label><input type="text" id="wk-rbq" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wk-name">Nom</label><input type="text" id="wk-name" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wk-specialty">Spécialité</label><input type="text" id="wk-specialty" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wk-phone">Téléphone</label><input type="text" id="wk-phone" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wk-email">Courriel</label><input type="email" id="wk-email" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wk-rbq">Licence RBQ (si applicable)</label><input type="text" id="wk-rbq" style="padding:8px;border:1px solid var(--line);"></div>
       <div><label style="display:block;font-size:11px;color:var(--muted);"><input type="checkbox" id="wk-requires-rbq"> Métier réglementé (RBQ requise)</label></div>
       <button onclick="createWorker()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter un travailleur</button>
     </div>
@@ -222,18 +222,18 @@
     <h1 style="margin-top:40px;font-size:22px;">Catalogue de services (Portail Pro)</h1>
     <p class="subtitle" style="margin-bottom:16px;">Tâches standardisées à prix fixe, ou au taux horaire du travailleur, ou nécessitant un diagnostic — utilisé par le moteur de dispatch automatique</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Catégorie</label><input type="text" id="sc-category" placeholder="plomberie" style="padding:8px;border:1px solid var(--line);width:120px;"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Code (unique)</label><input type="text" id="sc-task-type" placeholder="toilette_debouchee" style="padding:8px;border:1px solid var(--line);width:150px;"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Étiquette</label><input type="text" id="sc-label" placeholder="Débouchage de toilette simple" style="padding:8px;border:1px solid var(--line);width:200px;"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Tarification</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sc-category">Catégorie</label><input type="text" id="sc-category" placeholder="plomberie" style="padding:8px;border:1px solid var(--line);width:120px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sc-task-type">Code (unique)</label><input type="text" id="sc-task-type" placeholder="toilette_debouchee" style="padding:8px;border:1px solid var(--line);width:150px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sc-label">Étiquette</label><input type="text" id="sc-label" placeholder="Débouchage de toilette simple" style="padding:8px;border:1px solid var(--line);width:200px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sc-pricing-model">Tarification</label>
         <select id="sc-pricing-model" style="padding:8px;border:1px solid var(--line);">
           <option value="forfait">Forfait fixe</option>
           <option value="horaire">Taux horaire</option>
           <option value="diagnostic">Diagnostic requis</option>
         </select>
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Prix propriétaire ($)</label><input type="number" id="sc-owner-price" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Paie travailleur ($)</label><input type="number" id="sc-worker-pay" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sc-owner-price">Prix propriétaire ($)</label><input type="number" id="sc-owner-price" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sc-worker-pay">Paie travailleur ($)</label><input type="number" id="sc-worker-pay" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
       <div><label style="display:block;font-size:11px;color:var(--muted);"><input type="checkbox" id="sc-requires-rbq"> Licence RBQ requise</label></div>
       <button onclick="createServiceCatalogEntry()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter</button>
     </div>
@@ -265,16 +265,16 @@
     <h1 style="margin-top:40px;font-size:22px;">Facturation Portail</h1>
     <p class="subtitle" style="margin-bottom:16px;">Frais de gestion et de coordination facturés à chaque propriétaire — générés automatiquement avec le rapport mensuel. Les taxes ne s'appliquent qu'une fois les numéros de TPS/TVQ renseignés ci-dessous.</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom légal</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="cs-legal-name">Nom légal</label>
         <input type="text" id="cs-legal-name" style="padding:8px;border:1px solid var(--line);width:180px;">
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Adresse</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="cs-address">Adresse</label>
         <input type="text" id="cs-address" style="padding:8px;border:1px solid var(--line);width:220px;">
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">N° TPS (vide = pas encore incorporé)</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="cs-gst">N° TPS (vide = pas encore incorporé)</label>
         <input type="text" id="cs-gst" placeholder="Ex: 123456789 RT0001" style="padding:8px;border:1px solid var(--line);width:170px;">
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">N° TVQ</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="cs-qst">N° TVQ</label>
         <input type="text" id="cs-qst" placeholder="Ex: 1234567890 TQ0001" style="padding:8px;border:1px solid var(--line);width:170px;">
       </div>
       <button onclick="saveCompanySettings()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Enregistrer</button>
@@ -285,20 +285,20 @@
     <h2 style="font-size:16px;margin-bottom:8px;">Prélèvement automatique (PAD)</h2>
     <p class="subtitle" style="margin-bottom:12px;">Aucun fournisseur de prélèvement n'est encore branché (Flinks Connect est en lecture seule) — ceci consigne seulement le consentement contractuel en attendant. Le prélèvement réel des honoraires reste manuel pour l'instant.</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Client</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pad-owner">Client</label>
         <select id="pad-owner" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir —</option></select>
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Statut</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pad-status">Statut</label>
         <select id="pad-status" style="padding:8px;border:1px solid var(--line);">
           <option value="pending">En attente de signature</option>
           <option value="active">Actif (clause signée)</option>
           <option value="revoked">Révoqué</option>
         </select>
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Méthode de consentement</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pad-method">Méthode de consentement</label>
         <input type="text" id="pad-method" placeholder="Ex: clause au contrat de gestion" style="padding:8px;border:1px solid var(--line);width:200px;">
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fournisseur (une fois choisi)</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pad-processor">Fournisseur (une fois choisi)</label>
         <input type="text" id="pad-processor" placeholder="Ex: Flinks Pay" style="padding:8px;border:1px solid var(--line);width:140px;">
       </div>
       <button onclick="savePadAuthorization()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Enregistrer</button>
@@ -309,20 +309,20 @@
     <h2 style="font-size:16px;margin-bottom:8px;">Prélèvement automatique des loyers (PAD locataire)</h2>
     <p class="subtitle" style="margin-bottom:12px;">Distinct de la section ci-dessus (qui concerne les honoraires de gestion). Ceci concerne le loyer, prélevé auprès du locataire. Structure prête, branchement du processeur de paiement à venir (équipe TWIM) — en attendant, consigne le consentement manuellement.</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Bail</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="tpad-lease">Bail</label>
         <select id="tpad-lease" style="padding:8px;border:1px solid var(--line);min-width:260px;"><option value="">— Choisir —</option></select>
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Statut</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="tpad-status">Statut</label>
         <select id="tpad-status" style="padding:8px;border:1px solid var(--line);">
           <option value="pending">En attente de signature</option>
           <option value="active">Actif (autorisation signée)</option>
           <option value="revoked">Révoqué</option>
         </select>
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Méthode de consentement</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="tpad-method">Méthode de consentement</label>
         <input type="text" id="tpad-method" placeholder="Ex: formulaire papier signé" style="padding:8px;border:1px solid var(--line);width:200px;">
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fournisseur (une fois choisi)</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="tpad-processor">Fournisseur (une fois choisi)</label>
         <input type="text" id="tpad-processor" placeholder="Ex: Stripe" style="padding:8px;border:1px solid var(--line);width:120px;">
       </div>
       <button onclick="saveTenantPadAuthorization()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Enregistrer</button>
@@ -336,7 +336,7 @@
     <h1 style="margin-top:40px;font-size:22px;">Comptabilité — grand livre</h1>
     <p class="subtitle" style="margin-bottom:16px;">Plan de comptes, écritures à partie double (postées automatiquement pour les loyers perçus, dépenses et factures Portail), et balance de vérification — par propriétaire.</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Propriétaire</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="gl-owner">Propriétaire</label>
         <select id="gl-owner" style="padding:8px;border:1px solid var(--line);" onchange="loadGlData()"><option value="">— Choisir —</option></select>
       </div>
     </div>
@@ -347,8 +347,8 @@
     <h3 style="font-size:13px;margin-bottom:8px;">Nouvelle écriture manuelle</h3>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:10px;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Date</label><input type="date" id="gl-entry-date" style="padding:8px;border:1px solid var(--line);"></div>
-        <div style="flex:1;min-width:200px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description</label><input type="text" id="gl-entry-desc" style="padding:8px;border:1px solid var(--line);width:100%;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="gl-entry-date">Date</label><input type="date" id="gl-entry-date" style="padding:8px;border:1px solid var(--line);"></div>
+        <div style="flex:1;min-width:200px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="gl-entry-desc">Description</label><input type="text" id="gl-entry-desc" style="padding:8px;border:1px solid var(--line);width:100%;"></div>
       </div>
       <div id="gl-entry-lines"></div>
       <button onclick="addGlLine()" style="border:1px solid var(--ink);background:none;padding:6px 12px;font-size:12px;cursor:pointer;margin-top:6px;">+ Ligne</button>
@@ -367,10 +367,10 @@
     <h1 style="margin-top:40px;font-size:22px;">Rapprochement bancaire</h1>
     <p class="subtitle" style="margin-bottom:16px;">Importe un relevé bancaire (CSV : date,description,montant) — le matching locataire/bail/mois est automatique, l'IA ne fait que suggérer une piste sur les dépôts non identifiés</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Client</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="recon-owner">Client</label>
         <select id="recon-owner" style="padding:8px;border:1px solid var(--line);" onchange="loadBankTransactions()"><option value="">— Choisir —</option></select>
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fichier CSV</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="recon-file">Fichier CSV</label>
         <input type="file" id="recon-file" accept=".csv" style="padding:6px;border:1px solid var(--line);">
       </div>
       <button onclick="importBankCsv()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Importer</button>
@@ -385,7 +385,7 @@
     <p class="subtitle" style="margin-bottom:16px;">Connexion en lecture seule — aucun identifiant bancaire n'est stocké côté Portail. Une fois liée, la synchronisation des transactions est automatique (une fois par jour) et alimente le rapprochement ci-dessous.</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:12px;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Client</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="flinks-owner">Client</label>
           <select id="flinks-owner" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir —</option></select>
         </div>
         <button onclick="startFlinksConnect()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Connecter une banque</button>
@@ -418,13 +418,13 @@
     <p class="subtitle" style="margin-bottom:16px;">Une facture fournisseur passe par une approbation dédiée avant paiement — distincte de l'approbation "démarrer les travaux". Le paiement crée la dépense réelle et son écriture comptable.</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Immeuble</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pay-building">Immeuble</label>
           <select id="pay-building" style="padding:8px;border:1px solid var(--line);min-width:200px;"><option value="">— Choisir —</option></select>
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fournisseur</label><input type="text" id="pay-vendor" style="padding:8px;border:1px solid var(--line);width:160px;"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description</label><input type="text" id="pay-desc" style="padding:8px;border:1px solid var(--line);width:220px;"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Montant ($)</label><input type="number" id="pay-amount" min="0" step="0.01" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Échéance</label><input type="date" id="pay-due" style="padding:8px;border:1px solid var(--line);"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pay-vendor">Fournisseur</label><input type="text" id="pay-vendor" style="padding:8px;border:1px solid var(--line);width:160px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pay-desc">Description</label><input type="text" id="pay-desc" style="padding:8px;border:1px solid var(--line);width:220px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pay-amount">Montant ($)</label><input type="number" id="pay-amount" min="0" step="0.01" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pay-due">Échéance</label><input type="date" id="pay-due" style="padding:8px;border:1px solid var(--line);"></div>
         <button onclick="createPayable()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Loguer la facture</button>
       </div>
     </div>
@@ -434,7 +434,7 @@
     <p class="subtitle" style="margin-bottom:16px;">Téléverse une facture ou un reçu (PDF/photo) — l'IA propose le fournisseur, le montant, les taxes et la catégorie. Rien n'est enregistré tant que tu n'as pas confirmé.</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:14px;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Facture / reçu (PDF ou photo)</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="receipt-file">Facture / reçu (PDF ou photo)</label>
           <input type="file" id="receipt-file" accept=".pdf,image/*">
         </div>
         <button onclick="parseExpenseReceipt()" id="receipt-parse-btn" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Analyser avec l'IA</button>
@@ -443,8 +443,8 @@
       <div id="receipt-review" style="display:none;background:var(--paper);border:1px solid var(--line);padding:14px;">
         <p id="receipt-confidence-note" style="font-size:12px;color:var(--muted);margin-bottom:10px;"></p>
         <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:10px;">
-          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fournisseur</label><input type="text" id="rv-vendor" style="padding:8px;border:1px solid var(--line);width:170px;"></div>
-          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Catégorie</label>
+          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="rv-vendor">Fournisseur</label><input type="text" id="rv-vendor" style="padding:8px;border:1px solid var(--line);width:170px;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="rv-category">Catégorie</label>
             <select id="rv-category" style="padding:8px;border:1px solid var(--line);">
               <option value="plomberie">Plomberie</option><option value="electricite">Électricité</option><option value="cvac">CVAC</option>
               <option value="serrurerie">Serrurerie</option><option value="structure">Structure</option><option value="peinture">Peinture</option>
@@ -452,16 +452,16 @@
               <option value="utilities">Services publics</option><option value="administratif">Administratif</option><option value="autre">Autre</option>
             </select>
           </div>
-          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Immeuble</label>
+          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="rv-building">Immeuble</label>
             <select id="rv-building" style="padding:8px;border:1px solid var(--line);min-width:200px;"><option value="">— Choisir —</option></select>
           </div>
-          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Date de la facture</label><input type="date" id="rv-date" style="padding:8px;border:1px solid var(--line);"></div>
+          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="rv-date">Date de la facture</label><input type="date" id="rv-date" style="padding:8px;border:1px solid var(--line);"></div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:10px;">
-          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description</label><input type="text" id="rv-description" style="padding:8px;border:1px solid var(--line);width:280px;"></div>
-          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">TPS ($)</label><input type="number" id="rv-gst" step="0.01" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
-          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">TVQ ($)</label><input type="number" id="rv-qst" step="0.01" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
-          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Montant total ($)</label><input type="number" id="rv-total" step="0.01" style="padding:8px;border:1px solid var(--line);width:110px;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="rv-description">Description</label><input type="text" id="rv-description" style="padding:8px;border:1px solid var(--line);width:280px;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="rv-gst">TPS ($)</label><input type="number" id="rv-gst" step="0.01" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="rv-qst">TVQ ($)</label><input type="number" id="rv-qst" step="0.01" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="rv-total">Montant total ($)</label><input type="number" id="rv-total" step="0.01" style="padding:8px;border:1px solid var(--line);width:110px;"></div>
           <button onclick="confirmExpenseReceipt()" id="receipt-confirm-btn" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Confirmer et créer la dépense</button>
         </div>
       </div>
@@ -480,11 +480,11 @@
     <p class="subtitle" style="margin-bottom:16px;">Pipeline d'acquisition, trié par valeur potentielle</p>
 
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom</label><input type="text" id="pr-name" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel</label><input type="email" id="pr-email" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone</label><input type="text" id="pr-phone" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Portes</label><input type="number" id="pr-doors" style="padding:8px;border:1px solid var(--line);width:80px;"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Loyer moyen</label><input type="number" id="pr-rent" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pr-name">Nom</label><input type="text" id="pr-name" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pr-email">Courriel</label><input type="email" id="pr-email" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pr-phone">Téléphone</label><input type="text" id="pr-phone" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pr-doors">Portes</label><input type="number" id="pr-doors" style="padding:8px;border:1px solid var(--line);width:80px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pr-rent">Loyer moyen</label><input type="number" id="pr-rent" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
       <button onclick="createProspect()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter un prospect</button>
     </div>
 
@@ -504,9 +504,9 @@
     <p class="subtitle" style="margin-bottom:16px;">Comptes des travailleurs autonomes qui font de la prospection par téléphone — ils voient uniquement les prospects qui leur sont assignés ci-dessus</p>
 
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom complet</label><input type="text" id="cc-name" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel</label><input type="email" id="cc-email" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone (optionnel)</label><input type="text" id="cc-phone" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="cc-name">Nom complet</label><input type="text" id="cc-name" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="cc-email">Courriel</label><input type="email" id="cc-email" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="cc-phone">Téléphone (optionnel)</label><input type="text" id="cc-phone" style="padding:8px;border:1px solid var(--line);"></div>
       <button onclick="createColdCaller()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Créer le compte + envoyer l'accès</button>
     </div>
     <p id="cc-msg" style="font-size:12.5px;margin-top:-8px;margin-bottom:16px;"></p>
@@ -531,12 +531,12 @@
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
       <h3 style="font-size:14px;margin-bottom:10px;">1. Compte propriétaire</h3>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom complet</label><input type="text" id="ob-owner-name" style="padding:8px;border:1px solid var(--line);"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel</label><input type="email" id="ob-owner-email" style="padding:8px;border:1px solid var(--line);"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone</label><input type="text" id="ob-owner-phone" style="padding:8px;border:1px solid var(--line);"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Entreprise</label><input type="text" id="ob-owner-company" style="padding:8px;border:1px solid var(--line);"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Taux de gestion (%)</label><input type="number" id="ob-owner-rate" value="6" step="0.1" style="padding:8px;border:1px solid var(--line);width:80px;"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Plafond de dépenses ($)</label><input type="number" id="ob-owner-cap" value="300" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-owner-name">Nom complet</label><input type="text" id="ob-owner-name" style="padding:8px;border:1px solid var(--line);"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-owner-email">Courriel</label><input type="email" id="ob-owner-email" style="padding:8px;border:1px solid var(--line);"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-owner-phone">Téléphone</label><input type="text" id="ob-owner-phone" style="padding:8px;border:1px solid var(--line);"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-owner-company">Entreprise</label><input type="text" id="ob-owner-company" style="padding:8px;border:1px solid var(--line);"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-owner-rate">Taux de gestion (%)</label><input type="number" id="ob-owner-rate" value="6" step="0.1" style="padding:8px;border:1px solid var(--line);width:80px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-owner-cap">Plafond de dépenses ($)</label><input type="number" id="ob-owner-cap" value="300" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
         <button onclick="obCreateOwner()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Créer le compte + envoyer l'accès</button>
       </div>
       <p id="ob-owner-msg" style="font-size:12.5px;margin-top:8px;"></p>
@@ -551,12 +551,12 @@
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
       <h3 style="font-size:14px;margin-bottom:10px;">2. Immeuble</h3>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Propriétaire</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-building-owner">Propriétaire</label>
           <select id="ob-building-owner" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir —</option></select>
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Adresse</label><input type="text" id="ob-building-address" style="padding:8px;border:1px solid var(--line);width:240px;"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nombre d'unités</label><input type="number" id="ob-building-count" value="1" min="1" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Année</label><input type="number" id="ob-building-year" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-building-address">Adresse</label><input type="text" id="ob-building-address" style="padding:8px;border:1px solid var(--line);width:240px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-building-count">Nombre d'unités</label><input type="number" id="ob-building-count" value="1" min="1" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-building-year">Année</label><input type="number" id="ob-building-year" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
         <button onclick="obAddBuilding()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Ajouter l'immeuble</button>
       </div>
       <p id="ob-building-msg" style="font-size:12.5px;margin-top:8px;"></p>
@@ -565,13 +565,13 @@
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
       <h3 style="font-size:14px;margin-bottom:10px;">3. Unité</h3>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Immeuble</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-unit-building">Immeuble</label>
           <select id="ob-unit-building" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir un propriétaire d'abord —</option></select>
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Numéro</label><input type="text" id="ob-unit-number" style="padding:8px;border:1px solid var(--line);width:80px;"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Type</label><input type="text" id="ob-unit-type" placeholder="4½" style="padding:8px;border:1px solid var(--line);width:70px;"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Loyer ($)</label><input type="number" id="ob-unit-rent" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Statut</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-unit-number">Numéro</label><input type="text" id="ob-unit-number" style="padding:8px;border:1px solid var(--line);width:80px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-unit-type">Type</label><input type="text" id="ob-unit-type" placeholder="4½" style="padding:8px;border:1px solid var(--line);width:70px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-unit-rent">Loyer ($)</label><input type="number" id="ob-unit-rent" style="padding:8px;border:1px solid var(--line);width:90px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-unit-status">Statut</label>
           <select id="ob-unit-status" style="padding:8px;border:1px solid var(--line);">
             <option value="occupied">Occupée</option>
             <option value="available">Disponible</option>
@@ -586,15 +586,15 @@
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:32px;">
       <h3 style="font-size:14px;margin-bottom:10px;">4. Locataire + bail</h3>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Unité</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-tenant-unit">Unité</label>
           <select id="ob-tenant-unit" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir un immeuble d'abord —</option></select>
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom complet</label><input type="text" id="ob-tenant-name" style="padding:8px;border:1px solid var(--line);"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel (optionnel — vide = aucun compte de connexion créé)</label><input type="email" id="ob-tenant-email" style="padding:8px;border:1px solid var(--line);"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Téléphone (optionnel)</label><input type="text" id="ob-tenant-phone" style="padding:8px;border:1px solid var(--line);"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Loyer mensuel ($)</label><input type="number" id="ob-tenant-rent" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Début du bail</label><input type="date" id="ob-tenant-start" style="padding:8px;border:1px solid var(--line);"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fin du bail (optionnel)</label><input type="date" id="ob-tenant-end" style="padding:8px;border:1px solid var(--line);"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-tenant-name">Nom complet</label><input type="text" id="ob-tenant-name" style="padding:8px;border:1px solid var(--line);"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-tenant-email">Courriel (optionnel — vide = aucun compte de connexion créé)</label><input type="email" id="ob-tenant-email" style="padding:8px;border:1px solid var(--line);"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-tenant-phone">Téléphone (optionnel)</label><input type="text" id="ob-tenant-phone" style="padding:8px;border:1px solid var(--line);"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-tenant-rent">Loyer mensuel ($)</label><input type="number" id="ob-tenant-rent" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-tenant-start">Début du bail</label><input type="date" id="ob-tenant-start" style="padding:8px;border:1px solid var(--line);"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ob-tenant-end">Fin du bail (optionnel)</label><input type="date" id="ob-tenant-end" style="padding:8px;border:1px solid var(--line);"></div>
         <button onclick="obCreateTenant()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Créer le compte + envoyer l'accès</button>
       </div>
       <p id="ob-tenant-msg" style="font-size:12.5px;margin-top:8px;"></p>
@@ -604,10 +604,10 @@
       <h3 style="font-size:14px;margin-bottom:10px;">5. Import massif (immeubles + unités + locataires)</h3>
       <p style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">Pour ajouter 50 à 500 portes d'un coup au lieu de remplir le formulaire ci-dessus une unité à la fois. Fichier CSV avec ces colonnes (dans cet ordre) : <code>address,unit_number,unit_type,rent,tenant_full_name,tenant_email,tenant_phone,lease_start_date,monthly_rent</code>. Seules <code>address</code> et <code>unit_number</code> sont obligatoires — laisse les colonnes locataire vides pour une unité vacante. Les immeubles/unités déjà existants (même adresse, même numéro) ne sont jamais dupliqués — relancer le même fichier deux fois est sans danger.</p>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Propriétaire</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="bulk-import-owner">Propriétaire</label>
           <select id="bulk-import-owner" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir —</option></select>
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Fichier CSV</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="bulk-import-file">Fichier CSV</label>
           <input type="file" id="bulk-import-file" accept=".csv" style="padding:6px;border:1px solid var(--line);">
         </div>
         <div><label style="display:block;font-size:11px;color:var(--muted);"><input type="checkbox" id="bulk-import-send-emails"> Envoyer un courriel de bienvenue aux locataires avec un courriel renseigné</label></div>
@@ -657,15 +657,15 @@
     <h1 style="margin-top:40px;font-size:22px;">Automatisations (Studio)</h1>
     <p class="subtitle" style="margin-bottom:16px;">Fondation du moteur de règles — déclencheurs déterministes seulement (pas d'IA dans ce moteur). Chaque règle se déclenche une seule fois par dossier concerné, jamais en boucle.</p>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom de la règle</label><input type="text" id="ar-name" placeholder="Ex: Alerte retard 5 jours" style="padding:8px;border:1px solid var(--line);width:220px;"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Déclencheur</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ar-name">Nom de la règle</label><input type="text" id="ar-name" placeholder="Ex: Alerte retard 5 jours" style="padding:8px;border:1px solid var(--line);width:220px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ar-trigger">Déclencheur</label>
         <select id="ar-trigger" style="padding:8px;border:1px solid var(--line);">
           <option value="retard_loyer">Loyer en retard depuis N jours</option>
           <option value="bail_echeance">Bail se terminant dans N jours</option>
         </select>
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">N (jours)</label><input type="number" id="ar-threshold" value="5" style="padding:8px;border:1px solid var(--line);width:70px;"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Action</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ar-threshold">N (jours)</label><input type="number" id="ar-threshold" value="5" style="padding:8px;border:1px solid var(--line);width:70px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="ar-action">Action</label>
         <select id="ar-action" style="padding:8px;border:1px solid var(--line);" onchange="document.getElementById('ar-message-wrap').style.display = this.value === 'envoyer_rappel_email' ? 'block' : 'none';">
           <option value="notifier_admin">Notifier l'admin (journal d'audit)</option>
           <option value="envoyer_rappel_email">Envoyer un courriel au locataire</option>
@@ -673,7 +673,7 @@
       </div>
       <button onclick="createAutomationRule()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Créer la règle</button>
       <div id="ar-message-wrap" style="display:none;width:100%;">
-        <label style="display:block;font-size:11px;color:var(--muted);margin:8px 0 4px;">Message du courriel (rédigé par toi — jamais généré par l'IA)</label>
+        <label style="display:block;font-size:11px;color:var(--muted);margin:8px 0 4px;" for="ar-message">Message du courriel (rédigé par toi — jamais généré par l'IA)</label>
         <textarea id="ar-message" placeholder="Ex: Nous constatons que votre loyer est en retard. Merci de régulariser votre situation ou de nous contacter rapidement." style="width:100%;padding:8px;border:1px solid var(--line);min-height:70px;font-family:'Inter',sans-serif;"></textarea>
       </div>
     </div>
@@ -690,12 +690,12 @@
 
     <h2 style="font-size:16px;margin-bottom:10px;">Incidents de confidentialité</h2>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;">
-      <div style="margin-bottom:10px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description de l'incident</label>
+      <div style="margin-bottom:10px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pi-description">Description de l'incident</label>
         <textarea id="pi-description" style="width:100%;padding:8px;border:1px solid var(--line);min-height:60px;"></textarea>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Catégories touchées</label><input type="text" id="pi-categories" placeholder="Ex: courriels, adresses" style="padding:8px;border:1px solid var(--line);width:200px;"></div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nb. personnes touchées (est.)</label><input type="number" id="pi-count" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pi-categories">Catégories touchées</label><input type="text" id="pi-categories" placeholder="Ex: courriels, adresses" style="padding:8px;border:1px solid var(--line);width:200px;"></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="pi-count">Nb. personnes touchées (est.)</label><input type="number" id="pi-count" style="padding:8px;border:1px solid var(--line);width:100px;"></div>
         <div><label style="display:block;font-size:11px;color:var(--muted);"><input type="checkbox" id="pi-risk"> Risque de préjudice sérieux</label></div>
         <button onclick="logPrivacyIncident()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Consigner l'incident</button>
       </div>
@@ -704,15 +704,15 @@
 
     <h2 style="font-size:16px;margin-bottom:10px;">Demandes d'accès / rectification / suppression</h2>
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:16px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Type</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="dr-type">Type</label>
         <select id="dr-type" style="padding:8px;border:1px solid var(--line);"><option value="access">Accès</option><option value="rectification">Rectification</option><option value="deletion">Suppression</option></select>
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Personne concernée</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="dr-subject-type">Personne concernée</label>
         <select id="dr-subject-type" style="padding:8px;border:1px solid var(--line);"><option value="tenant">Locataire</option><option value="prospect">Prospect</option><option value="owner">Propriétaire</option><option value="worker">Travailleur</option></select>
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">ID du dossier concerné</label><input type="text" id="dr-subject-id" placeholder="UUID" style="padding:8px;border:1px solid var(--line);width:220px;"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Nom du demandeur</label><input type="text" id="dr-requester-name" style="padding:8px;border:1px solid var(--line);"></div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Courriel du demandeur</label><input type="email" id="dr-requester-email" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="dr-subject-id">ID du dossier concerné</label><input type="text" id="dr-subject-id" placeholder="UUID" style="padding:8px;border:1px solid var(--line);width:220px;"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="dr-requester-name">Nom du demandeur</label><input type="text" id="dr-requester-name" style="padding:8px;border:1px solid var(--line);"></div>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="dr-requester-email">Courriel du demandeur</label><input type="email" id="dr-requester-email" style="padding:8px;border:1px solid var(--line);"></div>
       <button onclick="logDataRequest()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Enregistrer la demande</button>
     </div>
     <div id="data-requests-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
@@ -1222,13 +1222,13 @@ function renderOwnersList(owners){
   container.innerHTML = owners.map(o => `
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;padding:10px 0;border-bottom:1px solid var(--line);">
       <div style="min-width:160px;font-size:13px;font-weight:500;">${esc(o.full_name)}${o.company_name ? '<br><span style="color:var(--muted);font-size:11.5px;font-weight:400;">' + esc(o.company_name) + '</span>' : ''}</div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Taux de gestion (%)</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="own-mgmt-${o.id}">Taux de gestion (%)</label>
         <input type="number" id="own-mgmt-${o.id}" value="${o.management_rate ?? 6}" step="0.1" min="0" style="padding:7px;border:1px solid var(--line);width:80px;">
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Taux coordination travaux (%)</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="own-coord-${o.id}">Taux coordination travaux (%)</label>
         <input type="number" id="own-coord-${o.id}" value="${o.work_coordination_rate ?? 10}" step="0.1" min="0" style="padding:7px;border:1px solid var(--line);width:80px;">
       </div>
-      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Plafond de dépenses ($)</label>
+      <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="own-cap-${o.id}">Plafond de dépenses ($)</label>
         <input type="number" id="own-cap-${o.id}" value="${o.spending_cap ?? 300}" step="1" min="0" style="padding:7px;border:1px solid var(--line);width:90px;">
       </div>
       <button onclick="saveOwnerRates('${o.id}')" style="background:var(--ink);color:var(--paper);border:none;padding:8px 14px;font-size:12.5px;cursor:pointer;">Enregistrer</button>
@@ -1867,7 +1867,7 @@ async function loadVisitInquiries(){
       <b style="display:block;margin-bottom:4px;">${esc(i.full_name)} — ${esc(i.units?.buildings?.address) || ''}, unité ${esc(i.units?.unit_number) || ''}</b>
       <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">${esc(i.email)} · ${esc(i.phone) || '—'}${i.message ? ' — ' + esc(i.message) : ''}</span>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Date et heure proposées</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="vi-when-${i.id}">Date et heure proposées</label>
           <input type="datetime-local" id="vi-when-${i.id}" style="padding:8px;border:1px solid var(--line);">
         </div>
         <button onclick="proposeVisit('${i.id}', '${i.unit_id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Proposer cette visite</button>
@@ -2042,22 +2042,22 @@ async function loadWorkersAdmin(){
           : `<button onclick="toggleWorkerActive('${w.id}', false)" style="border:1px solid var(--rust);background:none;color:var(--rust);padding:7px 12px;font-size:11.5px;cursor:pointer;">Désactiver (ne recevra plus de mandats)</button>`}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Requiert RBQ</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wk-req-${w.id}">Requiert RBQ</label>
           <input type="checkbox" id="wk-req-${w.id}" ${w.requires_rbq ? 'checked' : ''}>
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Licence RBQ</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wk-lic-${w.id}">Licence RBQ</label>
           <input type="text" id="wk-lic-${w.id}" value="${esc(w.rbq_license) || ''}" style="padding:8px;border:1px solid var(--line);width:130px;">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Expiration RBQ</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wk-licexp-${w.id}">Expiration RBQ</label>
           <input type="date" id="wk-licexp-${w.id}" value="${w.rbq_license_expiry || ''}" style="padding:8px;border:1px solid var(--line);">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Expiration assurance</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wk-insexp-${w.id}">Expiration assurance</label>
           <input type="date" id="wk-insexp-${w.id}" value="${w.insurance_expiry || ''}" style="padding:8px;border:1px solid var(--line);">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Preuve d'assurance ${w.insurance_document_id ? '(déjà au dossier)' : ''}</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wk-insfile-${w.id}">Preuve d'assurance ${w.insurance_document_id ? '(déjà au dossier)' : ''}</label>
           <input type="file" id="wk-insfile-${w.id}" accept=".pdf,image/*">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Notes</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wk-notes-${w.id}">Notes</label>
           <input type="text" id="wk-notes-${w.id}" value="${esc(w.verification_notes) || ''}" style="padding:8px;border:1px solid var(--line);width:160px;">
         </div>
         <button onclick="saveWorkerVerification('${w.id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Enregistrer la vérification</button>
@@ -2219,7 +2219,7 @@ async function loadLatePaymentsAdmin(){
       </div>
       ${disbursementsHtml}
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px;border-top:1px solid var(--line);padding-top:10px;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Débours externe</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="disb-cat-${p.lease_id}">Débours externe</label>
           <select id="disb-cat-${p.lease_id}" style="padding:7px;border:1px solid var(--line);font-size:12px;">
             <option value="depot_tal">Dépôt TAL</option><option value="huissier">Huissier</option><option value="avocat">Avocat/professionnel</option><option value="autre">Autre</option>
           </select>
@@ -2287,31 +2287,31 @@ async function loadServiceRequestsAdmin(){
         ${sr.ai_risk_if_no_action ? '<b>Risque si non traité :</b> ' + esc(sr.ai_risk_if_no_action) : ''}
       </div>` : ''}
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-top:10px;">
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Travailleur</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sr-worker-${sr.id}">Travailleur</label>
           <select id="sr-worker-${sr.id}" style="padding:8px;border:1px solid var(--line);"><option value="">— Choisir —</option>${workerOptionsHtml()}</select>
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Description du travail</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sr-desc-${sr.id}">Description du travail</label>
           <input type="text" id="sr-desc-${sr.id}" value="${esc(sr.description)}" style="padding:8px;border:1px solid var(--line);width:260px;">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Paie du travailleur ($)</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sr-pay-${sr.id}">Paie du travailleur ($)</label>
           <input type="number" id="sr-pay-${sr.id}" min="0" step="0.01" style="padding:8px;border:1px solid var(--line);width:110px;">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" title="Laisse vide pour le taux du propriétaire (10 % par défaut). Obligatoire à partir de 10 000 $ — le système n'applique jamais de taux par défaut à un gros projet.">Taux coordination (%)</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" title="Laisse vide pour le taux du propriétaire (10 % par défaut). Obligatoire à partir de 10 000 $ — le système n'applique jamais de taux par défaut à un gros projet." for="sr-coordrate-${sr.id}">Taux coordination (%)</label>
           <input type="number" id="sr-coordrate-${sr.id}" min="0" step="0.1" placeholder="10 (défaut)" style="padding:8px;border:1px solid var(--line);width:100px;">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" title="Pour un projet majeur avec forfait négocié plutôt qu'un pourcentage — remplace le taux ci-dessus.">ou forfait coordination ($)</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" title="Pour un projet majeur avec forfait négocié plutôt qu'un pourcentage — remplace le taux ci-dessus." for="sr-coordforfait-${sr.id}">ou forfait coordination ($)</label>
           <input type="number" id="sr-coordforfait-${sr.id}" min="0" step="0.01" placeholder="forfait négocié" style="padding:8px;border:1px solid var(--line);width:120px;">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Rendez-vous proposé</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sr-appt-${sr.id}">Rendez-vous proposé</label>
           <input type="datetime-local" id="sr-appt-${sr.id}" style="padding:8px;border:1px solid var(--line);">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Échéance</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sr-due-${sr.id}">Échéance</label>
           <input type="date" id="sr-due-${sr.id}" style="padding:8px;border:1px solid var(--line);">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Accès au logement</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sr-entry-${sr.id}">Accès au logement</label>
           <input type="text" id="sr-entry-${sr.id}" placeholder="Ex: locataire présent" style="padding:8px;border:1px solid var(--line);width:160px;">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Conditions de facturation</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="sr-billing-${sr.id}">Conditions de facturation</label>
           <input type="text" id="sr-billing-${sr.id}" placeholder="Ex: net 15 jours" style="padding:8px;border:1px solid var(--line);width:150px;">
         </div>
         <button onclick="assignServiceRequest('${sr.id}', '${sr.unit_id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Assigner</button>
@@ -2392,10 +2392,10 @@ async function loadWorkOrdersAdmin(){
         <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Réassigner</label>
           <select onchange="reassignWorkOrder('${wo.id}', this.value)" style="padding:8px;border:1px solid var(--line);"><option value="">—</option>${workerOptionsHtml(wo.worker_id)}</select>
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Coût final réel ($)</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wo-final-${wo.id}">Coût final réel ($)</label>
           <input type="number" id="wo-final-${wo.id}" min="0" step="0.01" value="${wo.estimated_cost ?? ''}" style="padding:8px;border:1px solid var(--line);width:110px;">
         </div>
-        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Facture/reçu (optionnel)</label>
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;" for="wo-receipt-${wo.id}">Facture/reçu (optionnel)</label>
           <input type="file" id="wo-receipt-${wo.id}" accept=".pdf,image/*">
         </div>
         <button onclick="completeWorkOrderAdmin('${wo.id}')" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Marquer complété</button>

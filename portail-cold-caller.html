@@ -14,7 +14,7 @@
   :root{
     --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
     --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
-    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E; --amber:#B98A2E;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#6E6C61; --amber:#B98A2E;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;}
@@ -100,8 +100,8 @@
   <div class="login-box">
     <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
     <div class="sub">Espace prospection téléphonique</div>
-    <div class="f"><label>Courriel</label><input type="email" id="login-email"></div>
-    <div class="f"><label>Mot de passe</label><input type="password" id="login-password"></div>
+    <div class="f"><label for="login-email">Courriel</label><input type="email" id="login-email"></div>
+    <div class="f"><label for="login-password">Mot de passe</label><input type="password" id="login-password"></div>
     <button onclick="handleLogin()">Se connecter</button>
     <p class="login-error" id="login-error"></p>
     <p style="text-align:center;margin-top:12px;"><a href="#" onclick="showResetForm();return false;" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Mot de passe oublié ?</a></p>
@@ -110,7 +110,7 @@
   <div class="login-box" id="reset-box" style="display:none;">
     <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
     <div class="sub">Réinitialiser le mot de passe</div>
-    <div class="f"><label>Courriel</label><input type="email" id="reset-email"></div>
+    <div class="f"><label for="reset-email">Courriel</label><input type="email" id="reset-email"></div>
     <button onclick="sendResetLink()">Envoyer le lien</button>
     <p class="login-error" id="reset-error"></p>
     <p class="login-error" id="reset-success" style="color:var(--sage);"></p>
@@ -120,7 +120,7 @@
   <div class="login-box" id="newpw-box" style="display:none;">
     <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
     <div class="sub">Choisir un nouveau mot de passe</div>
-    <div class="f"><label>Nouveau mot de passe</label><input type="password" id="newpw-value"></div>
+    <div class="f"><label for="newpw-value">Nouveau mot de passe</label><input type="password" id="newpw-value"></div>
     <button onclick="confirmNewPassword()">Confirmer</button>
     <p class="login-error" id="newpw-error"></p>
   </div>

@@ -14,7 +14,7 @@
   :root{
     --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
     --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
-    --rust:#A63D40; --line:#C9C2AE; --muted:#8C8A7E; --amber:#B98A2E;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#6E6C61; --amber:#B98A2E;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;}
@@ -115,8 +115,8 @@
     <div class="config-warning" id="config-warning">
       SUPABASE_URL / SUPABASE_ANON_KEY ne sont pas configurés dans ce fichier — remplace les valeurs en haut du &lt;script&gt; avant de tester la connexion.
     </div>
-    <div class="f"><label>Courriel</label><input type="email" id="login-email"></div>
-    <div class="f"><label>Mot de passe</label><input type="password" id="login-password"></div>
+    <div class="f"><label for="login-email">Courriel</label><input type="email" id="login-email"></div>
+    <div class="f"><label for="login-password">Mot de passe</label><input type="password" id="login-password"></div>
     <button onclick="handleLogin()">Se connecter</button>
     <p class="login-error" id="login-error"></p>
     <p style="text-align:center;margin-top:12px;"><a href="#" onclick="showResetForm();return false;" style="font-size:12.5px;color:var(--muted);text-decoration:underline;">Mot de passe oublié ?</a></p>
@@ -125,7 +125,7 @@
   <div class="login-box" id="reset-box" style="display:none;">
     <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
     <div class="sub">Réinitialiser le mot de passe</div>
-    <div class="f"><label>Courriel</label><input type="email" id="reset-email"></div>
+    <div class="f"><label for="reset-email">Courriel</label><input type="email" id="reset-email"></div>
     <button onclick="sendResetLink()">Envoyer le lien</button>
     <p class="login-error" id="reset-error"></p>
     <p class="login-error" id="reset-success" style="color:var(--sage);"></p>
@@ -135,7 +135,7 @@
   <div class="login-box" id="newpw-box" style="display:none;">
     <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
     <div class="sub">Choisir un nouveau mot de passe</div>
-    <div class="f"><label>Nouveau mot de passe</label><input type="password" id="newpw-value"></div>
+    <div class="f"><label for="newpw-value">Nouveau mot de passe</label><input type="password" id="newpw-value"></div>
     <button onclick="confirmNewPassword()">Confirmer</button>
     <p class="login-error" id="newpw-error"></p>
   </div>
@@ -257,8 +257,8 @@
       <section id="documents" class="section">
         <div class="toolbar"><h2>Documents</h2></div>
         <div class="wo-form open" style="margin-bottom:16px;">
-          <div class="f"><label>Titre</label><input type="text" id="doc-title"></div>
-          <div class="f"><label>Type</label>
+          <div class="f"><label for="doc-title">Titre</label><input type="text" id="doc-title"></div>
+          <div class="f"><label for="doc-type">Type</label>
             <select id="doc-type">
               <option value="bail">Bail</option>
               <option value="mandat">Mandat</option>
@@ -266,12 +266,12 @@
               <option value="rapport">Rapport</option>
             </select>
           </div>
-          <div class="f"><label>Fichier</label><input type="file" id="doc-file"></div>
+          <div class="f"><label for="doc-file">Fichier</label><input type="file" id="doc-file"></div>
           <button onclick="addDocument()" id="doc-submit-btn">Téléverser</button>
           <p class="login-error" id="doc-error"></p>
         </div>
         <div class="wo-form open" style="margin-bottom:16px;">
-          <div class="f" style="flex:1;"><label>Poser une question sur tes documents</label>
+          <div class="f" style="flex:1;"><label for="doc-question">Poser une question sur tes documents</label>
             <input type="text" id="doc-question" placeholder="Ex. : Quand expire l'assurance de cet entrepreneur ?">
           </div>
           <button onclick="askDocuments()" id="doc-ask-btn">Demander</button>
@@ -285,7 +285,7 @@
       <section id="messages" class="section">
         <div class="toolbar"><h2>Messages</h2></div>
         <div id="messages-body" style="margin-bottom:16px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
-        <div class="f"><label>Nouveau message</label><textarea id="message-text" style="width:100%;padding:11px 12px;border:1px solid var(--line);background:var(--paper-2);font-size:13.5px;font-family:'Inter',sans-serif;min-height:80px;"></textarea></div>
+        <div class="f"><label for="message-text">Nouveau message</label><textarea id="message-text" style="width:100%;padding:11px 12px;border:1px solid var(--line);background:var(--paper-2);font-size:13.5px;font-family:'Inter',sans-serif;min-height:80px;"></textarea></div>
         <button class="btn-small" onclick="sendMessage()">Envoyer</button>
       </section>
 
@@ -306,10 +306,10 @@
         <div class="toolbar" style="margin-top:32px;"><h2>Mes renseignements personnels</h2></div>
         <p style="color:var(--muted);font-size:13.5px;margin-bottom:14px;">Demande d'accès à tes renseignements, de rectification ou d'effacement — conformément à la Loi 25. Une réponse te sera communiquée sous 30 jours.</p>
         <div class="wo-form open" style="margin-bottom:16px;">
-          <div class="f"><label>Type de demande</label>
+          <div class="f"><label for="pdr-type">Type de demande</label>
             <select id="pdr-type"><option value="access">Accès à mes renseignements</option><option value="rectification">Rectification</option><option value="deletion">Effacement</option></select>
           </div>
-          <div class="f" style="flex:1;"><label>Précisions (optionnel)</label><input type="text" id="pdr-details" placeholder="Ex. : préciser ce qui doit être corrigé"></div>
+          <div class="f" style="flex:1;"><label for="pdr-details">Précisions (optionnel)</label><input type="text" id="pdr-details" placeholder="Ex. : préciser ce qui doit être corrigé"></div>
           <button onclick="submitPersonalDataRequest()">Envoyer la demande</button>
           <p class="login-error" id="pdr-error"></p>
         </div>
@@ -320,7 +320,7 @@
         <div class="toolbar"><h2>Copilot financier</h2></div>
         <p style="color:var(--muted);font-size:13.5px;margin-bottom:14px;">Pose une question sur tes revenus, tes dépenses ou tes travaux — les réponses sont calculées à partir de tes vraies données des 24 derniers mois, jamais inventées.</p>
         <div class="wo-form open" style="margin-bottom:16px;">
-          <div class="f" style="flex:1;"><label>Ta question</label>
+          <div class="f" style="flex:1;"><label for="copilot-question">Ta question</label>
             <input type="text" id="copilot-question" placeholder="Ex. : Combien j'ai dépensé en plomberie cet été ?" onkeydown="if(event.key==='Enter') askFinances();">
           </div>
           <button onclick="askFinances()" id="copilot-ask-btn">Demander</button>
