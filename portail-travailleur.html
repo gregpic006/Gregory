@@ -19,7 +19,17 @@
   *{box-sizing:border-box;margin:0;padding:0;}
   body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;}
 
-  #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;}
+  #login-screen{min-height:100vh;display:flex;align-items:stretch;justify-content:center;}
+  .login-side{flex:1 1 440px;max-width:480px;background:var(--ink);color:var(--paper);display:flex;flex-direction:column;justify-content:center;padding:60px;}
+  .login-side .side-brand{font-family:'JetBrains Mono',monospace;font-weight:500;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--brass);margin-bottom:26px;}
+  .login-side h2{font-family:'Fraunces',serif;font-weight:600;font-size:27px;line-height:1.25;margin-bottom:14px;}
+  .login-side p{font-size:14px;color:#C9C6BC;line-height:1.6;max-width:36ch;}
+  .login-side ul{margin-top:26px;padding:0;list-style:none;}
+  .login-side li{font-size:13px;color:#C9C6BC;padding:10px 0;border-top:1px solid #33362f;}
+  .login-side li:first-child{border-top:none;}
+  .login-box-wrap{flex:1 1 420px;display:flex;align-items:center;justify-content:center;padding:40px 24px;}
+  @media (max-width:860px){.login-side{display:none;}}
+
   .login-box{width:100%;max-width:340px;padding:36px;background:var(--paper-2);border:1px solid var(--line);}
   .login-box .brand{font-family:'Fraunces',serif;font-weight:600;font-size:22px;margin-bottom:4px;}
   .login-box .sub{font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:24px;}
@@ -110,6 +120,13 @@
 <body>
 
 <div id="login-screen">
+  <div class="login-side">
+    <div class="side-brand">Portail</div>
+    <h2>Des mandats près de chez toi, sans démarchage.</h2>
+    <p>Portail Pro connecte les travailleurs qualifiés aux propriétaires qui ont besoin d'une intervention.</p>
+    <ul><li>Mandats selon ton métier et ta zone</li><li>Premier arrivé, premier servi</li><li>Paiement suivi, historique clair</li></ul>
+  </div>
+  <div class="login-box-wrap">
   <div class="login-box">
     <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:28px;width:auto;display:block;"></a></div>
     <div class="sub">Portail Pro — Espace travailleur</div>
@@ -137,6 +154,7 @@
     <div class="f"><label for="newpw-value">Nouveau mot de passe</label><input type="password" id="newpw-value"></div>
     <button onclick="confirmNewPassword()">Confirmer</button>
     <p class="login-error" id="newpw-error"></p>
+  </div>
   </div>
 </div>
 
