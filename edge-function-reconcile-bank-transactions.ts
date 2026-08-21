@@ -222,12 +222,26 @@ Deno.serve(async (req) => {
       const tenantIdByName = new Map(leases.map((l: any) => [l.tenants?.full_name, l.tenant_id]));
 
       const existingIdsRes = await fetch(`${supabaseUrl}/rest/v1/bank_transactions?owner_id=eq.${owner_id}&select=external_id`, { headers: adminHeaders });
+      if (!existingIdsRes.ok) {
+        // Ne JAMAIS retomber sur un ensemble vide en cas d'échec : le
+        // dédoublonnage de l'import dépend entièrement de cette liste —
+        // un ensemble vide ferait réimporter (et redoubler) tous les
+        // dépôts déjà traités lors d'un import précédent.
+        return new Response(JSON.stringify({ error: "Impossible de vérifier les transactions déjà importées, réessaie." }), { status: 500, headers: corsHeaders });
+      }
       const existingIds = new Set(
-        (await existingIdsRes.json().catch(() => [])).map((r: any) => r.external_id).filter(Boolean),
+        (await existingIdsRes.json()).map((r: any) => r.external_id).filter(Boolean),
       );
 
-      const patchPayment = (id: string, fields: Record<string, unknown>) =>
-        fetch(`${supabaseUrl}/rest/v1/payments?id=eq.${id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify(fields) });
+      // Retourne le succès (.ok) plutôt que de laisser l'appelant présumer
+      // que la mise à jour a réussi — un import bancaire ne doit jamais
+      // marquer un dépôt "matched"/"reversed" si le paiement visé n'a en
+      // fait pas été modifié.
+      const patchPayment = async (id: string, fields: Record<string, unknown>) => {
+        const res = await fetch(`${supabaseUrl}/rest/v1/payments?id=eq.${id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify(fields) });
+        if (!res.ok) console.error(`Failed to patch payment ${id}`, await res.text().catch(() => ""));
+        return res.ok;
+      };
 
       const results = [];
       for (const row of rows) {
@@ -257,16 +271,21 @@ Deno.serve(async (req) => {
           if (reversalMatch) {
             matchedPaymentId = reversalMatch.id;
             const isLate = new Date(reversalMatch.due_date) < new Date();
-            await patchPayment(reversalMatch.id, {
+            const patchOk = await patchPayment(reversalMatch.id, {
               status: isLate ? "late" : "pending",
               paid_date: null,
               amount_received: Math.max(0, Number(reversalMatch.amount_received || reversalMatch.amount) - absAmount),
             });
-            note = `Paiement renversé/rejeté (${absAmount} $) — dossier rouvert automatiquement.`;
-            await notifyAdmins(
-              "Paiement renversé — dossier rouvert",
-              `Un dépôt de ${absAmount} $ a été renversé ou rejeté (${description}). Le paiement correspondant (échéance ${reversalMatch.due_date}) a été remis en statut ${isLate ? "en retard" : "en attente"} automatiquement.`,
-            );
+            if (!patchOk) {
+              matchStatus = "error";
+              note = `Renversement détecté (${absAmount} $) mais la réouverture du dossier a échoué — vérification manuelle requise.`;
+            } else {
+              note = `Paiement renversé/rejeté (${absAmount} $) — dossier rouvert automatiquement.`;
+              await notifyAdmins(
+                "Paiement renversé — dossier rouvert",
+                `Un dépôt de ${absAmount} $ a été renversé ou rejeté (${description}). Le paiement correspondant (échéance ${reversalMatch.due_date}) a été remis en statut ${isLate ? "en retard" : "en attente"} automatiquement.`,
+              );
+            }
           } else {
             note = "Renversement/rejet détecté, mais aucun paiement correspondant trouvé — vérification manuelle requise.";
             await notifyAdmins("Renversement bancaire non identifié", `Un retrait de ${absAmount} $ (${description}) ressemble à un renversement mais ne correspond à aucun paiement payé récemment. Vérification manuelle requise.`);
@@ -311,17 +330,27 @@ Deno.serve(async (req) => {
           if (Math.abs(owed) <= AMOUNT_TOLERANCE) {
             matchStatus = "matched";
             matchedPaymentId = payment.id;
-            await patchPayment(payment.id, { status: "paid", paid_date: txDate, amount_received: totalReceived });
-            candidatePayments = candidatePayments.filter((p) => p.id !== payment.id);
-            if (alreadyReceived > 0) note = `Paiement complété par versements (cumul ${totalReceived} $, ex: colocataires).`;
+            const patchOk = await patchPayment(payment.id, { status: "paid", paid_date: txDate, amount_received: totalReceived });
+            if (!patchOk) {
+              matchStatus = "error";
+              note = "Correspondance trouvée mais la mise à jour du paiement a échoué — vérification manuelle requise.";
+            } else {
+              candidatePayments = candidatePayments.filter((p) => p.id !== payment.id);
+              if (alreadyReceived > 0) note = `Paiement complété par versements (cumul ${totalReceived} $, ex: colocataires).`;
+            }
           } else if (owed > AMOUNT_TOLERANCE) {
             // Reçu partiel — le bail reste en attente, mais le cumul est enregistré
             // pour qu'un second versement (ex: colocataire) puisse le compléter.
             matchStatus = "partial";
             matchedPaymentId = payment.id;
-            await patchPayment(payment.id, { amount_received: totalReceived });
-            payment.amount_received = totalReceived; // reflète le cumul pour une 2e ligne du même import
-            note = `Paiement partiel : ${amount} $ reçu, ${owed.toFixed(2)} $ restant sur ${payment.amount} $.`;
+            const patchOk = await patchPayment(payment.id, { amount_received: totalReceived });
+            if (!patchOk) {
+              matchStatus = "error";
+              note = "Versement partiel détecté mais la mise à jour du paiement a échoué — vérification manuelle requise.";
+            } else {
+              payment.amount_received = totalReceived; // reflète le cumul pour une 2e ligne du même import
+              note = `Paiement partiel : ${amount} $ reçu, ${owed.toFixed(2)} $ restant sur ${payment.amount} $.`;
+            }
           } else {
             // Excédent : vérifier si ça correspond à 2 mois payés d'avance
             const twoMonths = Number(payment.amount) * 2;
@@ -331,16 +360,26 @@ Deno.serve(async (req) => {
             if (nextMonth && Math.abs(amount - twoMonths) <= AMOUNT_TOLERANCE) {
               matchStatus = "matched";
               matchedPaymentId = payment.id;
-              await patchPayment(payment.id, { status: "paid", paid_date: txDate, amount_received: payment.amount });
-              await patchPayment(nextMonth.id, { status: "paid", paid_date: txDate, amount_received: nextMonth.amount });
-              candidatePayments = candidatePayments.filter((p) => p.id !== payment.id && p.id !== nextMonth.id);
-              note = `Ce dépôt couvre 2 échéances (${payment.due_date} et ${nextMonth.due_date}).`;
+              const patchOk1 = await patchPayment(payment.id, { status: "paid", paid_date: txDate, amount_received: payment.amount });
+              const patchOk2 = await patchPayment(nextMonth.id, { status: "paid", paid_date: txDate, amount_received: nextMonth.amount });
+              if (!patchOk1 || !patchOk2) {
+                matchStatus = "error";
+                note = "Ce dépôt couvre 2 échéances mais la mise à jour d'au moins un des deux paiements a échoué — vérification manuelle requise.";
+              } else {
+                candidatePayments = candidatePayments.filter((p) => p.id !== payment.id && p.id !== nextMonth.id);
+                note = `Ce dépôt couvre 2 échéances (${payment.due_date} et ${nextMonth.due_date}).`;
+              }
             } else {
               matchStatus = "overpaid";
               matchedPaymentId = payment.id;
-              await patchPayment(payment.id, { status: "paid", paid_date: txDate, amount_received: totalReceived });
-              candidatePayments = candidatePayments.filter((p) => p.id !== payment.id);
-              note = `Excédent de ${Math.abs(owed).toFixed(2)} $ par rapport au loyer attendu (${payment.amount} $) — possiblement stationnement/garage inclus.`;
+              const patchOk = await patchPayment(payment.id, { status: "paid", paid_date: txDate, amount_received: totalReceived });
+              if (!patchOk) {
+                matchStatus = "error";
+                note = "Excédent détecté mais la mise à jour du paiement a échoué — vérification manuelle requise.";
+              } else {
+                candidatePayments = candidatePayments.filter((p) => p.id !== payment.id);
+                note = `Excédent de ${Math.abs(owed).toFixed(2)} $ par rapport au loyer attendu (${payment.amount} $) — possiblement stationnement/garage inclus.`;
+              }
             }
           }
         } else if (best && best.score >= 75) {
@@ -445,13 +484,21 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
       // réel (ex: colocataires qui paient séparément) disparaît
       // silencieusement du suivi des loyers en retard.
       const paymentStatus = Math.abs(owed) <= AMOUNT_TOLERANCE || owed < -AMOUNT_TOLERANCE ? "paid" : "pending";
-      await fetch(`${supabaseUrl}/rest/v1/payments?id=eq.${payment_id}`, {
+      const paymentPatchRes = await fetch(`${supabaseUrl}/rest/v1/payments?id=eq.${payment_id}`, {
         method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: paymentStatus, paid_date: paymentStatus === "paid" ? tx.transaction_date : null, amount_received: totalReceived }),
       });
-      await fetch(`${supabaseUrl}/rest/v1/bank_transactions?id=eq.${transaction_id}`, {
+      if (!paymentPatchRes.ok) {
+        console.error("Failed to patch payment on confirm_match", await paymentPatchRes.text());
+        return new Response(JSON.stringify({ error: "Impossible de mettre à jour le paiement." }), { status: 500, headers: corsHeaders });
+      }
+      const txPatchRes = await fetch(`${supabaseUrl}/rest/v1/bank_transactions?id=eq.${transaction_id}`, {
         method: "PATCH", headers: adminHeaders,
         body: JSON.stringify({ match_status: "matched", matched_payment_id: payment_id, reconciled_by: userId, reconciled_at: new Date().toISOString() }),
       });
+      if (!txPatchRes.ok) {
+        console.error("Failed to patch bank_transactions on confirm_match", await txPatchRes.text());
+        return new Response(JSON.stringify({ error: "Paiement mis à jour, mais l'enregistrement de la transaction bancaire a échoué." }), { status: 500, headers: corsHeaders });
+      }
       await logAudit("bank_reconciliation.manual_match", "bank_transactions", transaction_id, { payment_id });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
