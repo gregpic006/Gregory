@@ -16,15 +16,16 @@ SaaS de gestion immobilière résidentielle, construit sur Supabase (Postgres + 
 - Tables consultées directement par le navigateur (`owners`, `buildings`, `units`, `tenants`, `leases`, `payments`, `work_orders`, etc.) : policies scopées via des fonctions `security definer` (`auth_owner_id()`, `auth_tenant_id()`, `owned_unit_ids()`, `tenant_unit_ids()`, `auth_is_admin()`, définies vers la ligne 555 de `schema.sql`).
 - Tables sensibles (`prospects`, `job_offers`, `worker_ratings`, `financial_anomalies`, `public_submission_log`, `ai_run_log`...) : RLS activé avec **zéro policy** — verrouillées au `service_role` uniquement. Tout accès passe obligatoirement par une edge function.
 
-**Backend** : 38 Supabase Edge Functions (Deno/TypeScript), chacune un fichier `edge-function-<nom>.ts` à la racine — le nom de la fonction déployée sur Supabase est `<nom>` (sans le préfixe `edge-function-` ni le `.ts`). Trois familles :
+**Backend** : 39 Supabase Edge Functions (Deno/TypeScript), chacune un fichier `edge-function-<nom>.ts` à la racine — le nom de la fonction déployée sur Supabase est `<nom>` (sans le préfixe `edge-function-` ni le `.ts`). Trois familles :
 - Fonctions **admin/rôle-authentifiées** (`ops-api`, `onboarding-api`, `admin-api`, `crm-api`, `caller-api`, `worker-api`, `owner-api`, `privacy-api`, `ask-documents`, `ask-finances`, `flinks-api`, `parse-expense-receipt`, `reconcile-bank-transactions`, `handle-lease-renewal-notice`) : vérifient le JWT en code via `verifySupabaseJwt()` (voir section Sécurité ci-dessous — pas le réglage plateforme `verify_jwt`), vérifient `users.is_admin` (ou l'équivalent propriétaire/locataire/travailleur) via une requête `service_role`, puis exécutent l'action demandée (`body.action`).
 - Fonctions **publiques** (`handle-public-inquiry`, `handle-worker-registration`, `handle-mandat-inquiry`, `handle-public-faq`...) : pas de JWT requis, protégées par un honeypot (champ caché `website`) + limite de débit par IP (table `public_submission_log`).
 - Fonctions **système/cron** (`handle-payment-reminder`, `handle-worker-job-assigned`, `generate-owner-report`, `send-onboarding-reminder`, `dispatch-work-order`...) : déclenchées par des `cron.schedule(...)` définis dans `schema.sql` via `pg_net`.
 
-**Frontend** : 14 fichiers HTML statiques (vanilla JS, aucun framework/bundler) à la racine :
+**Frontend** : 15 fichiers HTML statiques (vanilla JS, aucun framework/bundler) à la racine :
 - `portail-admin.html` — interne, accès complet
 - `portail-proprietaire.html`, `portail-locataire.html`, `portail-cold-caller.html`, `portail-travailleur.html` — un portail par rôle, connectés via Supabase Auth (client JS direct + RLS pour la plupart des lectures/écritures)
 - `index.html`, `pro.html`, `formulaires-gestion-immobiliere.html`, `blog.html` — pages publiques
+- `app.html` — point d'entrée unique de l'app mobile (Capacitor, voir `mobile/README.md`) : connexion puis redirection vers le bon portail selon le rôle (`edge-function-whoami.ts`)
 - `confirmer-reparation.html`, `confirmer-visite.html`, `reponse-travailleur.html`, `signer-bail.html` — pages de confirmation/signature à token à usage unique (pas de compte requis)
 - `politique-de-confidentialite.html`
 

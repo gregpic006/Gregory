@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Portail</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3"></script>
+<style>
+  :root{
+    --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
+    --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#6E6C61;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;line-height:1.5;}
+  #screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;padding-top:max(24px,env(safe-area-inset-top));padding-bottom:max(24px,env(safe-area-inset-bottom));}
+  .box{width:100%;max-width:340px;padding:36px 30px;background:var(--paper-2);border:1px solid var(--line);}
+  .box .brand{font-family:'Fraunces',serif;font-weight:600;font-size:24px;margin-bottom:2px;text-align:center;}
+  .box .sub{font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:26px;text-align:center;}
+  .box label{display:block;font-size:12.5px;font-weight:500;margin-bottom:6px;}
+  .box .f{margin-bottom:14px;}
+  .box input{width:100%;padding:11px 12px;border:1px solid var(--line);background:var(--paper);font-size:14px;font-family:'Inter',sans-serif;}
+  .box input:focus{outline:none;border-color:var(--brass);}
+  .box button{width:100%;background:var(--ink);color:var(--paper);border:none;padding:13px;font-size:14px;font-weight:500;cursor:pointer;margin-top:8px;}
+  .box button:hover{background:var(--brass-dark);}
+  .box button:disabled{opacity:0.6;cursor:default;}
+  .error{color:var(--rust);font-size:13px;margin-top:12px;display:none;text-align:center;}
+  .loading{text-align:center;color:var(--muted);font-size:13.5px;}
+</style>
+</head>
+<body>
+
+<div id="screen">
+  <div class="box" id="login-box">
+    <div class="brand">Portail</div>
+    <div class="sub">Connexion</div>
+    <div class="f"><label for="login-email">Courriel</label><input type="email" id="login-email" autocomplete="username"></div>
+    <div class="f"><label for="login-password">Mot de passe</label><input type="password" id="login-password" autocomplete="current-password"></div>
+    <button onclick="handleLogin()" id="login-btn">Se connecter</button>
+    <p class="error" id="login-error"></p>
+  </div>
+  <div class="box" id="loading-box" style="display:none;">
+    <p class="loading">Redirection vers ton portail...</p>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// L'app mobile "employeur"/admin n'existe pas ici volontairement —
+// seuls propriétaire/locataire/travailleur sont des usages mobile-first
+// (voir edge-function-whoami.ts pour la logique de détection de rôle).
+const PORTAL_BY_ROLE = {
+  owner: 'portail-proprietaire.html',
+  tenant: 'portail-locataire.html',
+  worker: 'portail-travailleur.html',
+};
+
+function showError(msg){
+  const el = document.getElementById('login-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function routeToPortal(){
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(!session) return false;
+
+  document.getElementById('login-box').style.display = 'none';
+  document.getElementById('loading-box').style.display = 'block';
+
+  const { data, error } = await supabaseClient.functions.invoke('whoami');
+  if(error || !data?.role){
+    document.getElementById('loading-box').style.display = 'none';
+    document.getElementById('login-box').style.display = 'block';
+    showError(data?.error || "Ce compte n'est associé à aucun portail. Contacte l'équipe Portail.");
+    await supabaseClient.auth.signOut();
+    return false;
+  }
+  window.location.replace(PORTAL_BY_ROLE[data.role]);
+  return true;
+}
+
+async function handleLogin(){
+  const btn = document.getElementById('login-btn');
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  document.getElementById('login-error').style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Connexion...';
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if(error){
+    btn.disabled = false;
+    btn.textContent = 'Se connecter';
+    showError(error.message);
+    return;
+  }
+  await routeToPortal();
+}
+
+// Une session déjà active (app rouverte, ou session partagée depuis le
+// site web sur le même domaine) saute directement le formulaire.
+routeToPortal();
+</script>
+</body>
+</html>

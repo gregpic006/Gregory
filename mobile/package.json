@@ -1,0 +1,22 @@
+{
+  "name": "portail-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Coquille native (Capacitor) autour des portails web Portail — propriétaire, locataire, travailleur. Ne contient aucune logique métier : tout tourne sur portailgestion.ca (voir ../app.html), exactement comme dans un navigateur.",
+  "scripts": {
+    "add:ios": "npx cap add ios",
+    "add:android": "npx cap add android",
+    "sync": "npx cap sync",
+    "open:ios": "npx cap open ios",
+    "open:android": "npx cap open android",
+    "run:android": "npx cap run android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/ios": "^8.5.0"
+  }
+}

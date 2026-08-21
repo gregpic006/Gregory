@@ -435,8 +435,7 @@ async function handleLogin(){
 
 async function handleSignOut(){
   if(supabaseClient) await supabaseClient.auth.signOut();
-  document.getElementById('app-shell').style.display = 'none';
-  document.getElementById('login-screen').style.display = 'flex';
+  window.location.replace('app.html');
 }
 
 function showLoginError(msg){

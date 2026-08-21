@@ -1,0 +1,10 @@
+{
+  "appId": "ca.portailgestion.app",
+  "appName": "Portail",
+  "webDir": "www",
+  "server": {
+    "url": "https://portailgestion.ca/app.html",
+    "androidScheme": "https",
+    "iosScheme": "https"
+  }
+}
