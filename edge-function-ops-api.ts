@@ -540,10 +540,29 @@ Deno.serve(async (req) => {
 
     if (action === "list_marketplace_listings") {
       const res = await fetch(
-        `${supabaseUrl}/rest/v1/units?marketplace_generated_at=not.is.null&status=in.(available,soon_available)&select=id,unit_type,rent,suggested_rent,marketplace_title,marketplace_description,marketplace_generated_at,marketplace_posted_at,buildings(address)&order=marketplace_generated_at.desc`,
+        `${supabaseUrl}/rest/v1/units?marketplace_generated_at=not.is.null&status=in.(available,soon_available)&select=id,unit_type,rent,suggested_rent,marketplace_title,marketplace_description,marketplace_generated_at,marketplace_posted_at,photo_urls,buildings(address)&order=marketplace_generated_at.desc`,
         { headers: adminHeaders },
       );
       return new Response(JSON.stringify({ listings: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Les photos elles-mêmes sont téléversées directement depuis le
+    // navigateur admin vers le bucket "listing-photos" (RLS admin-only,
+    // voir migration photos_logements) — cette action ne fait que
+    // persister la liste des chemins résultants sur units.photo_urls.
+    if (action === "update_unit_photos") {
+      const { unit_id, photo_urls } = body;
+      if (!unit_id || !Array.isArray(photo_urls)) {
+        return new Response(JSON.stringify({ error: "unit_id et photo_urls (tableau) requis" }), { status: 400, headers: corsHeaders });
+      }
+      const patchRes = await fetch(`${supabaseUrl}/rest/v1/units?id=eq.${unit_id}`, {
+        method: "PATCH", headers: adminHeaders, body: JSON.stringify({ photo_urls }),
+      });
+      if (!patchRes.ok) {
+        return new Response(JSON.stringify({ error: "Échec de la mise à jour des photos" }), { status: 500, headers: corsHeaders });
+      }
+      await logAudit("unit.photos_updated", "units", unit_id, { photo_count: photo_urls.length });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
     if (action === "mark_marketplace_posted") {

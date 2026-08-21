@@ -1979,10 +1979,12 @@ async function copyToClipboard(text, btn){
   }
 }
 
+let marketplaceListingsCache = [];
 async function loadMarketplaceListings(){
   const data = await callOpsApi({ action: 'list_marketplace_listings' });
   const container = document.getElementById('marketplace-listings-body');
   const listings = data?.listings || [];
+  marketplaceListingsCache = listings;
   if(!listings.length){
     container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucune annonce en attente de publication.</p>';
     return;
@@ -1990,10 +1992,26 @@ async function loadMarketplaceListings(){
   container.innerHTML = listings.map(u => {
     const price = u.suggested_rent ?? u.rent;
     const posted = !!u.marketplace_posted_at;
+    const photos = Array.isArray(u.photo_urls) ? u.photo_urls : [];
+    const photosHtml = photos.map(path => `
+        <div style="position:relative;width:88px;height:66px;flex:0 0 auto;">
+          <img src="${SUPABASE_URL}/storage/v1/object/public/listing-photos/${path}" style="width:100%;height:100%;object-fit:cover;border:1px solid var(--line);">
+          <button onclick="removeUnitPhoto('${u.id}', '${path}')" title="Retirer" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--rust);color:#fff;border:none;font-size:12px;line-height:1;cursor:pointer;">×</button>
+        </div>`).join('');
     return `
     <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;">
       <b style="display:block;margin-bottom:4px;">${esc(u.buildings?.address) || ''} ${u.unit_type ? '— ' + esc(u.unit_type) : ''}</b>
       <span style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:8px;">Préparée le ${new Date(u.marketplace_generated_at).toLocaleDateString('fr-CA')} — ${posted ? `<span style="background:#4c7a4c;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">PUBLIÉE</span>` : `<span style="background:#e6a817;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;">À PUBLIER</span>`}</span>
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:11px;color:var(--muted);margin-bottom:6px;">Photos (visibles sur l'annonce publique du site)</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          ${photosHtml}
+          <label style="width:88px;height:66px;flex:0 0 auto;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);cursor:pointer;text-align:center;">
+            + Ajouter<input type="file" accept="image/*" style="display:none;" onchange="uploadUnitPhoto('${u.id}', this)">
+          </label>
+        </div>
+        <p class="upload-note" id="photo-upload-note-${u.id}" style="font-size:11.5px;color:var(--muted);margin-top:4px;display:none;"></p>
+      </div>
       <div style="margin-bottom:8px;">
         <label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Titre</label>
         <div style="display:flex;gap:8px;align-items:center;"><input readonly value="${esc(u.marketplace_title)}" style="flex:1;padding:8px;border:1px solid var(--line);font-size:12.5px;"><button onclick="copyToClipboard(${JSON.stringify(u.marketplace_title || '')}, this)" style="border:1px solid var(--ink);background:none;padding:8px 12px;font-size:11.5px;cursor:pointer;">Copier</button></div>
@@ -2014,6 +2032,47 @@ async function loadMarketplaceListings(){
 async function markMarketplacePosted(unit_id, posted){
   const res = await callOpsApi({ action: 'mark_marketplace_posted', unit_id, posted });
   if(res?.ok){ await loadMarketplaceListings(); }
+}
+
+// Téléversement direct navigateur → bucket "listing-photos" (RLS
+// admin-only), puis persistance du chemin résultant sur units.photo_urls
+// via ops-api — units n'a pas de policy d'écriture directe pour l'admin
+// (voir schema.sql), toute mise à jour passe par une fonction edge.
+async function uploadUnitPhoto(unitId, inputEl){
+  const file = inputEl.files?.[0];
+  if(!file) return;
+  const noteEl = document.getElementById('photo-upload-note-' + unitId);
+  noteEl.style.display = 'block';
+  noteEl.style.color = 'var(--muted)';
+  noteEl.textContent = 'Envoi en cours...';
+
+  const path = `${unitId}/${Date.now()}_${file.name}`;
+  const { error: uploadError } = await supabaseClient.storage.from('listing-photos').upload(path, file);
+  if(uploadError){
+    noteEl.style.color = 'var(--rust)';
+    noteEl.textContent = "Erreur lors de l'envoi : " + uploadError.message;
+    inputEl.value = '';
+    return;
+  }
+  const current = marketplaceListingsCache.find(u => u.id === unitId);
+  const photo_urls = [...(Array.isArray(current?.photo_urls) ? current.photo_urls : []), path];
+  const res = await callOpsApi({ action: 'update_unit_photos', unit_id: unitId, photo_urls });
+  if(res?.ok){ await loadMarketplaceListings(); }
+  else {
+    noteEl.style.color = 'var(--rust)';
+    noteEl.textContent = res?.error || "Erreur lors de l'enregistrement.";
+  }
+}
+
+async function removeUnitPhoto(unitId, path){
+  if(!confirm('Retirer cette photo de l\'annonce ?')) return;
+  const current = marketplaceListingsCache.find(u => u.id === unitId);
+  const photo_urls = (Array.isArray(current?.photo_urls) ? current.photo_urls : []).filter(p => p !== path);
+  const res = await callOpsApi({ action: 'update_unit_photos', unit_id: unitId, photo_urls });
+  if(res?.ok){
+    await supabaseClient.storage.from('listing-photos').remove([path]).catch(() => null);
+    await loadMarketplaceListings();
+  }
 }
 
 async function loadWorkersAdmin(){

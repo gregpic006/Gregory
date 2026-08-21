@@ -191,7 +191,7 @@ async function testPublicListingsScopedCorrectly() {
 }
 
 // ---- 6. Stockage (documents, photos) : la clé anon ne doit lister aucun fichier ----
-const STORAGE_BUCKETS = ["documents", "service-request-photos"];
+const STORAGE_BUCKETS = ["documents", "service-request-photos", "listing-photos"];
 
 async function testStorageBucketsNotListableByAnon() {
   for (const bucket of STORAGE_BUCKETS) {

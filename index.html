@@ -355,7 +355,7 @@ async function loadLogements(){
   const list = document.getElementById('listings');
   const { data: units, error } = await supabaseClient
     .from('units')
-    .select('id, unit_number, unit_type, rent, status, listing_description, buildings(address), leases(end_date, status)')
+    .select('id, unit_number, unit_type, rent, status, listing_description, photo_urls, buildings(address), leases(end_date, status)')
     .in('status', ['available', 'soon_available']);
 
   if(error || !units || !units.length){
@@ -371,11 +371,16 @@ async function loadLogements(){
       const activeLease = (u.leases || []).find(l => l.status === 'active' || l.status === 'renewed');
       dispo = activeLease?.end_date || 'À confirmer';
     }
+    const photo = Array.isArray(u.photo_urls) && u.photo_urls[0]
+      ? `${SUPABASE_URL}/storage/v1/object/public/listing-photos/${u.photo_urls[0]}`
+      : null;
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
       <span class="badge">${statut}</span>
-      <div class="thumb">Photo à venir</div>
+      ${photo
+        ? `<img class="thumb" src="${photo}" alt="${esc(u.unit_type) || 'Logement'} — ${esc(u.buildings?.address) || ''}" style="width:100%;height:150px;object-fit:cover;display:block;">`
+        : `<div class="thumb">Photo à venir</div>`}
       <div class="body">
         <h3>${esc(u.unit_type) || ''} — Unité ${esc(u.unit_number)}</h3>
         <p class="addr">${esc(u.buildings?.address) || ''}</p>
