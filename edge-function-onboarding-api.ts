@@ -733,9 +733,13 @@ Deno.serve(async (req) => {
         const existingRes = await fetch(`${supabaseUrl}/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=id`, { headers: adminHeaders });
         const [existingUser] = await existingRes.json().catch(() => [null]);
         if (existingUser) {
-          await fetch(`${supabaseUrl}/auth/v1/admin/users/${existingUser.id}`, {
+          const updateRes = await fetch(`${supabaseUrl}/auth/v1/admin/users/${existingUser.id}`, {
             method: "PUT", headers: adminHeaders, body: JSON.stringify({ password, email_confirm: true }),
           });
+          if (!updateRes.ok) {
+            const errData = await updateRes.json().catch(() => ({}));
+            throw new Error(errData.msg || errData.error_description || `Impossible de réinitialiser le mot de passe pour ${email}`);
+          }
           return { id: existingUser.id, password };
         }
         const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
