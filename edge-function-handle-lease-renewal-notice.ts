@@ -220,7 +220,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
         }),
       });
 
-      await fetch(`${supabaseUrl}/rest/v1/leases?id=eq.${lease_id}`, {
+      const noticePatchRes = await fetch(`${supabaseUrl}/rest/v1/leases?id=eq.${lease_id}`, {
         method: "PATCH",
         headers: adminHeaders,
         body: JSON.stringify({
@@ -233,6 +233,10 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
           renewal_signature_token: notice_type !== "non_renouvellement" ? signatureToken : null,
         }),
       });
+      if (!noticePatchRes.ok) {
+        console.error("Failed to record renewal notice on lease", await noticePatchRes.text());
+        return new Response(JSON.stringify({ error: "Avis envoyé, mais l'enregistrement sur le bail a échoué." }), { status: 500, headers: corsHeaders });
+      }
 
       await logAudit("lease_renewal.notice_sent", lease_id, { notice_type, new_rent_amount: new_rent_amount || null });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
@@ -271,11 +275,15 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
           }
         }
       }
-      await fetch(`${supabaseUrl}/rest/v1/leases?id=eq.${lease_id}`, {
+      const responsePatchRes = await fetch(`${supabaseUrl}/rest/v1/leases?id=eq.${lease_id}`, {
         method: "PATCH",
         headers: adminHeaders,
         body: JSON.stringify(leasePatch),
       });
+      if (!responsePatchRes.ok) {
+        console.error("Failed to record renewal response on lease", await responsePatchRes.text());
+        return new Response(JSON.stringify({ error: "Impossible d'enregistrer la réponse sur le bail." }), { status: 500, headers: corsHeaders });
+      }
       await logAudit("lease_renewal.response_recorded", lease_id, { renewal_response, renewal_signed, renewal_response_note });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }

@@ -137,11 +137,15 @@ Deno.serve(async (req) => {
       }
 
       // renewal_signature_token remis à null : invalide définitivement ce lien.
-      await fetch(`${supabaseUrl}/rest/v1/leases?id=eq.${lease_id}`, {
+      const leasePatchRes = await fetch(`${supabaseUrl}/rest/v1/leases?id=eq.${lease_id}`, {
         method: "PATCH",
         headers: adminHeaders,
         body: JSON.stringify(leasePatch),
       });
+      if (!leasePatchRes.ok) {
+        console.error("Failed to apply lease renewal terms", await leasePatchRes.text());
+        return new Response(JSON.stringify({ error: "Signature enregistrée, mais l'application des nouvelles conditions a échoué. Contacte l'équipe Portail." }), { status: 500, headers: corsHeaders });
+      }
 
       await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
         method: "POST",
