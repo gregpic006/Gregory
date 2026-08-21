@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portail — Blog</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png">
+<meta name="description" content="Articles de l'équipe Portail sur la gestion immobilière résidentielle au Québec.">
+<meta property="og:title" content="Portail — Blog">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3"></script>
+<style>
+  :root{
+    --ink:#1F2421; --paper:#F5F1E8; --paper-2:#EDE7D8;
+    --brass:#B08D57; --brass-dark:#8A6B3E; --sage:#5F7355;
+    --rust:#A63D40; --line:#C9C2AE; --muted:#6E6C61;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;line-height:1.55;}
+  a{color:inherit;}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 28px;}
+
+  header{position:sticky;top:0;background:var(--paper);border-bottom:1px solid var(--ink);z-index:30;}
+  nav{display:flex;justify-content:space-between;align-items:center;padding:16px 0;flex-wrap:wrap;gap:10px;}
+  .brand{font-family:'Fraunces',serif;font-weight:600;font-size:20px;letter-spacing:-0.01em;line-height:1.15;}
+  .navlinks{display:flex;gap:20px;font-size:13.5px;align-items:center;flex-wrap:wrap;}
+  .navlinks a{text-decoration:none;border-bottom:1px solid transparent;transition:border-color .15s;white-space:nowrap;}
+  .navlinks a:hover{border-color:var(--brass);}
+  .navlinks a.current{border-color:var(--brass-dark);color:var(--brass-dark);}
+  .nav-toggle{display:none;flex-direction:column;justify-content:center;gap:5px;width:38px;height:38px;background:none;border:1px solid var(--ink);cursor:pointer;padding:0;flex-shrink:0;}
+  .nav-toggle span{display:block;height:2px;margin:0 9px;background:var(--ink);}
+  @media(max-width:780px){
+    .nav-toggle{display:flex;}
+    .navlinks{display:none;width:100%;flex-direction:column;align-items:stretch;gap:0;}
+    .navlinks.open{display:flex;}
+    .navlinks a{padding:13px 0;border-bottom:1px solid var(--line);}
+  }
+
+  .page-head{padding:56px 0 40px;border-bottom:1px solid var(--line);}
+  .page-head .eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--brass-dark);margin-bottom:14px;}
+  .page-head h1{font-family:'Fraunces',serif;font-weight:600;font-size:clamp(30px,4.2vw,44px);letter-spacing:-0.01em;margin-bottom:12px;}
+  .page-head p{color:var(--muted);font-size:15px;max-width:520px;}
+
+  section{padding:48px 0 80px;}
+  .posts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;}
+  .post-card{background:var(--paper-2);border:1px solid var(--line);text-decoration:none;color:inherit;display:block;transition:transform .15s;}
+  .post-card:hover{transform:translateY(-3px);}
+  .post-card .thumb{height:160px;background:linear-gradient(135deg,var(--line),var(--paper-2));display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;}
+  .post-card .thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+  .post-card .body{padding:20px;}
+  .post-card .meta{font-family:'JetBrains Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);margin-bottom:10px;}
+  .post-card h2{font-family:'Fraunces',serif;font-weight:600;font-size:19px;margin-bottom:8px;}
+  .post-card p{font-size:13.5px;color:var(--muted);}
+
+  .article-head{padding:56px 0 32px;border-bottom:1px solid var(--line);}
+  .article-head a.back{display:inline-block;font-size:12.5px;color:var(--muted);text-decoration:none;margin-bottom:22px;}
+  .article-head a.back:hover{color:var(--brass-dark);}
+  .article-head .meta{font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--brass-dark);margin-bottom:14px;}
+  .article-head h1{font-family:'Fraunces',serif;font-weight:600;font-size:clamp(28px,4vw,40px);letter-spacing:-0.01em;}
+  .article-cover{width:100%;max-height:420px;object-fit:cover;display:block;margin-top:32px;}
+  .article-body{max-width:680px;margin:40px auto 0;padding:0 28px;font-size:16px;line-height:1.75;}
+  .article-body p{margin-bottom:22px;}
+
+  footer{border-top:1px solid var(--line);background:var(--paper-2);padding:28px 0;}
+  footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;font-size:12.5px;color:var(--muted);}
+</style>
+</head>
+<body>
+
+<header>
+  <nav class="wrap">
+    <div class="brand"><a href="index.html" style="display:inline-block;"><img src="assets/logo.png" alt="Portail — Gestion immobilière" style="height:34px;width:auto;display:block;"></a></div>
+    <button class="nav-toggle" onclick="toggleMobileNav()" aria-label="Menu" aria-expanded="false" aria-controls="navlinks"><span></span><span></span><span></span></button>
+    <div class="navlinks" id="navlinks">
+      <a href="index.html">Accueil</a>
+      <a href="index.html#tarification">Tarification</a>
+      <a href="index.html#apropos">À propos</a>
+      <a href="blog.html" class="current">Blog</a>
+    </div>
+  </nav>
+</header>
+
+<div id="list-view">
+  <div class="page-head">
+    <div class="wrap">
+      <p class="eyebrow">Blog</p>
+      <h1>Articles de l'équipe Portail</h1>
+      <p>Gestion immobilière, entretien, droits et obligations des propriétaires et locataires au Québec.</p>
+    </div>
+  </div>
+  <section class="wrap">
+    <div id="posts-list" class="posts-grid"><p style="color:var(--muted);font-size:14px;">Chargement...</p></div>
+  </section>
+</div>
+
+<div id="article-view" style="display:none;">
+  <div class="article-head">
+    <div class="wrap">
+      <a class="back" href="blog.html">&larr; Tous les articles</a>
+      <p class="meta" id="article-meta"></p>
+      <h1 id="article-title"></h1>
+    </div>
+  </div>
+  <img id="article-cover" class="article-cover" style="display:none;">
+  <div class="article-body" id="article-body"></div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>Portail — gestion immobilière · Grande région de Québec</span>
+    <span><a href="index.html">Retour à l'accueil</a></span>
+  </div>
+</footer>
+
+<script>
+const SUPABASE_URL = 'https://kdmwfbcziokygfcmjxeq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XJTO7hD6WHG9uK7Sg7LNDg_MM46QALR';
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+function esc(s){ const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+function toggleMobileNav(){
+  const nav = document.getElementById('navlinks');
+  const btn = document.querySelector('.nav-toggle');
+  const isOpen = nav.classList.toggle('open');
+  btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+}
+
+function coverUrl(path){
+  return path ? `${SUPABASE_URL}/storage/v1/object/public/blog-photos/${path}` : null;
+}
+
+async function loadPostsList(){
+  const { data: posts, error } = await supabaseClient
+    .from('blog_posts')
+    .select('title, slug, excerpt, cover_photo_path, author_name, published_at')
+    .eq('status', 'published')
+    .order('published_at', { ascending: false });
+
+  const list = document.getElementById('posts-list');
+  if(error || !posts || !posts.length){
+    list.innerHTML = '<p style="color:var(--muted);font-size:14px;">Aucun article publié pour le moment. Revenez bientôt !</p>';
+    return;
+  }
+  list.innerHTML = '';
+  posts.forEach(p => {
+    const cover = coverUrl(p.cover_photo_path);
+    const card = document.createElement('a');
+    card.className = 'post-card';
+    card.href = `blog.html?article=${encodeURIComponent(p.slug)}`;
+    card.innerHTML = `
+      ${cover ? `<div class="thumb"><img src="${cover}" alt=""></div>` : `<div class="thumb">Portail</div>`}
+      <div class="body">
+        <div class="meta">${p.published_at ? new Date(p.published_at).toLocaleDateString('fr-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : ''} — ${esc(p.author_name)}</div>
+        <h2>${esc(p.title)}</h2>
+        ${p.excerpt ? `<p>${esc(p.excerpt)}</p>` : ''}
+      </div>`;
+    list.appendChild(card);
+  });
+}
+
+async function loadArticle(slug){
+  document.getElementById('list-view').style.display = 'none';
+  document.getElementById('article-view').style.display = 'block';
+
+  const { data: post, error } = await supabaseClient
+    .from('blog_posts')
+    .select('title, body, excerpt, cover_photo_path, author_name, published_at')
+    .eq('slug', slug)
+    .eq('status', 'published')
+    .single();
+
+  if(error || !post){
+    document.getElementById('article-title').textContent = 'Article introuvable';
+    document.getElementById('article-body').innerHTML = '<p>Cet article n\'existe pas ou n\'est plus publié.</p>';
+    return;
+  }
+
+  document.title = `${post.title} — Portail Blog`;
+  document.getElementById('article-meta').textContent = `${post.published_at ? new Date(post.published_at).toLocaleDateString('fr-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : ''} — ${post.author_name || ''}`;
+  document.getElementById('article-title').textContent = post.title;
+  const coverEl = document.getElementById('article-cover');
+  const cover = coverUrl(post.cover_photo_path);
+  if(cover){
+    coverEl.src = cover;
+    coverEl.alt = post.title;
+    coverEl.style.display = 'block';
+  }
+  const paragraphs = (post.body || '').split(/\n\s*\n/).filter(p => p.trim());
+  document.getElementById('article-body').innerHTML = paragraphs.map(p => `<p>${esc(p.trim())}</p>`).join('');
+}
+
+const params = new URLSearchParams(window.location.search);
+const articleSlug = params.get('article');
+if(articleSlug){
+  loadArticle(articleSlug);
+} else {
+  loadPostsList();
+}
+</script>
+</body>
+</html>

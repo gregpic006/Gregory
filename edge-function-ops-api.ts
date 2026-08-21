@@ -565,6 +565,89 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 
+    // ============ ARTICLES / BLOGUE ============
+    if (action === "list_blog_posts") {
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/blog_posts?select=*&order=created_at.desc`,
+        { headers: adminHeaders },
+      );
+      return new Response(JSON.stringify({ posts: await res.json() }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "create_blog_post") {
+      const { title, slug, excerpt, body: postBody, cover_photo_path, author_name, status } = body;
+      if (!title || !slug || !postBody) {
+        return new Response(JSON.stringify({ error: "title, slug et body requis" }), { status: 400, headers: corsHeaders });
+      }
+      const publishNow = status === "published";
+      const insertRes = await fetch(`${supabaseUrl}/rest/v1/blog_posts`, {
+        method: "POST",
+        headers: { ...adminHeaders, Prefer: "return=representation" },
+        body: JSON.stringify({
+          title, slug, excerpt: excerpt || null, body: postBody,
+          cover_photo_path: cover_photo_path || null,
+          author_name: author_name || "L'équipe Portail",
+          status: publishNow ? "published" : "draft",
+          published_at: publishNow ? new Date().toISOString() : null,
+        }),
+      });
+      if (!insertRes.ok) {
+        const errText = await insertRes.text().catch(() => "");
+        const dup = errText.includes("duplicate key") || errText.includes("blog_posts_slug_key");
+        return new Response(JSON.stringify({ error: dup ? "Ce slug existe déjà — choisis-en un autre." : "Échec de la création de l'article." }), { status: 400, headers: corsHeaders });
+      }
+      const [newPost] = await insertRes.json();
+      await logAudit("blog_post.create", "blog_posts", newPost?.id ?? null, { title, status: publishNow ? "published" : "draft" });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "update_blog_post") {
+      const { post_id, title, slug, excerpt, body: postBody, cover_photo_path, author_name, status } = body;
+      if (!post_id) {
+        return new Response(JSON.stringify({ error: "post_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      // published_at ne se met à jour que lors de la TRANSITION vers
+      // "published" (première publication) — republier après édition ne
+      // doit pas faire remonter l'article comme s'il était nouveau.
+      const currentRes = await fetch(`${supabaseUrl}/rest/v1/blog_posts?id=eq.${post_id}&select=status,published_at`, { headers: adminHeaders });
+      const [current] = await currentRes.json().catch(() => [null]);
+      const patch: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      };
+      if (title !== undefined) patch.title = title;
+      if (slug !== undefined) patch.slug = slug;
+      if (excerpt !== undefined) patch.excerpt = excerpt || null;
+      if (postBody !== undefined) patch.body = postBody;
+      if (cover_photo_path !== undefined) patch.cover_photo_path = cover_photo_path || null;
+      if (author_name !== undefined) patch.author_name = author_name;
+      if (status !== undefined) {
+        patch.status = status;
+        if (status === "published" && current?.status !== "published") {
+          patch.published_at = new Date().toISOString();
+        }
+      }
+      const patchRes = await fetch(`${supabaseUrl}/rest/v1/blog_posts?id=eq.${post_id}`, {
+        method: "PATCH", headers: adminHeaders, body: JSON.stringify(patch),
+      });
+      if (!patchRes.ok) {
+        const errText = await patchRes.text().catch(() => "");
+        const dup = errText.includes("duplicate key") || errText.includes("blog_posts_slug_key");
+        return new Response(JSON.stringify({ error: dup ? "Ce slug existe déjà — choisis-en un autre." : "Échec de la mise à jour de l'article." }), { status: 400, headers: corsHeaders });
+      }
+      await logAudit("blog_post.update", "blog_posts", post_id, { status: status ?? current?.status });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (action === "delete_blog_post") {
+      const { post_id } = body;
+      if (!post_id) {
+        return new Response(JSON.stringify({ error: "post_id requis" }), { status: 400, headers: corsHeaders });
+      }
+      await fetch(`${supabaseUrl}/rest/v1/blog_posts?id=eq.${post_id}`, { method: "DELETE", headers: adminHeaders });
+      await logAudit("blog_post.delete", "blog_posts", post_id, {});
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
     if (action === "mark_marketplace_posted") {
       const { unit_id, posted } = body;
       if (!unit_id) {

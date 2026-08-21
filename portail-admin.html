@@ -151,6 +151,7 @@
       <button class="tab-btn" data-tab="crm" onclick="showTab('crm')">CRM propriétaires</button>
       <button class="tab-btn" data-tab="callers" onclick="showTab('callers')">Prospecteurs</button>
       <button class="tab-btn" data-tab="marketplace" onclick="showTab('marketplace')">Annonces Marketplace</button>
+      <button class="tab-btn" data-tab="blog" onclick="showTab('blog')">Articles</button>
       <div class="nav-group-label">ADMINISTRATION</div>
       <button class="tab-btn" data-tab="onboarding" onclick="showTab('onboarding')">Onboarding client</button>
       <button class="tab-btn" data-tab="demo-accounts" onclick="showTab('demo-accounts')">Comptes démo</button>
@@ -540,6 +541,38 @@
     <p class="subtitle" style="margin-bottom:16px;">Préparées automatiquement dès qu'un logement devient vacant — Facebook ne permet pas la publication automatique, il ne reste qu'à copier-coller</p>
     <div id="marketplace-listings-body" style="margin-bottom:32px;"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
 
+      </section>
+
+      <section id="blog" class="section">
+    <div class="toolbar"><h1 style="margin-top:40px;font-size:22px;">Articles</h1><button onclick="openBlogForm()" style="background:var(--ink);color:var(--paper);border:none;padding:9px 16px;font-size:12.5px;cursor:pointer;">Nouvel article</button></div>
+    <p class="subtitle" style="margin-bottom:16px;">Publiés sur <a href="blog.html" target="_blank">le blogue public</a>. Un brouillon n'est visible que dans cet onglet.</p>
+
+    <div id="blog-form-box" style="display:none;background:var(--paper-2);border:1px solid var(--line);padding:16px 18px;margin-bottom:24px;">
+      <h2 id="blog-form-title" style="font-size:15px;margin-bottom:14px;">Nouvel article</h2>
+      <input type="hidden" id="blog-post-id">
+      <div style="margin-bottom:10px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Titre</label>
+        <input id="blog-title" type="text" oninput="blogAutoSlug()" style="width:100%;padding:9px;border:1px solid var(--line);font-size:13.5px;"></div>
+      <div style="margin-bottom:10px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Slug (URL — blog.html?article=...)</label>
+        <input id="blog-slug" type="text" oninput="blogSlugManuallyEdited = true" style="width:100%;padding:9px;border:1px solid var(--line);font-size:13.5px;font-family:'JetBrains Mono',monospace;"></div>
+      <div style="margin-bottom:10px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Résumé (optionnel — affiché dans la liste des articles)</label>
+        <textarea id="blog-excerpt" style="width:100%;padding:9px;border:1px solid var(--line);font-size:13.5px;min-height:50px;"></textarea></div>
+      <div style="margin-bottom:10px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Contenu (un paragraphe par ligne vide)</label>
+        <textarea id="blog-body" style="width:100%;padding:9px;border:1px solid var(--line);font-size:13.5px;min-height:220px;font-family:'Inter',sans-serif;"></textarea></div>
+      <div style="margin-bottom:10px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Auteur</label>
+        <input id="blog-author" type="text" value="L'équipe Portail" style="width:280px;padding:9px;border:1px solid var(--line);font-size:13.5px;"></div>
+      <div style="margin-bottom:14px;"><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px;">Photo de couverture</label>
+        <div id="blog-cover-preview" style="margin-bottom:8px;"></div>
+        <input type="file" accept="image/*" id="blog-cover-input" onchange="uploadBlogCover(this)">
+        <p id="blog-cover-note" style="font-size:11.5px;color:var(--muted);margin-top:4px;display:none;"></p></div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="saveBlogPost('draft')" style="background:transparent;color:var(--ink);border:1px solid var(--ink);padding:10px 18px;font-size:13px;cursor:pointer;">Enregistrer le brouillon</button>
+        <button onclick="saveBlogPost('published')" style="background:var(--ink);color:var(--paper);border:none;padding:10px 18px;font-size:13px;cursor:pointer;">Publier</button>
+        <button onclick="closeBlogForm()" style="background:none;color:var(--muted);border:none;padding:10px 18px;font-size:13px;cursor:pointer;">Annuler</button>
+      </div>
+      <p class="error" id="blog-form-error" style="color:var(--rust);font-size:12.5px;margin-top:8px;display:none;"></p>
+    </div>
+
+    <div id="blog-posts-body"><p style="color:var(--muted);font-size:13.5px;">Chargement...</p></div>
       </section>
 
       <section id="onboarding" class="section">
@@ -1652,6 +1685,7 @@ async function loadOps(){
   await loadCompanySettings();
   await loadAutomationRules();
   await loadInvoices();
+  await loadBlogPosts();
 }
 
 async function loadCompanySettings(){
@@ -2073,6 +2107,137 @@ async function removeUnitPhoto(unitId, path){
     await supabaseClient.storage.from('listing-photos').remove([path]).catch(() => null);
     await loadMarketplaceListings();
   }
+}
+
+// ============ ARTICLES / BLOGUE ============
+let blogPostsCache = [];
+let blogCoverPath = null;
+let blogSlugManuallyEdited = false;
+
+function blogStatusLabel(s){ return s === 'published' ? 'Publié' : 'Brouillon'; }
+
+async function loadBlogPosts(){
+  const data = await callOpsApi({ action: 'list_blog_posts' });
+  blogPostsCache = data?.posts || [];
+  const container = document.getElementById('blog-posts-body');
+  if(!blogPostsCache.length){
+    container.innerHTML = '<p style="color:var(--muted);font-size:13.5px;">Aucun article pour le moment.</p>';
+    return;
+  }
+  container.innerHTML = blogPostsCache.map(p => `
+    <div style="background:var(--paper-2);border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:220px;">
+        <b style="display:block;margin-bottom:4px;">${esc(p.title)}</b>
+        <span style="font-size:12px;color:var(--muted);">/${esc(p.slug)} — ${blogStatusLabel(p.status)}${p.published_at ? ' le ' + new Date(p.published_at).toLocaleDateString('fr-CA') : ''} — ${esc(p.author_name)}</span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button onclick="editBlogPost('${p.id}')" style="border:1px solid var(--ink);background:none;padding:7px 12px;font-size:12px;cursor:pointer;">Modifier</button>
+        <button onclick="toggleBlogPostStatus('${p.id}')" style="border:1px solid var(--ink);background:none;padding:7px 12px;font-size:12px;cursor:pointer;">${p.status === 'published' ? 'Dépublier' : 'Publier'}</button>
+        <button onclick="deleteBlogPost('${p.id}')" style="border:1px solid var(--rust);color:var(--rust);background:none;padding:7px 12px;font-size:12px;cursor:pointer;">Supprimer</button>
+      </div>
+    </div>`).join('');
+}
+
+function slugify(s){
+  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+function blogAutoSlug(){
+  if(blogSlugManuallyEdited) return;
+  document.getElementById('blog-slug').value = slugify(document.getElementById('blog-title').value);
+}
+
+function openBlogForm(post){
+  document.getElementById('blog-form-box').style.display = 'block';
+  document.getElementById('blog-form-error').style.display = 'none';
+  blogSlugManuallyEdited = !!post;
+  document.getElementById('blog-form-title').textContent = post ? 'Modifier l\'article' : 'Nouvel article';
+  document.getElementById('blog-post-id').value = post?.id || '';
+  document.getElementById('blog-title').value = post?.title || '';
+  document.getElementById('blog-slug').value = post?.slug || '';
+  document.getElementById('blog-excerpt').value = post?.excerpt || '';
+  document.getElementById('blog-body').value = post?.body || '';
+  document.getElementById('blog-author').value = post?.author_name || "L'équipe Portail";
+  blogCoverPath = post?.cover_photo_path || null;
+  renderBlogCoverPreview();
+  document.getElementById('blog-form-box').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function editBlogPost(id){
+  const post = blogPostsCache.find(p => p.id === id);
+  if(post) openBlogForm(post);
+}
+
+function closeBlogForm(){
+  document.getElementById('blog-form-box').style.display = 'none';
+}
+
+function renderBlogCoverPreview(){
+  const el = document.getElementById('blog-cover-preview');
+  el.innerHTML = blogCoverPath
+    ? `<img src="${SUPABASE_URL}/storage/v1/object/public/blog-photos/${blogCoverPath}" style="width:160px;height:100px;object-fit:cover;border:1px solid var(--line);">`
+    : '';
+}
+
+async function uploadBlogCover(inputEl){
+  const file = inputEl.files?.[0];
+  if(!file) return;
+  const noteEl = document.getElementById('blog-cover-note');
+  noteEl.style.display = 'block';
+  noteEl.style.color = 'var(--muted)';
+  noteEl.textContent = 'Envoi en cours...';
+  const path = `${Date.now()}_${file.name}`;
+  const { error } = await supabaseClient.storage.from('blog-photos').upload(path, file);
+  if(error){
+    noteEl.style.color = 'var(--rust)';
+    noteEl.textContent = "Erreur lors de l'envoi : " + error.message;
+    return;
+  }
+  blogCoverPath = path;
+  renderBlogCoverPreview();
+  noteEl.style.display = 'none';
+  inputEl.value = '';
+}
+
+async function saveBlogPost(status){
+  const post_id = document.getElementById('blog-post-id').value || null;
+  const title = document.getElementById('blog-title').value.trim();
+  const slug = document.getElementById('blog-slug').value.trim();
+  const excerpt = document.getElementById('blog-excerpt').value.trim();
+  const bodyText = document.getElementById('blog-body').value.trim();
+  const author_name = document.getElementById('blog-author').value.trim() || "L'équipe Portail";
+  const errEl = document.getElementById('blog-form-error');
+  errEl.style.display = 'none';
+  if(!title || !slug || !bodyText){
+    errEl.textContent = 'Titre, slug et contenu sont requis.';
+    errEl.style.display = 'block';
+    return;
+  }
+  const payload = { title, slug, excerpt, body: bodyText, author_name, cover_photo_path: blogCoverPath, status };
+  const res = post_id
+    ? await callOpsApi({ action: 'update_blog_post', post_id, ...payload })
+    : await callOpsApi({ action: 'create_blog_post', ...payload });
+  if(res?.ok){
+    closeBlogForm();
+    await loadBlogPosts();
+  } else {
+    errEl.textContent = res?.error || 'Une erreur est survenue.';
+    errEl.style.display = 'block';
+  }
+}
+
+async function toggleBlogPostStatus(id){
+  const post = blogPostsCache.find(p => p.id === id);
+  if(!post) return;
+  const newStatus = post.status === 'published' ? 'draft' : 'published';
+  const res = await callOpsApi({ action: 'update_blog_post', post_id: id, status: newStatus });
+  if(res?.ok){ await loadBlogPosts(); }
+}
+
+async function deleteBlogPost(id){
+  if(!confirm('Supprimer définitivement cet article ?')) return;
+  const res = await callOpsApi({ action: 'delete_blog_post', post_id: id });
+  if(res?.ok){ await loadBlogPosts(); }
 }
 
 async function loadWorkersAdmin(){

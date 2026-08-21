@@ -116,12 +116,12 @@ async function testFlinksSyncAllProtected() {
 // sans JWT d'un usager authentifié — ne doit jamais recevoir une
 // ligne réelle. Liste extraite de schema.sql (`create table`).
 //
-// buildings et units sont volontairement exclues d'ici : elles ont
-// une policy de lecture publique assumée (annonces de logements sur
-// le site, voir index.html loadLogements()) — testées séparément
-// ci-dessous pour vérifier que l'exposition reste bornée à ce qui est
-// vraiment public, plutôt que de faire échouer le test sur un
-// comportement voulu.
+// buildings, units et blog_posts sont volontairement exclues d'ici :
+// elles ont une policy de lecture publique assumée (annonces de
+// logements sur le site, articles publiés du blog) — testées
+// séparément ci-dessous pour vérifier que l'exposition reste bornée à
+// ce qui est vraiment public, plutôt que de faire échouer le test sur
+// un comportement voulu.
 const ALL_TABLES = [
   "ai_run_log", "approvals", "audit_log", "automated_decisions", "automation_rule_runs", "automation_rules",
   "bank_connections", "bank_transactions", "cold_callers", "company_settings",
@@ -190,8 +190,23 @@ async function testPublicListingsScopedCorrectly() {
   }
 }
 
+// blog_posts a une policy de lecture publique volontaire (status =
+// 'published') — RLS filtre déjà les brouillons au niveau des lignes,
+// mais on vérifie ici que ça reste vrai en conditions réelles plutôt
+// que de le supposer.
+async function testBlogPostsScopedCorrectly() {
+  const res = await restRequestAnon("blog_posts?select=id,status");
+  const posts = Array.isArray(res.data) ? res.data : [];
+  const leaked = posts.filter((p) => p.status !== "published");
+  if (res.status === 200 && leaked.length === 0) {
+    record("Articles publics (blog_posts) bornés aux articles publiés", "PASS", `${posts.length} article(s) visible(s)`);
+  } else {
+    record("Articles publics (blog_posts) bornés aux articles publiés", "FAIL", `${leaked.length} article(s) non publié(s) exposé(s) à la clé anon`);
+  }
+}
+
 // ---- 6. Stockage (documents, photos) : la clé anon ne doit lister aucun fichier ----
-const STORAGE_BUCKETS = ["documents", "service-request-photos", "listing-photos"];
+const STORAGE_BUCKETS = ["documents", "service-request-photos", "listing-photos", "blog-photos"];
 
 async function testStorageBucketsNotListableByAnon() {
   for (const bucket of STORAGE_BUCKETS) {
@@ -220,6 +235,7 @@ async function main() {
   await testFlinksSyncAllProtected();
   await testNoRealDataReadableByAnon();
   await testPublicListingsScopedCorrectly();
+  await testBlogPostsScopedCorrectly();
   await testStorageBucketsNotListableByAnon();
   await testHealthCheckReachable();
 

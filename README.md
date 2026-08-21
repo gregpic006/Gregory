@@ -21,10 +21,10 @@ SaaS de gestion immobilière résidentielle, construit sur Supabase (Postgres + 
 - Fonctions **publiques** (`handle-public-inquiry`, `handle-worker-registration`, `handle-mandat-inquiry`, `handle-public-faq`...) : pas de JWT requis, protégées par un honeypot (champ caché `website`) + limite de débit par IP (table `public_submission_log`).
 - Fonctions **système/cron** (`handle-payment-reminder`, `handle-worker-job-assigned`, `generate-owner-report`, `send-onboarding-reminder`, `dispatch-work-order`...) : déclenchées par des `cron.schedule(...)` définis dans `schema.sql` via `pg_net`.
 
-**Frontend** : 13 fichiers HTML statiques (vanilla JS, aucun framework/bundler) à la racine :
+**Frontend** : 14 fichiers HTML statiques (vanilla JS, aucun framework/bundler) à la racine :
 - `portail-admin.html` — interne, accès complet
 - `portail-proprietaire.html`, `portail-locataire.html`, `portail-cold-caller.html`, `portail-travailleur.html` — un portail par rôle, connectés via Supabase Auth (client JS direct + RLS pour la plupart des lectures/écritures)
-- `index.html`, `pro.html`, `formulaires-gestion-immobiliere.html` — pages publiques
+- `index.html`, `pro.html`, `formulaires-gestion-immobiliere.html`, `blog.html` — pages publiques
 - `confirmer-reparation.html`, `confirmer-visite.html`, `reponse-travailleur.html`, `signer-bail.html` — pages de confirmation/signature à token à usage unique (pas de compte requis)
 - `politique-de-confidentialite.html`
 
