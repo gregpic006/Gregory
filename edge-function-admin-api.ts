@@ -127,11 +127,14 @@ Deno.serve(async (req) => {
       if (!signal_id) {
         return new Response(JSON.stringify({ error: "signal_id manquant" }), { status: 400, headers: corsHeaders });
       }
-      await fetch(`${supabaseUrl}/rest/v1/dissatisfaction_signals?id=eq.${signal_id}`, {
+      const resolveRes = await fetch(`${supabaseUrl}/rest/v1/dissatisfaction_signals?id=eq.${signal_id}`, {
         method: "PATCH",
         headers: adminHeaders,
         body: JSON.stringify({ resolved: true, resolved_at: new Date().toISOString(), resolution_note: resolution_note || null }),
       });
+      if (!resolveRes.ok) {
+        return new Response(JSON.stringify({ error: "Impossible de résoudre le signal d'insatisfaction" }), { status: 500, headers: corsHeaders });
+      }
       await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
         method: "POST",
         headers: adminHeaders,
@@ -142,11 +145,14 @@ Deno.serve(async (req) => {
 
     if (body.action === "update_anomaly") {
       const { anomaly_id, status } = body;
-      await fetch(`${supabaseUrl}/rest/v1/financial_anomalies?id=eq.${anomaly_id}`, {
+      const anomalyRes = await fetch(`${supabaseUrl}/rest/v1/financial_anomalies?id=eq.${anomaly_id}`, {
         method: "PATCH",
         headers: adminHeaders,
         body: JSON.stringify({ status }),
       });
+      if (!anomalyRes.ok) {
+        return new Response(JSON.stringify({ error: "Impossible de mettre à jour l'anomalie" }), { status: 500, headers: corsHeaders });
+      }
       await fetch(`${supabaseUrl}/rest/v1/audit_log`, {
         method: "POST",
         headers: adminHeaders,

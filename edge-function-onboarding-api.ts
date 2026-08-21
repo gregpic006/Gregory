@@ -466,6 +466,10 @@ Deno.serve(async (req) => {
           management_rate: management_rate || 6.0, spending_cap: spending_cap || 300,
         }),
       });
+      if (!ownerRes.ok) {
+        console.error("Failed to create owner row", await ownerRes.text());
+        return new Response(JSON.stringify({ error: "Compte de connexion créé, mais la fiche propriétaire n'a pas pu être créée. Contacte le support." }), { status: 500, headers: corsHeaders });
+      }
       const [owner] = await ownerRes.json();
 
       await sendEmail(email, "Bienvenue sur Portail — ton accès propriétaire",
@@ -568,13 +572,21 @@ Deno.serve(async (req) => {
         headers: { ...adminHeaders, Prefer: "return=representation" },
         body: JSON.stringify({ user_id: authUserId, full_name, email: email || null, phone: phone || null }),
       });
+      if (!tenantRes.ok) {
+        console.error("Failed to create tenant row", await tenantRes.text());
+        return new Response(JSON.stringify({ error: "Impossible de créer la fiche locataire." }), { status: 500, headers: corsHeaders });
+      }
       const [tenant] = await tenantRes.json();
 
-      await fetch(`${supabaseUrl}/rest/v1/leases`, {
+      const leaseRes = await fetch(`${supabaseUrl}/rest/v1/leases`, {
         method: "POST",
         headers: adminHeaders,
         body: JSON.stringify({ unit_id, tenant_id: tenant.id, start_date, end_date: end_date || null, monthly_rent, status: "active" }),
       });
+      if (!leaseRes.ok) {
+        console.error("Failed to create lease row", await leaseRes.text());
+        return new Response(JSON.stringify({ error: "Locataire créé mais échec de création du bail." }), { status: 500, headers: corsHeaders });
+      }
 
       await fetch(`${supabaseUrl}/rest/v1/units?id=eq.${unit_id}`, {
         method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "occupied" }),

@@ -307,6 +307,10 @@ Réponds UNIQUEMENT avec un objet JSON valide (rien avant, rien après):
           management_rate: management_rate || 6.0, spending_cap: spending_cap || 300,
         }),
       });
+      if (!ownerRes.ok) {
+        console.error("Failed to create owner row", await ownerRes.text());
+        return new Response(JSON.stringify({ error: "Compte de connexion créé, mais la fiche propriétaire n'a pas pu être créée. Contacte le support." }), { status: 500, headers: corsHeaders });
+      }
       const [owner] = await ownerRes.json();
 
       let emailSent = true;
