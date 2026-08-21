@@ -227,9 +227,13 @@ Deno.serve(async (req) => {
         if (!target) {
           return new Response(JSON.stringify({ error: "Type de sujet non pris en charge pour l'anonymisation" }), { status: 400, headers: corsHeaders });
         }
-        await fetch(`${supabaseUrl}/rest/v1/${target.table}?id=eq.${subject_id}`, {
+        const anonymizeRes = await fetch(`${supabaseUrl}/rest/v1/${target.table}?id=eq.${subject_id}`, {
           method: "PATCH", headers: adminHeaders, body: JSON.stringify(target.patch),
         });
+        if (!anonymizeRes.ok) {
+          console.error(`Failed to anonymize ${target.table}/${subject_id}`, await anonymizeRes.text());
+          return new Response(JSON.stringify({ error: "L'anonymisation a échoué — la demande reste ouverte, réessaie." }), { status: 500, headers: corsHeaders });
+        }
 
         let filesDeleted = 0;
         if (subject_type === "owner") {
@@ -263,10 +267,14 @@ Deno.serve(async (req) => {
           }
         }
 
-        await fetch(`${supabaseUrl}/rest/v1/personal_data_requests?id=eq.${request_id}`, {
+        const fulfilledRes = await fetch(`${supabaseUrl}/rest/v1/personal_data_requests?id=eq.${request_id}`, {
           method: "PATCH", headers: adminHeaders,
           body: JSON.stringify({ status: "fulfilled", handled_by: userId, handled_at: new Date().toISOString(), resolution_note: `Anonymisation appliquée, ${filesDeleted} fichier(s) supprimé(s) du stockage` }),
         });
+        if (!fulfilledRes.ok) {
+          console.error("Failed to mark data request fulfilled", await fulfilledRes.text());
+          return new Response(JSON.stringify({ error: "Anonymisation appliquée, mais la mise à jour du statut de la demande a échoué." }), { status: 500, headers: corsHeaders });
+        }
         await logAudit("data_request.fulfilled", "personal_data_requests", request_id, { request_type, subject_type, subject_id, files_deleted: filesDeleted });
         return new Response(JSON.stringify({ ok: true, action_taken: "anonymized", files_deleted: filesDeleted }), { status: 200, headers: corsHeaders });
       }
