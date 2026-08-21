@@ -138,7 +138,10 @@ Deno.serve(async (req) => {
       if (payout_email !== undefined) patch.payout_email = payout_email || null;
       if (availability_schedule !== undefined && typeof availability_schedule === "object") patch.availability_schedule = availability_schedule;
 
-      await fetch(`${supabaseUrl}/rest/v1/workers?id=eq.${workerId}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify(patch) });
+      const profileRes = await fetch(`${supabaseUrl}/rest/v1/workers?id=eq.${workerId}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify(patch) });
+      if (!profileRes.ok) {
+        return new Response(JSON.stringify({ error: "Impossible de mettre à jour le profil" }), { status: 500, headers: corsHeaders });
+      }
       await logAudit("worker.profile_updated", "workers", workerId, { fields: Object.keys(patch) });
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
@@ -177,9 +180,17 @@ Deno.serve(async (req) => {
         headers: { ...adminHeaders, Prefer: "return=representation" },
         body: JSON.stringify({ worker_id: workerId, title: filename || doc_type, doc_type, file_url: path }),
       });
+      if (!docRes.ok) {
+        console.error("Failed to create document row", await docRes.text());
+        return new Response(JSON.stringify({ error: "Fichier téléversé, mais l'enregistrement du document a échoué." }), { status: 500, headers: corsHeaders });
+      }
       const [doc] = await docRes.json().catch(() => [null]);
       if (doc_type === "assurance_travailleur" && doc?.id) {
-        await fetch(`${supabaseUrl}/rest/v1/workers?id=eq.${workerId}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ insurance_document_id: doc.id }) });
+        const linkRes = await fetch(`${supabaseUrl}/rest/v1/workers?id=eq.${workerId}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ insurance_document_id: doc.id }) });
+        if (!linkRes.ok) {
+          console.error("Failed to link insurance document to worker", await linkRes.text());
+          return new Response(JSON.stringify({ error: "Document enregistré, mais le lien avec le profil a échoué." }), { status: 500, headers: corsHeaders });
+        }
       }
       await logAudit("worker.document_uploaded", "workers", workerId, { doc_type });
       return new Response(JSON.stringify({ ok: true, document_id: doc?.id ?? null }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -219,7 +230,10 @@ Deno.serve(async (req) => {
       if (offer.status !== "sent") {
         return new Response(JSON.stringify({ error: "Cette offre n'est plus active" }), { status: 409, headers: corsHeaders });
       }
-      await fetch(`${supabaseUrl}/rest/v1/job_offers?id=eq.${offer_id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "declined", responded_at: new Date().toISOString() }) });
+      const declineRes = await fetch(`${supabaseUrl}/rest/v1/job_offers?id=eq.${offer_id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "declined", responded_at: new Date().toISOString() }) });
+      if (!declineRes.ok) {
+        return new Response(JSON.stringify({ error: "Impossible d'enregistrer le refus" }), { status: 500, headers: corsHeaders });
+      }
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
     }
 

@@ -276,11 +276,15 @@ Deno.serve(async (req) => {
       }
       const token = await flinksGenerateAuthorizeToken();
       const auth = await flinksAuthorize(token, login_id);
-      await fetch(`${supabaseUrl}/rest/v1/bank_connections`, {
+      const linkRes = await fetch(`${supabaseUrl}/rest/v1/bank_connections`, {
         method: "POST",
         headers: { ...adminHeaders, Prefer: "resolution=merge-duplicates" },
         body: JSON.stringify({ owner_id, flinks_login_id: login_id, institution_name: auth.InstitutionName, status: "active" }),
       });
+      if (!linkRes.ok) {
+        console.error("Failed to save bank_connections row", await linkRes.text());
+        return new Response(JSON.stringify({ error: "La connexion bancaire a été autorisée, mais l'enregistrement a échoué. Réessaie." }), { status: 500, headers: corsHeaders });
+      }
       await logAudit(actorType, actorId, "bank_connection.linked", null, { owner_id, institution_name: auth.InstitutionName });
       return new Response(JSON.stringify({ ok: true, institution_name: auth.InstitutionName }), { status: 200, headers: corsHeaders });
     }
