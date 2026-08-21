@@ -58,6 +58,7 @@
   <div id="form-visite" class="form-panel active">
     <h1>Demander une visite</h1>
     <p class="subtitle">Remplis ce formulaire et notre équipe te contactera pour proposer des créneaux de visite.</p>
+    <div id="unit-context" style="display:none;background:var(--paper-2);border:1px solid var(--line);padding:12px 16px;margin-bottom:20px;font-size:13.5px;"></div>
     <form onsubmit="submitInquiry(event, 'visite')">
       <div class="f"><label for="visite-full_name">Nom complet</label><input id="visite-full_name" type="text" name="full_name" required></div>
       <div class="f"><label for="visite-email">Courriel</label><input id="visite-email" type="email" name="email" required></div>
@@ -132,11 +133,42 @@ const params = new URLSearchParams(window.location.search);
 const unitId = params.get('unit');
 const initialTab = params.get('type') === 'mandat' ? 'mandat' : 'visite';
 
+function esc(s){ const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+// Affiche pour quel logement la visite est demandée — sans ce contexte,
+// une demande de visite arrive sans qu'on sache pour quelle unité, si le
+// lien est partagé/copié sans son paramètre ?unit=.
+async function loadUnitContext(){
+  const box = document.getElementById('unit-context');
+  if(!unitId){
+    box.style.display = 'block';
+    box.innerHTML = '<span style="color:var(--rust);">Aucun logement précisé — si tu réponds à une annonce, utilise le lien "Demander une visite" affiché sur cette annonce pour qu\'on sache de quel logement il s\'agit.</span>';
+    return;
+  }
+  const { data: unit, error } = await supabaseClient
+    .from('units')
+    .select('unit_number, unit_type, rent, buildings(address)')
+    .eq('id', unitId)
+    .single();
+  box.style.display = 'block';
+  if(error || !unit){
+    box.innerHTML = '<span style="color:var(--rust);">Logement introuvable — le lien utilisé n\'est peut-être plus valide.</span>';
+    return;
+  }
+  box.innerHTML = `Visite demandée pour : <b>${esc(unit.unit_type) || 'Logement'} — Unité ${esc(unit.unit_number)}</b><br>${esc(unit.buildings?.address) || ''} — ${Number(unit.rent).toLocaleString('fr-CA')} $/mois`;
+}
+if(initialTab === 'visite') loadUnitContext();
+
+let unitContextLoaded = initialTab === 'visite';
 function showFormTab(tab){
   document.querySelectorAll('.form-panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('form-' + tab).classList.add('active');
   document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
+  if(tab === 'visite' && !unitContextLoaded){
+    unitContextLoaded = true;
+    loadUnitContext();
+  }
 }
 showFormTab(initialTab);
 
