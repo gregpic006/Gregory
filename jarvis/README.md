@@ -380,6 +380,14 @@ date d'un jalon anterieur. Git ne le suit pas (il contient tes secrets), donc
 Les variables manquantes sont ajoutees avec leurs commentaires, et **aucune
 valeur existante n'est modifiee**. `jarvis doctor` signale ce decalage.
 
+**Gmail ou Calendar ne repond pas comme attendu** — lance le diagnostic, il
+teste les API directement, sans passer par le modele :
+`.\\.venv\\Scripts\\python.exe -m jarvis_core.cli check-google`
+Il verifie dans l'ordre : identifiants, compte connecte, feature flags,
+permissions accordees, puis un appel reel a chaque service. Si tout repond
+mais que JARVIS n'utilise pas les donnees, c'est le modele qui n'appelle pas
+l'outil — reformule la demande plus explicitement.
+
 **JARVIS dit « Gmail n'est pas connecte » alors que tu l'as connecte** — le
 jeton n'a pas ete enregistre, ou la cle de chiffrement a change. Panneau
 Integrations : **Deconnecter**, puis **Connecter Google**.

@@ -121,6 +121,29 @@ def _missing_env_keys() -> list[str]:
     return [k for k in parse_keys(example.read_text(encoding="utf-8")) if k not in existing]
 
 
+async def _cmd_check_google(settings: Settings) -> int:
+    """Teste la chaine Google directement, pour distinguer les causes."""
+    import logging
+
+    from jarvis_core.diagnostics import check_google, render
+    from jarvis_core.runtime import build_runtime
+
+    logging.getLogger().setLevel(logging.WARNING)
+    print("Diagnostic Google Workspace\n")
+    runtime = build_runtime(settings)
+    try:
+        failed = render(await check_google(runtime))
+    finally:
+        await runtime.aclose()
+
+    if failed:
+        print("\nCorrige les lignes [ECHEC] ci-dessus.")
+        return 1
+    print("\nTout repond. Si JARVIS n'utilise pas ces donnees, c'est le modele")
+    print("qui n'appelle pas l'outil: reformule ta demande plus explicitement.")
+    return 0
+
+
 def _cmd_doctor(settings: Settings) -> int:
     """Diagnostic de configuration.
 
@@ -254,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("chat", help="conversation en mode texte")
     sub.add_parser("doctor", help="verifie la configuration")
     sub.add_parser("sync-env", help="ajoute a .env les nouvelles variables du modele")
+    sub.add_parser("check-google", help="teste Gmail, Calendar et Contacts")
     sub.add_parser("keygen", help="genere une cle de chiffrement")
 
     args = parser.parse_args(argv)
@@ -267,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(_chat_loop(settings))
     if args.command == "sync-env":
         return _cmd_sync_env()
+    if args.command == "check-google":
+        return asyncio.run(_cmd_check_google(settings))
     if args.command == "doctor":
         return _cmd_doctor(settings)
     if args.command == "serve" or args.command is None:
