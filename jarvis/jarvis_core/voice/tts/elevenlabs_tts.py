@@ -26,6 +26,10 @@ class ElevenLabsTTSProvider(TextToSpeechProvider):
         *,
         voice_id: str,
         model: str = "eleven_turbo_v2_5",
+        stability: float = 0.55,
+        similarity: float = 0.80,
+        style: float = 0.10,
+        speaker_boost: bool = True,
         timeout: float = 30.0,
     ) -> None:
         if not api_key:
@@ -39,6 +43,14 @@ class ElevenLabsTTSProvider(TextToSpeechProvider):
         self._api_key = api_key
         self._voice_id = voice_id
         self._model = model
+        # Le timbre se regle ici, pas dans le code: un assistant pose n'a pas
+        # la meme livraison qu'un narrateur.
+        self._voice_settings = {
+            "stability": max(0.0, min(1.0, stability)),
+            "similarity_boost": max(0.0, min(1.0, similarity)),
+            "style": max(0.0, min(1.0, style)),
+            "use_speaker_boost": speaker_boost,
+        }
         self._client = httpx.AsyncClient(timeout=timeout)
         self.available = True
 
@@ -54,7 +66,7 @@ class ElevenLabsTTSProvider(TextToSpeechProvider):
                 json={
                     "text": text,
                     "model_id": self._model,
-                    "voice_settings": {"stability": 0.45, "similarity_boost": 0.75},
+                    "voice_settings": self._voice_settings,
                 },
             )
             response.raise_for_status()

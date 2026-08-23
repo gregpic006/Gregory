@@ -197,14 +197,18 @@ variables. Les essentielles :
 - `openai` — `gpt-4o-transcribe`, plus rapide et meilleur sur le melange
   francais/anglais. Necessite `OPENAI_API_KEY`.
 
-**Voix (TTS)**
+**Voix (TTS)** — guide complet : **[docs/voice-setup.md](docs/voice-setup.md)**
 
-- `null` (defaut) — le navigateur lit avec la voix du systeme. Gratuit,
-  correct, pas exceptionnel.
-- `elevenlabs` — la voix la plus naturelle et la plus basse latence. Choisis un
-  identifiant de voix masculine dans ton compte et mets-le dans
-  `JARVIS_TTS_ELEVENLABS_VOICE_ID`.
-- `openai` — `gpt-4o-mini-tts`, voix `onyx` (masculine, posee).
+- `null` (defaut) — le navigateur lit avec la voix du systeme. Gratuit. JARVIS
+  choisit automatiquement la meilleure voix francaise installee, en
+  privilegiant les voix « Natural » de Windows.
+- `openai` — `gpt-4o-mini-tts`, voix `onyx` (masculine, posee). ~1 $/mois.
+- `elevenlabs` — le timbre le plus proche du JARVIS des films: masculin,
+  britannique, pose. Latence la plus basse. Timbre reglable via
+  `JARVIS_TTS_STABILITY` et `JARVIS_TTS_STYLE`.
+
+La reponse est synthetisee **phrase par phrase**: JARVIS commence a parler
+pendant que la suite s'ecrit encore.
 
 ### Connecter Gmail et Calendar
 

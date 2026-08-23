@@ -56,8 +56,12 @@ export default function App() {
   const micAvailable =
     recorder.current.supported && (system?.providers.stt_available ?? false);
 
+  const voiceLabel = system?.providers.tts_available
+    ? system.providers.tts
+    : player.current.voiceName();
+
   const bargeIn = useCallback(() => {
-    player.current.stop();
+    player.current.beginTurn();
     socket.current?.send({ type: "cancel" });
   }, []);
 
@@ -89,9 +93,16 @@ export default function App() {
           setMessages((current) => [...current, { id: nextId(), role: "user", text }]);
           break;
         }
-        case "token":
-          appendToken(event.text as string);
+        case "token": {
+          const chunk = event.text as string;
+          appendToken(chunk);
+          // Aucun moteur serveur: on parle des qu'une phrase est complete,
+          // au lieu d'attendre la fin de la reponse.
+          if (!serverVoice.current) {
+            player.current.pushStreamedText(chunk, system?.language ?? "fr-CA");
+          }
           break;
+        }
         case "tool_start":
           setActivity((current) =>
             [
@@ -139,9 +150,9 @@ export default function App() {
           });
           streamingId.current = null;
           if (!event.pending_confirmation) setPending(null);
-          // Aucun moteur de voix serveur: on lit avec la voix du systeme.
+          // Aucun moteur de voix serveur: la voix du systeme termine le tour.
           if (!serverVoice.current) {
-            player.current.speakWithSystemVoice(text, system?.language ?? "fr-CA");
+            player.current.flushStreamedText(text, system?.language ?? "fr-CA");
           }
           void fetchMetrics().then(setMetrics).catch(() => undefined);
           break;
@@ -289,6 +300,7 @@ export default function App() {
         {!micAvailable && <span className="chip">voix desactivee</span>}
         <span className="spacer" />
         <span className="chip">{system?.providers.llm_models.balanced ?? "…"}</span>
+        <span className="chip" title="Voix utilisee pour la reponse">{voiceLabel}</span>
         <span className="chip ok">{system?.timezone ?? ""}</span>
       </header>
 

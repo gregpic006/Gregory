@@ -74,6 +74,13 @@ class Settings(BaseSettings):
     tts_elevenlabs_model: str = Field(
         default="eleven_turbo_v2_5", alias="JARVIS_TTS_ELEVENLABS_MODEL"
     )
+    # Reglages de timbre ElevenLabs. Valeurs par defaut choisies pour une voix
+    # posee: stabilite haute (peu de variation d'intonation), style bas (peu
+    # d'emphase dramatique). C'est ce qui distingue un assistant d'un acteur.
+    tts_stability: float = Field(default=0.55, alias="JARVIS_TTS_STABILITY")
+    tts_similarity: float = Field(default=0.80, alias="JARVIS_TTS_SIMILARITY")
+    tts_style: float = Field(default=0.10, alias="JARVIS_TTS_STYLE")
+    tts_speaker_boost: bool = Field(default=True, alias="JARVIS_TTS_SPEAKER_BOOST")
     tts_openai_model: str = Field(default="gpt-4o-mini-tts", alias="JARVIS_TTS_OPENAI_MODEL")
     tts_openai_voice: str = Field(default="onyx", alias="JARVIS_TTS_OPENAI_VOICE")
 

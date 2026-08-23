@@ -72,6 +72,10 @@ def build_tts(settings: Settings) -> TextToSpeechProvider:
             api_key=settings.elevenlabs_api_key,
             voice_id=settings.tts_elevenlabs_voice_id,
             model=settings.tts_elevenlabs_model,
+            stability=settings.tts_stability,
+            similarity=settings.tts_similarity,
+            style=settings.tts_style,
+            speaker_boost=settings.tts_speaker_boost,
         )
     if settings.tts_provider == "openai":
         from jarvis_core.voice.tts.openai_tts import OpenAITTSProvider
