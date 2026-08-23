@@ -41,10 +41,39 @@ _DAYS_FR = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanc
 
 
 def get_tz(timezone: str) -> ZoneInfo:
+    """Charge un fuseau IANA.
+
+    Windows n'embarque aucune base de fuseaux: `zoneinfo` se rabat sur le
+    paquet `tzdata`. S'il manque, TOUS les fuseaux echouent, pas seulement
+    celui demande - on distingue les deux cas pour donner la bonne consigne.
+    """
     try:
         return ZoneInfo(timezone)
-    except ZoneInfoNotFoundError as exc:  # pragma: no cover - depend de l'OS
-        raise ConfigurationError(f"Fuseau horaire inconnu: {timezone}") from exc
+    except ZoneInfoNotFoundError as exc:
+        if _tzdata_missing():
+            raise ConfigurationError(
+                f"base de fuseaux horaires absente (demande: {timezone})",
+                user_message=(
+                    "La base de fuseaux horaires manque sur cette machine. "
+                    "Installe-la: pip install tzdata"
+                ),
+            ) from exc
+        raise ConfigurationError(
+            f"fuseau horaire inconnu: {timezone}",
+            user_message=(
+                f"Le fuseau horaire '{timezone}' n'existe pas. Corrige "
+                "JARVIS_TIMEZONE dans .env (par exemple America/Montreal)."
+            ),
+        ) from exc
+
+
+def _tzdata_missing() -> bool:
+    """Vrai si aucune base de fuseaux n'est disponible sur le systeme."""
+    try:
+        ZoneInfo("UTC")
+    except ZoneInfoNotFoundError:
+        return True
+    return False
 
 
 def now(timezone: str) -> datetime:

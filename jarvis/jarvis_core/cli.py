@@ -16,6 +16,7 @@ import asyncio
 import sys
 
 from jarvis_core.config import Settings, get_settings
+from jarvis_core.errors import ConfigurationError
 from jarvis_core.logging_setup import setup_logging
 from jarvis_core.security.crypto import SecretBox
 
@@ -83,64 +84,117 @@ async def _chat_loop(settings: Settings) -> int:
 
 
 def _cmd_doctor(settings: Settings) -> int:
+    """Diagnostic de configuration.
+
+    Trois niveaux, volontairement distincts: `ok` (verifie), `info` (absent
+    mais optionnel, JARVIS fonctionne quand meme), `ECHEC` (bloquant). Un
+    echec renvoie un code de sortie non nul, exploitable en script.
+    """
+    import logging
+
     from jarvis_core.runtime import build_runtime
 
-    print("Verification de la configuration JARVIS\n")
-    checks: list[tuple[str, bool, str]] = []
+    # Le diagnostic doit se lire d'un coup d'oeil: on coupe le bruit des logs
+    # applicatifs, on garde les avertissements.
+    logging.getLogger().setLevel(logging.WARNING)
 
-    checks.append(("Fuseau horaire", True, settings.timezone))
+    OK, INFO, FAIL = "ok", "info", "fail"
+    checks: list[tuple[str, str, str]] = []
+
+    print("Verification de la configuration JARVIS\n")
+
+    # -- bloquants -----------------------------------------------------------
+    try:
+        from jarvis_core.timeutils import get_tz
+
+        get_tz(settings.timezone)
+        checks.append(("Fuseau horaire", OK, settings.timezone))
+    except ConfigurationError as exc:
+        checks.append(("Fuseau horaire", FAIL, exc.user_message))
+
+    # -- securite ------------------------------------------------------------
+    if settings.encryption_key:
+        checks.append(("Cle de chiffrement", OK, "definie"))
+    elif settings.is_dev:
+        checks.append(
+            ("Cle de chiffrement", INFO, "absente (cle ephemere, developpement)")
+        )
+    else:
+        checks.append(
+            ("Cle de chiffrement", FAIL, "absente: requise en production (jarvis keygen)")
+        )
+
+    # -- raisonnement --------------------------------------------------------
+    if settings.llm_provider == "anthropic":
+        if settings.anthropic_api_key:
+            checks.append(("Cle Claude", OK, "definie"))
+        else:
+            checks.append(
+                ("Cle Claude", INFO, "absente -> repli sur le moteur local, tres limite")
+            )
+    else:
+        checks.append(("Moteur LLM", INFO, f"{settings.llm_provider} (pas de vrai modele)"))
+
+    # -- voix (optionnelle) --------------------------------------------------
     checks.append(
         (
-            "Cle de chiffrement",
-            bool(settings.encryption_key),
-            "definie" if settings.encryption_key else "absente (cle ephemere en dev)",
+            "Moteur STT",
+            OK if settings.stt_provider != "null" else INFO,
+            settings.stt_provider
+            if settings.stt_provider != "null"
+            else "aucun -> micro desactive, le mode texte fonctionne",
         )
-    )
-    if settings.llm_provider == "anthropic":
-        checks.append(
-            (
-                "Cle Claude",
-                bool(settings.anthropic_api_key),
-                "definie" if settings.anthropic_api_key else "absente -> repli sur le mode local",
-            )
-        )
-    checks.append(
-        ("Moteur STT", settings.stt_provider != "null", settings.stt_provider)
     )
     checks.append(
         (
             "Moteur TTS",
-            settings.tts_provider != "null",
-            f"{settings.tts_provider} (voix du systeme si null)",
+            OK if settings.tts_provider != "null" else INFO,
+            settings.tts_provider
+            if settings.tts_provider != "null"
+            else "aucun -> voix du systeme cote client",
         )
     )
 
+    # -- runtime -------------------------------------------------------------
     try:
         runtime = build_runtime(settings)
-    except Exception as exc:  # noqa: BLE001
-        print(f"  [ECHEC] Construction du runtime: {exc}")
+    except Exception as exc:  # noqa: BLE001 - le diagnostic doit survivre a tout
+        checks.append(("Demarrage", FAIL, str(exc)))
+        _print_checks(checks)
         return 1
 
-    features = settings.feature_map()
-    checks.append(("Base de donnees", True, settings.database_url))
-    checks.append(
-        (
-            "Outils disponibles",
-            True,
-            f"{len(runtime.registry.available(features))} actifs"
-            f" / {len(runtime.registry.all())} declares",
+    try:
+        features = settings.feature_map()
+        checks.append(("Base de donnees", OK, settings.database_url))
+        checks.append(
+            (
+                "Outils disponibles",
+                OK,
+                f"{len(runtime.registry.available(features))} actifs"
+                f" / {len(runtime.registry.all())} declares",
+            )
         )
-    )
+    finally:
+        runtime.db.close()
 
-    ok = True
-    for label, passed, detail in checks:
-        mark = " ok " if passed else "info"
-        ok = ok and (passed or label not in {"Fuseau horaire", "Base de donnees"})
-        print(f"  [{mark}] {label:22} {detail}")
+    failed = _print_checks(checks)
+    if settings.dry_run:
+        print("\nMode developpement: les actions externes sont simulees.")
+    if failed:
+        print("\nCorrige les lignes [ECHEC] avant de lancer JARVIS.")
+        return 1
+    return 0
 
-    runtime.db.close()
-    print("\nMode developpement: les actions externes sont simulees." if settings.dry_run else "")
-    return 0 if ok else 1
+
+def _print_checks(checks: list[tuple[str, str, str]]) -> bool:
+    """Affiche les verifications; retourne vrai si l'une d'elles est bloquante."""
+    marks = {"ok": " ok  ", "info": "info ", "fail": "ECHEC"}
+    failed = False
+    for label, status, detail in checks:
+        if status == "fail":
+            failed = True
+        print(f"  [{marks[status]}] {label:22} {detail}")
+    return failed
 
 
 def main(argv: list[str] | None = None) -> int:

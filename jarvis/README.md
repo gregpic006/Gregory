@@ -353,6 +353,11 @@ Chaque jalon produit quelque chose de testable.
 
 ## Depannage
 
+**« Fuseau horaire inconnu » ou « La base de fuseaux horaires manque »** —
+Windows n'embarque aucune base IANA. Elle vient du paquet `tzdata`, installe
+automatiquement depuis la version 0.1.1. Sur une installation plus ancienne :
+`.\.venv\Scripts\python.exe -m pip install tzdata`
+
 **« ... setup.ps1 ne peut pas etre charge car l'execution de scripts est
 desactivee »** — c'est la protection par defaut de Windows. Lance le script
 ainsi, ca ne change aucun reglage systeme :

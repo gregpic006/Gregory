@@ -1,6 +1,6 @@
 [project]
 name = "jarvis-core"
-version = "0.1.0"
+version = "0.1.1"
 description = "JARVIS - assistant personnel vocal, modulaire et securise"
 requires-python = ">=3.11"
 dependencies = [
@@ -9,6 +9,9 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
     "python-dateutil>=2.9",
+    # Windows n'embarque pas la base de fuseaux IANA; `zoneinfo` la cherche
+    # dans ce paquet. Sans lui, ZoneInfo("America/Montreal") echoue.
+    "tzdata>=2024.1",
     "cryptography>=43",
     "httpx>=0.27",
     "python-multipart>=0.0.9",
