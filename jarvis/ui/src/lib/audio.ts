@@ -64,6 +64,30 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
+const VOICE_PREFERENCE_KEY = "jarvis.voice";
+
+/** Classe les voix: ce qui sonne le mieux d'abord.
+ *
+ * Les voix « Natural » / « Online » de Microsoft sont d'une generation au-dessus
+ * des voix locales historiques. Edge les expose sans rien installer; Chrome ne
+ * les voit pas — d'ou l'ecart de qualite entre les deux navigateurs.
+ */
+function scoreVoice(voice: SpeechSynthesisVoice): number {
+  let points = 0;
+  if (/natural/i.test(voice.name)) points += 100;
+  if (/neural|premium|enhanced|siri/i.test(voice.name)) points += 60;
+  if (/online/i.test(voice.name)) points += 40;
+  // Prenoms masculins des voix francaises courantes (Windows, macOS, Chrome).
+  if (/antoine|thomas|nicolas|henri|claude|paul|jean|remy|daniel|guillaume/i.test(voice.name)) {
+    points += 30;
+  }
+  // Francais canadien d'abord, puis francais de France.
+  if (/fr[-_]ca/i.test(voice.lang)) points += 20;
+  else if (/fr[-_]fr/i.test(voice.lang)) points += 10;
+  if (voice.localService) points -= 5; // souvent les anciennes voix embarquees
+  return points;
+}
+
 /** Lecture de la reponse: audio du serveur, ou voix du systeme en repli.
  *
  * Deux choix gouvernent la fluidite percue.
@@ -135,6 +159,41 @@ export class SpeechPlayer {
     return this.voice?.name ?? "voix par defaut";
   }
 
+  /** Voix francaises disponibles, de la meilleure a la moins bonne. */
+  availableVoices(): { name: string; lang: string; natural: boolean }[] {
+    if (!this.supportsSystemVoice()) return [];
+    return window.speechSynthesis
+      .getVoices()
+      .filter((v) => v.lang.toLowerCase().startsWith("fr"))
+      .sort((a, b) => scoreVoice(b) - scoreVoice(a))
+      .map((v) => ({
+        name: v.name,
+        lang: v.lang,
+        natural: /natural|neural|online/i.test(v.name),
+      }));
+  }
+
+  /** Impose une voix precise. Le choix de l'oreille prime sur mon classement. */
+  setVoice(name: string): void {
+    if (!this.supportsSystemVoice()) return;
+    const found = window.speechSynthesis.getVoices().find((v) => v.name === name);
+    if (!found) return;
+    this.voice = found;
+    this.voiceResolved = true;
+    try {
+      window.localStorage.setItem(VOICE_PREFERENCE_KEY, name);
+    } catch {
+      /* navigation privee: le choix vaut pour la session, sans plus */
+    }
+  }
+
+  /** Fait entendre la voix immediatement, pour comparer sans lancer un tour. */
+  preview(name: string, language = "fr-CA"): void {
+    this.setVoice(name);
+    this.stop();
+    this.speakChunk("Bonsoir Greg. Tout est en place.", language);
+  }
+
   stop(): void {
     this.current?.pause();
     this.current = null;
@@ -164,35 +223,33 @@ export class SpeechPlayer {
     window.speechSynthesis.speak(utterance);
   }
 
-  /** Selectionne la meilleure voix francaise disponible, une fois pour toutes. */
+  /** Retient la meilleure voix francaise, ou celle deja choisie par l'utilisateur. */
   private resolveVoice(): void {
     if (this.voiceResolved || !this.supportsSystemVoice()) return;
     const voices = window.speechSynthesis.getVoices();
     // La liste arrive de facon asynchrone: on retentera au prochain appel.
     if (voices.length === 0) return;
-    this.voiceResolved = true;
+
+    let preferred: string | null = null;
+    try {
+      preferred = window.localStorage.getItem(VOICE_PREFERENCE_KEY);
+    } catch {
+      /* stockage indisponible: on retombe sur la selection automatique */
+    }
+    const chosen = preferred && voices.find((v) => v.name === preferred);
+    if (chosen) {
+      this.voice = chosen;
+      this.voiceResolved = true;
+      return;
+    }
 
     const french = voices.filter((v) => v.lang.toLowerCase().startsWith("fr"));
     if (french.length === 0) return;
-
-    const score = (v: SpeechSynthesisVoice): number => {
-      let points = 0;
-      // Les voix « Natural » / « Online » de Windows sont d'une autre generation.
-      if (/natural/i.test(v.name)) points += 100;
-      if (/online/i.test(v.name)) points += 40;
-      if (/neural|premium|enhanced|siri/i.test(v.name)) points += 60;
-      // Prenoms masculins des voix francaises courantes (Windows, macOS, Chrome).
-      if (/antoine|thomas|nicolas|henri|claude|paul|jean|remy|daniel|guillaume/i.test(v.name)) {
-        points += 30;
-      }
-      // Francais canadien d'abord, puis francais de France.
-      if (/fr[-_]ca/i.test(v.lang)) points += 20;
-      else if (/fr[-_]fr/i.test(v.lang)) points += 10;
-      if (v.localService) points -= 5; // souvent les anciennes voix embarquees
-      return points;
-    };
-
-    this.voice = french.reduce((best, v) => (score(v) > score(best) ? v : best), french[0]);
+    this.voiceResolved = true;
+    this.voice = french.reduce(
+      (best, v) => (scoreVoice(v) > scoreVoice(best) ? v : best),
+      french[0],
+    );
   }
 
   private playNext(): void {

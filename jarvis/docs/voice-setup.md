@@ -13,15 +13,32 @@ Le navigateur lit avec les voix de Windows. JARVIS choisit automatiquement la
 meilleure disponible, en privilegiant dans l'ordre: les voix **Natural**, les
 voix **Online**, les timbres masculins, puis le francais canadien.
 
-**Ameliorer sans rien payer.** Windows 11 propose des voix « naturelles »
-nettement superieures aux anciennes, mais elles ne sont pas installees par
-defaut:
+### Le raccourci le plus rentable: utiliser Edge
 
-> Parametres -> Heure et langue -> Voix -> **Ajouter des voix** ->
-> chercher **Francais (Canada)** et **Francais (France)** -> installer
+**Microsoft Edge expose les voix « Online (Natural) » de Microsoft. Chrome
+non.** C'est le plus gros ecart de qualite disponible gratuitement, et il ne
+demande aucune installation: il suffit d'ouvrir `http://localhost:5173` dans
+Edge plutot que dans Chrome.
 
-Redemarre le navigateur ensuite. Le nom de la voix retenue s'affiche dans la
-barre du haut de l'interface: si tu vois apparaitre « Natural », c'est gagne.
+Sur un systeme francais, JARVIS y trouve typiquement **Antoine (Natural),
+francais canadien** — masculin, naturel, quebecois.
+
+### Installer des voix locales
+
+Utile si tu tiens a Chrome, ou a une voix qui fonctionne hors ligne.
+
+> **Windows + R** -> `ms-settings:speech` -> **Ajouter des voix** ->
+> **Francais (Canada)**
+
+Pour les voix naturelles locales: Parametres -> Accessibilite -> Narrateur ->
+**Ajouter des voix naturelles**.
+
+### Choisir soi-meme
+
+Le panneau **Voix du systeme** de l'interface liste toutes les voix francaises
+detectees, les meilleures en premier (marquees d'une etoile), avec un bouton
+**Ecouter** pour comparer. Le classement automatique reste une supposition:
+c'est l'oreille qui tranche, et le choix est memorise.
 
 Limite honnete: meme la meilleure voix Windows reste identifiable comme
 synthetique. Pour la conversation quotidienne c'est acceptable; pour l'effet

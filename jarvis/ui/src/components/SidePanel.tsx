@@ -1,16 +1,25 @@
 import type { MetricsSnapshot } from "../lib/api";
+import type { SpeechPlayer } from "../lib/audio";
 import type { SystemInfo, ToolActivity } from "../lib/types";
 import { IntegrationsPanel } from "./IntegrationsPanel";
+import { VoicePicker } from "./VoicePicker";
 
 interface Props {
   system: SystemInfo | null;
   activity: ToolActivity[];
   metrics: MetricsSnapshot | null;
   onIntegrationsChanged: () => void;
+  player: SpeechPlayer;
 }
 
 /** Panneau lateral: ce que JARVIS fait, ce qui est branche, ce que ca coute. */
-export function SidePanel({ system, activity, metrics, onIntegrationsChanged }: Props) {
+export function SidePanel({
+  system,
+  activity,
+  metrics,
+  onIntegrationsChanged,
+  player,
+}: Props) {
   return (
     <aside className="side">
       <section className="panel">
@@ -49,6 +58,12 @@ export function SidePanel({ system, activity, metrics, onIntegrationsChanged }: 
             />
             <Row k="Fuseau" v={system.timezone} />
           </section>
+
+          <VoicePicker
+            player={player}
+            language={system.language}
+            serverVoice={system.providers.tts_available}
+          />
 
           <IntegrationsPanel
             google={system.integrations?.google ?? null}

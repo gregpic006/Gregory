@@ -329,6 +329,7 @@ export default function App() {
         activity={activity}
         metrics={metrics}
         onIntegrationsChanged={refreshSystem}
+        player={player.current}
       />
     </div>
   );

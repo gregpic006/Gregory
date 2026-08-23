@@ -346,6 +346,22 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 12.5px;
 }
 
+/* ---------- Selecteur de voix ---------- */
+
+.voice-select {
+  width: 100%;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 9px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  outline: none;
+}
+.voice-select:focus { border-color: var(--accent-dim); }
+.voice-select option { background: var(--bg-elevated); }
+
 /* ---------- Integrations ---------- */
 
 .integration { display: flex; flex-direction: column; gap: 8px; }
