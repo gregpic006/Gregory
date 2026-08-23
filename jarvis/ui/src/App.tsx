@@ -50,6 +50,12 @@ export default function App() {
   const greeting = useMemo(() => greetingFor(system?.user ?? ""), [system?.user]);
 
   /** Interrompt la parole de JARVIS des que l'utilisateur reprend la main. */
+  /** Le micro n'est utilisable que si un moteur de transcription existe.
+   *  Sans cette condition, on demanderait l'acces au micro pour finalement
+   *  echouer a la transcription — la pire des sequences pour l'utilisateur. */
+  const micAvailable =
+    recorder.current.supported && (system?.providers.stt_available ?? false);
+
   const bargeIn = useCallback(() => {
     player.current.stop();
     socket.current?.send({ type: "cancel" });
@@ -202,6 +208,13 @@ export default function App() {
 
   const startRecording = useCallback(async () => {
     if (recording) return;
+    if (!micAvailable) {
+      setError(
+        "La reconnaissance vocale n'est pas configuree (JARVIS_STT_PROVIDER). " +
+          "Ecris ta demande ci-dessous — tout fonctionne aussi en texte.",
+      );
+      return;
+    }
     setError("");
     bargeIn();
     try {
@@ -211,7 +224,7 @@ export default function App() {
     } catch {
       setError("Acces au micro refuse. Utilise le mode texte.");
     }
-  }, [bargeIn, recording]);
+  }, [bargeIn, micAvailable, recording]);
 
   const stopRecording = useCallback(async () => {
     if (!recording) return;
@@ -237,11 +250,13 @@ export default function App() {
 
     const down = (event: KeyboardEvent) => {
       if (event.code !== "Space" || event.repeat || isTyping(event.target)) return;
+      if (!micAvailable) return;
       event.preventDefault();
       void startRecording();
     };
     const up = (event: KeyboardEvent) => {
       if (event.code !== "Space" || isTyping(event.target)) return;
+      if (!micAvailable) return;
       event.preventDefault();
       void stopRecording();
     };
@@ -251,7 +266,7 @@ export default function App() {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [startRecording, stopRecording]);
+  }, [micAvailable, startRecording, stopRecording]);
 
   const decide = (approved: boolean) => {
     if (!pending) return;
@@ -262,8 +277,6 @@ export default function App() {
     });
     setPending(null);
   };
-
-  const micAvailable = recorder.current.supported && (system?.providers.stt_available ?? false);
 
   return (
     <div className="shell">
@@ -285,7 +298,9 @@ export default function App() {
         <Conversation messages={messages} assistantName={assistantName} />
         {pending && <ConfirmBar action={pending} onDecision={decide} />}
         <div className="hint">
-          Espace = parler · Entree = envoyer · parler pendant la reponse l'interrompt
+          {micAvailable
+            ? "Espace = parler · Entree = envoyer · parler pendant la reponse l'interrompt"
+            : "Entree = envoyer · voix desactivee: aucun moteur de transcription configure"}
         </div>
         <Composer
           onSend={sendText}
