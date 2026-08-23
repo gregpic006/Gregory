@@ -47,6 +47,18 @@ export interface ToolInfo {
   feature_flag: string;
 }
 
+export interface GoogleStatus {
+  connected: boolean;
+  configured: boolean;
+  accounts: string[];
+  account?: string;
+  scopes?: string[];
+  expired?: boolean;
+  requested_scopes: string[];
+  redirect_uri: string;
+  features: { gmail: boolean; calendar: boolean };
+}
+
 export interface SystemInfo {
   name: string;
   user: string;
@@ -65,6 +77,7 @@ export interface SystemInfo {
   };
   tools: ToolInfo[];
   auto_approve_max_level: number;
+  integrations: { google: GoogleStatus };
 }
 
 /** Evenement recu du serveur. */

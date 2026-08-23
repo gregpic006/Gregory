@@ -124,6 +124,7 @@ class JarvisOrchestrator:
         audit: AuditTrail,
         memory_store: MemoryStore | None = None,
         reminders: ReminderRepository | None = None,
+        google: object | None = None,
     ) -> None:
         self.settings = settings
         self.router = router
@@ -132,6 +133,7 @@ class JarvisOrchestrator:
         self.audit = audit
         self.memory_store = memory_store
         self.reminders = reminders
+        self.google = google
 
     # -- point d'entree ------------------------------------------------------
 
@@ -574,6 +576,7 @@ class JarvisOrchestrator:
             session=session,
             memory_store=self.memory_store,
             reminders=self.reminders,
+            google=self.google,  # type: ignore[arg-type]
             dry_run=self.settings.dry_run,
             organization=session.organization,
             confirmed=confirmed,

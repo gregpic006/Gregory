@@ -1,14 +1,16 @@
 import type { MetricsSnapshot } from "../lib/api";
 import type { SystemInfo, ToolActivity } from "../lib/types";
+import { IntegrationsPanel } from "./IntegrationsPanel";
 
 interface Props {
   system: SystemInfo | null;
   activity: ToolActivity[];
   metrics: MetricsSnapshot | null;
+  onIntegrationsChanged: () => void;
 }
 
 /** Panneau lateral: ce que JARVIS fait, ce qui est branche, ce que ca coute. */
-export function SidePanel({ system, activity, metrics }: Props) {
+export function SidePanel({ system, activity, metrics, onIntegrationsChanged }: Props) {
   return (
     <aside className="side">
       <section className="panel">
@@ -48,8 +50,13 @@ export function SidePanel({ system, activity, metrics }: Props) {
             <Row k="Fuseau" v={system.timezone} />
           </section>
 
+          <IntegrationsPanel
+            google={system.integrations?.google ?? null}
+            onChanged={onIntegrationsChanged}
+          />
+
           <section className="panel">
-            <h2>Integrations</h2>
+            <h2>Capacites</h2>
             {Object.entries(system.features).map(([name, enabled]) => (
               <Row key={name} k={name} v={enabled ? "actif" : "—"} on={enabled} />
             ))}

@@ -4,11 +4,9 @@ Assistant personnel vocal, modulaire et securise. Francais quebecois d'abord,
 parfaitement bilingue. Conversation continue, appel d'outils, permissions a
 paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 
-> Etat actuel : **M1 termine** — conversation vocale et textuelle de bout en
-> bout, systeme d'outils, permissions, memoire, audit, interface temps reel.
-> Les integrations Google arrivent en M2 ; leurs contrats d'outils sont deja
-> figes et refusent explicitement de repondre tant qu'elles ne sont pas
-> branchees.
+> Etat actuel : **M2 termine** — conversation vocale et textuelle de bout en
+> bout, systeme d'outils, permissions, memoire, audit, interface temps reel,
+> et **Gmail / Calendar / Contacts** connectes par OAuth avec jetons chiffres.
 
 ---
 
@@ -43,7 +41,10 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 | Dates et calculs fiables | oui |
 | Piste d'audit + metriques + suivi de cout | oui |
 | Defense contre l'injection de prompt | oui |
-| Gmail / Calendar / Contacts | **non — M2** |
+| Gmail : chercher, lire, resumer un fil | oui |
+| Gmail : brouillon, reponse, envoi (avec confirmation) | oui |
+| Calendar : consulter, creer, modifier, annuler | oui |
+| Contacts : « envoie ca a Xavier » -> adresse resolue | oui |
 | Documents et recherche semantique | **non — M3** |
 | Donnees d'entreprise | **non — M4** |
 | Wake word, briefing quotidien, controle de l'ordinateur | **non — M5** |
@@ -178,6 +179,8 @@ variables. Les essentielles :
 | `JARVIS_DRY_RUN` | `true` | Simule les actions externes. **Passe a `false` seulement quand tu es pret.** |
 | `JARVIS_AUTO_APPROVE_MAX_LEVEL` | `1` | Palier maximum sans confirmation. Plafonne a 2 : les paliers 3 et 4 exigent toujours un accord. |
 | `JARVIS_ENCRYPTION_KEY` | — | Cle Fernet pour chiffrer les jetons. `jarvis keygen` en genere une. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Identifiants OAuth. Voir [docs/google-setup.md](docs/google-setup.md). |
+| `JARVIS_FEATURE_GMAIL` / `_CALENDAR` | `false` | Activent les outils **et** les permissions demandees a Google. |
 
 ### Choisir ses moteurs vocaux
 
@@ -197,6 +200,18 @@ variables. Les essentielles :
   identifiant de voix masculine dans ton compte et mets-le dans
   `JARVIS_TTS_ELEVENLABS_VOICE_ID`.
 - `openai` — `gpt-4o-mini-tts`, voix `onyx` (masculine, posee).
+
+### Connecter Gmail et Calendar
+
+Marche a suivre complete : **[docs/google-setup.md](docs/google-setup.md)**.
+En resume : creer un client OAuth « Application de bureau » dans Google Cloud,
+activer Gmail / Calendar / People API, coller les identifiants dans `.env`,
+activer les feature flags, puis **Connecter Google** dans le panneau
+Integrations.
+
+Ton mot de passe Google n'est jamais demande ni stocke. JARVIS ne demande que
+les permissions correspondant aux capacites que tu as activees — jamais l'acces
+total a la boite. Les jetons sont chiffres au repos, et se revoquent d'un clic.
 
 ---
 
@@ -341,7 +356,7 @@ sensible n'est pas recopie integralement.
 |---|---|---|
 | **M0** | Fondations : config, erreurs, base, journalisation | fait |
 | **M1** | Cerveau + outils + permissions + memoire + voix + interface | fait |
-| **M2** | Google : Gmail, Calendar, Contacts (OAuth, jetons chiffres) | a venir |
+| **M2** | Google : Gmail, Calendar, Contacts (OAuth + PKCE, jetons chiffres) | fait |
 | **M3** | Documents : PDF/DOCX/XLSX, embeddings, recherche semantique, citations | a venir |
 | **M4** | Entreprises : multi-organisation, POS, Stripe, KPI, PostgreSQL + pgvector | a venir |
 | **M5** | Wake word, service en arriere-plan, briefing quotidien, notifications, Tauri | a venir |
@@ -352,6 +367,14 @@ Chaque jalon produit quelque chose de testable.
 ---
 
 ## Depannage
+
+**JARVIS dit « Gmail n'est pas connecte » alors que tu l'as connecte** — le
+jeton n'a pas ete enregistre, ou la cle de chiffrement a change. Panneau
+Integrations : **Deconnecter**, puis **Connecter Google**.
+
+**« Permission manquante pour cette action »** — le compte a ete connecte avant
+l'activation d'un feature flag, donc la permission n'a jamais ete demandee.
+Active le flag, puis reconnecte le compte.
 
 **« Fuseau horaire inconnu » ou « La base de fuseaux horaires manque »** —
 Windows n'embarque aucune base IANA. Elle vient du paquet `tzdata`, installe

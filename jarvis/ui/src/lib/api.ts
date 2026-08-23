@@ -1,6 +1,6 @@
 /** Client REST minimal de l'API JARVIS. */
 
-import type { SystemInfo } from "./types";
+import type { GoogleStatus, SystemInfo } from "./types";
 
 async function get<T>(path: string): Promise<T> {
   const response = await fetch(path);
@@ -39,4 +39,31 @@ export interface MetricsSnapshot {
 
 export function fetchMetrics(): Promise<MetricsSnapshot> {
   return get("/api/metrics");
+}
+
+// --- Integrations -----------------------------------------------------------
+
+async function post<T>(path: string): Promise<T> {
+  const response = await fetch(path, { method: "POST" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error((payload as { detail?: string }).detail ?? `${path}: ${response.status}`);
+  }
+  return payload as T;
+}
+
+export function fetchGoogleStatus(): Promise<GoogleStatus> {
+  return get("/api/integrations/google/status");
+}
+
+/** Ouvre l'ecran de consentement Google dans un nouvel onglet. */
+export async function connectGoogle(): Promise<void> {
+  const { authorization_url } = await post<{ authorization_url: string }>(
+    "/api/integrations/google/connect",
+  );
+  window.open(authorization_url, "_blank", "noopener,noreferrer");
+}
+
+export function disconnectGoogle(): Promise<{ disconnected: number }> {
+  return post("/api/integrations/google/disconnect");
 }

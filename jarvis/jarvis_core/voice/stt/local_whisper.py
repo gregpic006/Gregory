@@ -45,10 +45,31 @@ class FasterWhisperProvider(SpeechToTextProvider):
                     "faster-whisper n'est pas installe. "
                     "Installer avec: pip install 'jarvis-core[local-stt]'"
                 ) from exc
-            logger.info("chargement du modele Whisper local (%s)", self._model_size)
-            self._model = await asyncio.to_thread(
-                WhisperModel, self._model_size, device="auto", compute_type=self._compute_type
+            logger.info(
+                "chargement du modele Whisper local (%s) — le premier appel telecharge "
+                "le modele, ce qui peut prendre une minute",
+                self._model_size,
             )
+            try:
+                self._model = await asyncio.to_thread(
+                    WhisperModel,
+                    self._model_size,
+                    device="auto",
+                    compute_type=self._compute_type,
+                )
+            except Exception as exc:  # noqa: BLE001 - toute panne doit rester lisible
+                # Cas reels: pas de reseau au premier lancement, proxy d'entreprise
+                # qui bloque Hugging Face, disque plein, nom de modele invalide.
+                # Sans ce filet, l'utilisateur recevrait une pile d'appels brute.
+                raise SpeechError(
+                    f"chargement du modele Whisper '{self._model_size}': {exc!r}",
+                    user_message=(
+                        f"Je n'arrive pas a charger le modele de reconnaissance vocale "
+                        f"'{self._model_size}'. Le premier lancement doit pouvoir le "
+                        "telecharger depuis Internet. Verifie ta connexion, ou bascule "
+                        "sur JARVIS_STT_PROVIDER=openai. Le mode texte reste disponible."
+                    ),
+                ) from exc
             return self._model
 
     async def transcribe(

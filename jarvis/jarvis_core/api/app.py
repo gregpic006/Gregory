@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from jarvis_core.api.routes_integrations import router as integrations_router
 from jarvis_core.api.schemas import ChatRequest, ConfirmRequest, SpeakRequest, TurnResponse
 from jarvis_core.api.ws import websocket_endpoint
 from jarvis_core.config import Settings, get_settings
@@ -79,6 +80,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    app.include_router(integrations_router)
 
     @app.exception_handler(JarvisError)
     async def jarvis_error_handler(request: Request, exc: JarvisError) -> JSONResponse:

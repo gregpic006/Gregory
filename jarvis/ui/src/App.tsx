@@ -179,6 +179,15 @@ export default function App() {
     };
   }, [handleEvent]);
 
+  const refreshSystem = useCallback(() => {
+    fetchSystem()
+      .then((info) => {
+        setSystem(info);
+        serverVoice.current = info.providers.tts_available;
+      })
+      .catch(() => undefined);
+  }, []);
+
   const sendText = useCallback(
     (text: string) => {
       setError("");
@@ -288,7 +297,12 @@ export default function App() {
         />
       </main>
 
-      <SidePanel system={system} activity={activity} metrics={metrics} />
+      <SidePanel
+        system={system}
+        activity={activity}
+        metrics={metrics}
+        onIntegrationsChanged={refreshSystem}
+      />
     </div>
   );
 }

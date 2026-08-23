@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     tts_openai_model: str = Field(default="gpt-4o-mini-tts", alias="JARVIS_TTS_OPENAI_MODEL")
     tts_openai_voice: str = Field(default="onyx", alias="JARVIS_TTS_OPENAI_VOICE")
 
+    # --- Google Workspace ----------------------------------------------------
+    google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
+    google_redirect_uri: str = Field(
+        default="", alias="GOOGLE_REDIRECT_URI"
+    )
+
     # --- Persistance ---------------------------------------------------------
     database_url: str = Field(default="sqlite:///data/jarvis.db", alias="JARVIS_DATABASE_URL")
 
@@ -116,6 +123,18 @@ class Settings(BaseSettings):
     @property
     def is_dev(self) -> bool:
         return self.env == "development"
+
+    @property
+    def google_configured(self) -> bool:
+        """Vrai si les identifiants OAuth Google sont renseignes."""
+        return bool(self.google_client_id and self.google_client_secret)
+
+    @property
+    def google_callback_url(self) -> str:
+        """URI de redirection OAuth; deduite du serveur local si non forcee."""
+        if self.google_redirect_uri:
+            return self.google_redirect_uri
+        return f"http://{self.host}:{self.port}/api/integrations/google/callback"
 
     @property
     def sqlite_path(self) -> str:

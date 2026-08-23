@@ -429,9 +429,12 @@ erDiagram
     }
 ```
 
+`oauth_tokens` (M2) stocke les jetons **chiffres au repos**: la table ne
+contient jamais de secret en clair, ce qu'un test verifie explicitement.
+
 Seules les tables necessaires au stade actuel existent. `documents`,
-`document_chunks`, `oauth_tokens`, `contacts`, `events` arriveront avec leurs
-jalons, par migration.
+`document_chunks`, `contacts` et `events` arriveront avec leurs jalons, par
+migration.
 
 **Multi-organisation.** `org_id` est present des maintenant sur les donnees
 metier. « Mes ventes aujourd'hui » pourra demander de quelle entreprise il
@@ -460,11 +463,97 @@ interne du modele.
 
 ---
 
-## 12. Ce que le M1 ne fait pas encore
+## 12. Google Workspace (M2)
+
+### Flux d'autorisation
+
+```mermaid
+sequenceDiagram
+    participant U as Utilisateur
+    participant UI as Interface
+    participant API as API JARVIS
+    participant G as Google
+    participant DB as Base chiffree
+
+    U->>UI: « Connecter Google »
+    UI->>API: POST /api/integrations/google/connect
+    API->>API: genere state + verificateur PKCE
+    Note over API: le verificateur ne quitte jamais le serveur
+    API-->>UI: URL de consentement (avec code_challenge S256)
+    UI->>G: ouvre l'ecran de consentement
+    U->>G: s'authentifie et coche les permissions
+    Note over U,G: le mot de passe reste chez Google
+    G->>API: redirection boucle locale (code + state)
+    API->>API: verifie le state (usage unique)
+    API->>G: echange code + code_verifier
+    G-->>API: access_token + refresh_token
+    API->>DB: chiffre puis stocke
+    API-->>U: page de confirmation
+```
+
+**Pourquoi PKCE.** Une application de bureau ne peut pas garder un secret: son
+binaire est sur la machine de l'utilisateur. PKCE rend un code d'autorisation
+intercepte inutilisable sans le verificateur, qui lui reste cote serveur.
+
+**Pourquoi la boucle locale.** Le code d'autorisation ne transite par aucun
+serveur distant: Google redirige vers `127.0.0.1`, c'est-a-dire vers le
+processus JARVIS lui-meme.
+
+### Moindre privilege applique litteralement
+
+Les portees demandees sont calculees a partir des feature flags actifs. Le
+calendrier desactive n'apparait meme pas sur l'ecran de consentement.
+
+| Capacite | Portee | Deliberement exclu |
+|---|---|---|
+| Lire | `gmail.readonly` | `https://mail.google.com/` (acces total) |
+| Ecrire | `gmail.compose` | `gmail.modify` (modification/suppression) |
+| Agenda | `calendar.events` | `calendar` (parametres du compte) |
+| Contacts | `contacts.readonly` | `contacts` (ecriture) |
+
+### Frontiere de confiance
+
+```mermaid
+graph LR
+    subgraph Fiable["Ecrit par JARVIS"]
+        H[En-tetes: expediteur, objet, date]
+        M[Metadonnees d'evenement]
+    end
+    subgraph Hostile["Contenu externe"]
+        B[Corps des courriels]
+        D[Descriptions d'evenements]
+    end
+    H --> LLM[Modele]
+    M --> LLM
+    B --> W["&lt;external_content&gt;<br/>+ detection d'injection"]
+    D --> W
+    W --> LLM
+    B -. "ne peut declencher aucune action" .-x A[Actions]
+```
+
+`search_email` ne rapatrie que des en-tetes — moins de donnees transmises, et
+rien d'hostile. Seul `read_email` descend dans un corps, et il le marque
+`untrusted`.
+
+### Renouvellement et pannes
+
+Le jeton d'acces est rafraichi automatiquement avant expiration (marge de
+60 secondes). Un `401` inattendu — horloge desynchronisee, consentement revoque
+depuis le compte Google — declenche un rafraichissement force puis **un seul**
+reessai: au-dela, on conclut a une revocation et on demande la reconnexion,
+plutot que de boucler.
+
+Chaque mode d'echec produit une phrase exploitable, jamais une reponse
+fabriquee: permission manquante, quota atteint, compte deconnecte, service
+injoignable.
+
+---
+
+## 13. Ce que JARVIS ne fait pas encore
 
 Enonce explicitement pour eviter toute illusion :
 
-- pas de Gmail, Calendar, Contacts, Drive (M2) ;
+- pas de Drive ni de Google Tasks ;
 - pas de lecture de documents ni de recherche semantique (M3) ;
 - pas de donnees d'entreprise (M4) ;
 - pas de wake word, pas de service en arriere-plan, pas de notifications
@@ -473,6 +562,5 @@ Enonce explicitement pour eviter toute illusion :
 - pas de graphe de connaissances — il sera evalue en M4, seulement s'il apporte
   une valeur reelle par rapport a la recherche semantique + metadonnees.
 
-Les contrats d'outils Google sont deja figes et **refusent explicitement** de
-repondre tant que OAuth n'est pas branche. C'est voulu : JARVIS doit dire
-« Gmail n'est pas encore connecte », jamais simuler une boite de reception.
+Chacune de ces absences est annoncee, jamais simulee : JARVIS dit « Drive n'est
+pas connecte » plutot que d'inventer un document.

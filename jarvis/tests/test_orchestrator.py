@@ -292,9 +292,15 @@ async def test_simple_greeting_uses_the_fast_model(
     assert llm.calls[-1]["model"] == orchestrator.settings.llm_model_balanced
 
 
-async def test_integration_error_from_registry_is_typed() -> None:
-    """Les outils Google refusent explicitement tant qu'OAuth n'est pas branche."""
+async def test_integration_error_from_registry_is_typed(
+    settings: Settings, session: SessionMemory
+) -> None:
+    """Les outils Google refusent explicitement tant qu'aucun compte n'est relie."""
     from jarvis_core.tools.google import search_email
 
-    with pytest.raises(IntegrationNotConfiguredError):
-        await search_email(None, sender="Marc")  # type: ignore[arg-type]
+    context = ToolContext(
+        session_id="s1", settings=settings, session=session, google=None
+    )
+    with pytest.raises(IntegrationNotConfiguredError) as excinfo:
+        await search_email(context, sender="Marc")
+    assert "Google" in excinfo.value.user_message

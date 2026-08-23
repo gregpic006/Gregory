@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from jarvis_core.config import Settings, get_settings
+from jarvis_core.integrations.google import GoogleWorkspace
 from jarvis_core.llm.router import LLMRouter, build_router
 from jarvis_core.memory.session import SessionStore
 from jarvis_core.memory.store import MemoryStore
@@ -53,11 +54,13 @@ class JarvisRuntime:
     tts: TextToSpeechProvider
     metrics: Metrics
     secret_box: SecretBox
+    google: GoogleWorkspace
 
     async def aclose(self) -> None:
         await self.router.aclose()
         await self.stt.aclose()
         await self.tts.aclose()
+        await self.google.aclose()
         self.db.close()
 
     def system_info(self) -> dict[str, Any]:
@@ -93,6 +96,7 @@ class JarvisRuntime:
                 "tts": self.tts.name,
                 "tts_available": self.tts.available,
             },
+            "integrations": {"google": self.google.status()},
             "tools": sorted(tools, key=lambda item: (not item["available"], item["name"])),
             "auto_approve_max_level": self.settings.auto_approve_max_level,
         }
@@ -115,6 +119,7 @@ def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
     reminders = ReminderRepository(db)
     router = build_router(settings)
     secret_box = SecretBox(settings.encryption_key, allow_ephemeral=settings.is_dev)
+    google = GoogleWorkspace(settings=settings, db=db, secret_box=secret_box)
 
     orchestrator = JarvisOrchestrator(
         settings=settings,
@@ -124,6 +129,7 @@ def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
         audit=audit,
         memory_store=memory_store,
         reminders=reminders,
+        google=google,
     )
 
     return JarvisRuntime(
@@ -140,4 +146,5 @@ def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
         tts=build_tts(settings),
         metrics=Metrics(),
         secret_box=secret_box,
+        google=google,
     )
