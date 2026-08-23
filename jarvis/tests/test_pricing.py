@@ -40,6 +40,15 @@ def test_dated_model_is_billed_like_its_base_model() -> None:
     assert dated > 0, "un modele date ne doit jamais couter zero"
 
 
+def test_free_engines_are_silent(caplog) -> None:  # type: ignore[no-untyped-def]
+    """Le moteur local n'a pas de tarif: ce n'est pas une anomalie a signaler."""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="jarvis_core.llm.pricing"):
+        assert estimate_cost_usd("mock", Usage(input_tokens=10_000)) == 0.0
+    assert caplog.records == []
+
+
 def test_unknown_model_stays_at_zero_without_crashing() -> None:
     assert estimate_cost_usd("modele-inconnu-xyz", Usage(input_tokens=1000)) == 0.0
 

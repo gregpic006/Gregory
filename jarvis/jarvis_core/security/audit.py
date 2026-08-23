@@ -74,10 +74,19 @@ class AuditSink(Protocol):
 
 
 class LoggingAuditSink:
-    """Ecrit l'audit dans les logs applicatifs (utile en dev et en test)."""
+    """Double l'audit dans les logs applicatifs.
+
+    L'audit qui fait foi est celui de la base (`SqliteAuditSink`). Cette
+    destination-ci sert au diagnostic, donc elle ecrit en DEBUG: sinon chaque
+    appel d'outil deverse un bloc JSON au milieu de la conversation. Un
+    deploiement serveur qui veut l'audit dans ses logs passe `level=INFO`.
+    """
+
+    def __init__(self, level: int = logging.DEBUG) -> None:
+        self.level = level
 
     def write(self, entry: AuditEntry) -> None:
-        logger.info("audit %s", json.dumps(entry.as_dict(), ensure_ascii=False))
+        logger.log(self.level, "audit %s", json.dumps(entry.as_dict(), ensure_ascii=False))
 
 
 class AuditTrail:

@@ -42,6 +42,9 @@ CACHE_WRITE_MULTIPLIER = 1.25
 
 _warned: set[str] = set()
 
+#: Moteurs sans facturation: leur absence de tarif n'est pas une anomalie.
+FREE_MODELS = frozenset({"mock", "local", ""})
+
 #: L'API renvoie l'identifiant resolu, souvent date: `claude-haiku-4-5-20251001`.
 _DATE_SUFFIX = re.compile(r"-\d{8}$")
 
@@ -70,6 +73,8 @@ def normalize_model(model: str) -> str:
 
 def estimate_cost_usd(model: str, usage: Usage) -> float:
     """Estime le cout d'un appel."""
+    if model in FREE_MODELS:
+        return 0.0
     price = PRICES.get(normalize_model(model))
     if price is None:
         if model and model not in _warned:
