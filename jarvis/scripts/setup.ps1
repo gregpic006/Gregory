@@ -64,6 +64,11 @@ if (-not (Test-Path ".env")) {
     (Get-Content ".env") -replace "^JARVIS_ENCRYPTION_KEY=.*", "JARVIS_ENCRYPTION_KEY=$key" | Set-Content ".env"
     Write-Host "   cle de chiffrement generee." -ForegroundColor Green
     Write-Host "   Ajoute maintenant ANTHROPIC_API_KEY dans .env." -ForegroundColor Yellow
+} else {
+    # Un .env existant date d'un jalon anterieur: il lui manque les variables
+    # ajoutees depuis. On les ajoute sans jamais toucher aux valeurs en place.
+    Write-Host "-> mise a jour du fichier .env"
+    & $venvPython -m jarvis_core.cli sync-env
 }
 
 Write-Host "-> installation de l'interface"

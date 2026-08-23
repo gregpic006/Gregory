@@ -150,6 +150,11 @@ Verifie l'installation :
 .\.venv\Scripts\python.exe -m jarvis_core.cli doctor
 ```
 
+> **Apres une mise a jour du projet**, relance `setup.ps1`, ou simplement
+> `.\.venv\Scripts\python.exe -m jarvis_core.cli sync-env` : les variables
+> ajoutees par le nouveau jalon apparaissent dans ton `.env` sans qu'aucune
+> de tes valeurs ne soit touchee.
+
 ---
 
 ## Installation (Linux / macOS)
@@ -367,6 +372,13 @@ Chaque jalon produit quelque chose de testable.
 ---
 
 ## Depannage
+
+**Une variable de `.env.example` est introuvable dans ton `.env`** — ton `.env`
+date d'un jalon anterieur. Git ne le suit pas (il contient tes secrets), donc
+`git pull` ne l'a pas mis a jour. Lance :
+`.\\.venv\\Scripts\\python.exe -m jarvis_core.cli sync-env`
+Les variables manquantes sont ajoutees avec leurs commentaires, et **aucune
+valeur existante n'est modifiee**. `jarvis doctor` signale ce decalage.
 
 **JARVIS dit « Gmail n'est pas connecte » alors que tu l'as connecte** — le
 jeton n'a pas ete enregistre, ou la cle de chiffrement a change. Panneau

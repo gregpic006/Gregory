@@ -25,6 +25,11 @@ if [ ! -f .env ]; then
   key=$(./.venv/bin/python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
   sed -i.bak "s|^JARVIS_ENCRYPTION_KEY=.*|JARVIS_ENCRYPTION_KEY=${key}|" .env && rm -f .env.bak
   echo "   cle de chiffrement generee. Ajoute maintenant ANTHROPIC_API_KEY dans .env."
+else
+  # Un .env existant date d'un jalon anterieur: on lui ajoute les variables
+  # apparues depuis, sans toucher aux valeurs deja renseignees.
+  echo "-> mise a jour du fichier .env"
+  ./.venv/bin/python -m jarvis_core.cli sync-env
 fi
 
 (cd ui && npm install)
