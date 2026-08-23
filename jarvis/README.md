@@ -416,6 +416,13 @@ port attendu. Verifie `JARVIS_PORT` et lance `jarvis serve`.
 **JARVIS repond « je tourne en mode local »** — `ANTHROPIC_API_KEY` est absente
 ou invalide. Le repli est volontaire et annonce, jamais silencieux.
 
+**La voix ne marche pas** — lance le diagnostic vocal, il charge reellement le
+moteur et lui fait transcrire un echantillon genere sur place :
+`.\\.venv\\Scripts\\python.exe -m jarvis_core.cli check-voice`
+Il distingue les trois causes possibles : moteur non declare, librairie non
+installee, ou modele impossible a telecharger. Le micro lui-meme vit dans le
+navigateur et ne peut pas etre teste depuis le terminal — c'est indique.
+
 **Le bouton micro est grise** — aucun moteur STT n'est configure
 (`JARVIS_STT_PROVIDER=null`). Le mode texte fonctionne quand meme.
 

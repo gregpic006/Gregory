@@ -162,6 +162,146 @@ async def _check_contacts(google: Any) -> CheckResult:
     return CheckResult("Contacts", OK, f"{len(contacts)} contact(s) trouve(s)")
 
 
+def _silent_wav(seconds: float = 1.0, rate: int = 16000) -> bytes:
+    """Genere un WAV mono valide, sans dependance externe.
+
+    Il sert a valider la chaine complete — decodage, chargement du modele,
+    inference — sans micro et sans fichier a fournir. Whisper renverra un
+    texte vide sur du silence: c'est attendu, ce qu'on teste ici c'est que
+    rien ne casse en chemin.
+    """
+    import io
+    import wave
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(b"\x00\x00" * int(rate * seconds))
+    return buffer.getvalue()
+
+
+async def check_voice(runtime: Any) -> list[CheckResult]:
+    """Teste le pipeline vocal cote serveur, sans micro.
+
+    Le micro et la lecture audio vivent dans le navigateur: ils ne peuvent pas
+    etre testes ici, et c'est dit explicitement plutot que passe sous silence.
+    """
+    settings = runtime.settings
+    results: list[CheckResult] = []
+
+    # 1. Un moteur de transcription est-il declare ?
+    if settings.stt_provider == "null":
+        results.append(
+            CheckResult(
+                "Moteur de transcription",
+                FAIL,
+                "JARVIS_STT_PROVIDER=null — aucun moteur",
+                "Mets JARVIS_STT_PROVIDER=faster_whisper dans .env, "
+                "puis: pip install faster-whisper",
+            )
+        )
+        return results
+    results.append(
+        CheckResult("Moteur de transcription", OK, settings.stt_provider)
+    )
+
+    # 2. La librairie est-elle installee ?
+    if settings.stt_provider == "faster_whisper":
+        try:
+            import faster_whisper  # noqa: F401
+        except ImportError:
+            results.append(
+                CheckResult(
+                    "Librairie faster-whisper",
+                    FAIL,
+                    "non installee",
+                    "Lance: .\\.venv\\Scripts\\python.exe -m pip install faster-whisper",
+                )
+            )
+            return results
+        results.append(
+            CheckResult(
+                "Librairie faster-whisper", OK, f"modele « {settings.stt_local_model} »"
+            )
+        )
+    elif settings.stt_provider == "openai" and not settings.openai_api_key:
+        results.append(
+            CheckResult(
+                "Cle OpenAI",
+                FAIL,
+                "OPENAI_API_KEY absente",
+                "Renseigne-la dans .env, ou passe a faster_whisper (local, gratuit)",
+            )
+        )
+        return results
+
+    # 3. Transcription reelle d'un echantillon genere.
+    print("  … chargement du moteur (le premier appel peut telecharger le modele)")
+    import time
+
+    started = time.perf_counter()
+    try:
+        transcript = await runtime.stt.transcribe(
+            _silent_wav(), mime="audio/wav", language=settings.default_language
+        )
+    except JarvisError as exc:
+        results.append(
+            CheckResult(
+                "Transcription", FAIL, exc.user_message, str(exc.detail or "")[:200]
+            )
+        )
+        return results
+    except Exception as exc:  # noqa: BLE001 - le diagnostic capture tout
+        results.append(
+            CheckResult("Transcription", FAIL, repr(exc), traceback.format_exc(limit=2))
+        )
+        return results
+
+    elapsed = int((time.perf_counter() - started) * 1000)
+    results.append(
+        CheckResult(
+            "Transcription",
+            OK,
+            f"moteur charge et fonctionnel ({elapsed} ms sur un echantillon muet)",
+            "" if elapsed < 20000 else "Premier appel: le modele vient d'etre telecharge.",
+            data={"texte rendu": repr(transcript.text) + " (vide = normal sur du silence)"},
+        )
+    )
+
+    # 4. Synthese vocale.
+    if settings.tts_provider == "null":
+        results.append(
+            CheckResult(
+                "Voix",
+                OK,
+                "voix du systeme (navigateur)",
+                "Pour une voix plus naturelle: JARVIS_TTS_PROVIDER=elevenlabs",
+            )
+        )
+    else:
+        try:
+            audio = await runtime.tts.synthesize("Test.")
+        except JarvisError as exc:
+            results.append(CheckResult("Voix", FAIL, exc.user_message))
+        else:
+            size = len(audio.data) if audio else 0
+            results.append(
+                CheckResult("Voix", OK, f"{settings.tts_provider} — {size} octets generes")
+            )
+
+    results.append(
+        CheckResult(
+            "Micro et lecture audio",
+            WARN,
+            "non testables ici: ils vivent dans le navigateur",
+            "Le micro exige localhost ou HTTPS, et une autorisation du navigateur.",
+        )
+    )
+    return results
+
+
 def render(results: list[CheckResult]) -> bool:
     """Affiche les resultats; retourne vrai si une verification a echoue."""
     marks = {OK: " ok  ", WARN: "warn ", FAIL: "ECHEC"}

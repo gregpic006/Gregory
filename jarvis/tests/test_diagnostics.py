@@ -173,3 +173,86 @@ async def test_only_enabled_capabilities_are_tested(db: Database) -> None:
 @pytest.mark.parametrize("flag", ["gmail", "calendar"])
 def test_settings_expose_the_flags_the_diagnostic_reads(flag: str) -> None:
     assert flag in _settings().feature_map()
+
+
+# =============================================================================
+# Diagnostic vocal
+# =============================================================================
+
+
+async def test_no_voice_engine_is_the_first_thing_reported(db: Database) -> None:
+    from jarvis_core.diagnostics import check_voice
+
+    settings = _settings(JARVIS_STT_PROVIDER="null")
+    runtime = SimpleNamespace(settings=settings, stt=None, tts=None)
+    results = await check_voice(runtime)
+
+    assert len(results) == 1
+    assert results[0].status == FAIL
+    assert "faster-whisper" in results[0].hint
+
+
+async def test_openai_engine_without_a_key_is_named(db: Database) -> None:
+    from jarvis_core.diagnostics import check_voice
+
+    settings = _settings(JARVIS_STT_PROVIDER="openai", OPENAI_API_KEY="")
+    runtime = SimpleNamespace(settings=settings, stt=None, tts=None)
+    results = await check_voice(runtime)
+
+    assert results[-1].status == FAIL
+    assert "OPENAI_API_KEY" in results[-1].detail
+
+
+async def test_a_working_engine_transcribes_the_generated_sample(db: Database) -> None:
+    """Le silence rend un texte vide: on teste la chaine, pas la comprehension."""
+    from jarvis_core.diagnostics import check_voice
+    from jarvis_core.voice.stt.base import Transcript
+
+    class WorkingSTT:
+        seen: bytes = b""
+
+        async def transcribe(self, audio: bytes, **kwargs: Any) -> Transcript:
+            WorkingSTT.seen = audio
+            return Transcript(text="", provider="faster_whisper", duration_ms=120)
+
+    settings = _settings(JARVIS_STT_PROVIDER="faster_whisper", JARVIS_TTS_PROVIDER="null")
+    runtime = SimpleNamespace(settings=settings, stt=WorkingSTT(), tts=None)
+    results = await check_voice(runtime)
+
+    transcription = _by_name(results, "Transcription")
+    assert transcription.status == OK
+    assert WorkingSTT.seen.startswith(b"RIFF"), "un WAV valide doit etre soumis"
+    # Le micro navigateur ne peut pas etre teste ici: c'est dit, pas masque.
+    assert _by_name(results, "Micro").status == WARN
+
+
+async def test_model_download_failure_is_reported_with_its_cause(db: Database) -> None:
+    from jarvis_core.diagnostics import check_voice
+    from jarvis_core.errors import SpeechError
+
+    class BrokenSTT:
+        async def transcribe(self, audio: bytes, **kwargs: Any) -> Any:
+            raise SpeechError(
+                "ProxyError 403", user_message="Je n'arrive pas a charger le modele."
+            )
+
+    settings = _settings(JARVIS_STT_PROVIDER="faster_whisper")
+    runtime = SimpleNamespace(settings=settings, stt=BrokenSTT(), tts=None)
+    results = await check_voice(runtime)
+
+    transcription = _by_name(results, "Transcription")
+    assert transcription.status == FAIL
+    assert "charger le modele" in transcription.detail
+    assert "403" in transcription.hint, "la cause technique doit rester visible"
+
+
+def test_generated_sample_is_a_valid_wav() -> None:
+    import io
+    import wave
+
+    from jarvis_core.diagnostics import _silent_wav
+
+    with wave.open(io.BytesIO(_silent_wav(0.5)), "rb") as handle:
+        assert handle.getnchannels() == 1
+        assert handle.getframerate() == 16000
+        assert handle.getnframes() == 8000

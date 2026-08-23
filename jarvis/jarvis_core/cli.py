@@ -144,6 +144,31 @@ async def _cmd_check_google(settings: Settings) -> int:
     return 0
 
 
+async def _cmd_check_voice(settings: Settings) -> int:
+    """Teste le pipeline vocal cote serveur, sans micro."""
+    import logging
+
+    from jarvis_core.diagnostics import check_voice, render
+    from jarvis_core.runtime import build_runtime
+
+    logging.getLogger().setLevel(logging.WARNING)
+    print("Diagnostic vocal\n")
+    runtime = build_runtime(settings)
+    try:
+        failed = render(await check_voice(runtime))
+    finally:
+        await runtime.aclose()
+
+    if failed:
+        print("\nCorrige les lignes [ECHEC] ci-dessus, puis redemarre l'API.")
+        return 1
+    print("\nLe serveur est pret. Si le micro ne repond pas dans l'interface:")
+    print("  - l'adresse doit etre localhost (pas une IP), ou en HTTPS;")
+    print("  - le navigateur doit avoir l'autorisation du micro;")
+    print("  - l'API doit avoir ete redemarree apres modification de .env.")
+    return 0
+
+
 def _cmd_doctor(settings: Settings) -> int:
     """Diagnostic de configuration.
 
@@ -278,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("doctor", help="verifie la configuration")
     sub.add_parser("sync-env", help="ajoute a .env les nouvelles variables du modele")
     sub.add_parser("check-google", help="teste Gmail, Calendar et Contacts")
+    sub.add_parser("check-voice", help="charge le moteur vocal et transcrit un echantillon")
     sub.add_parser("keygen", help="genere une cle de chiffrement")
 
     args = parser.parse_args(argv)
@@ -293,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_sync_env()
     if args.command == "check-google":
         return asyncio.run(_cmd_check_google(settings))
+    if args.command == "check-voice":
+        return asyncio.run(_cmd_check_voice(settings))
     if args.command == "doctor":
         return _cmd_doctor(settings)
     if args.command == "serve" or args.command is None:
