@@ -9,6 +9,7 @@ journalise plutot que de faire echouer un tour.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from jarvis_core.llm.base import Usage
@@ -41,10 +42,35 @@ CACHE_WRITE_MULTIPLIER = 1.25
 
 _warned: set[str] = set()
 
+#: L'API renvoie l'identifiant resolu, souvent date: `claude-haiku-4-5-20251001`.
+_DATE_SUFFIX = re.compile(r"-\d{8}$")
+
+
+def normalize_model(model: str) -> str:
+    """Ramene un identifiant renvoye par l'API a une cle de la table de tarifs.
+
+    Trois formes doivent tomber sur le meme tarif:
+    `claude-opus-5`, `claude-opus-5-20260115` (snapshot date) et
+    `us.anthropic.claude-opus-5` (prefixe fournisseur cloud). Sans cette
+    normalisation, le cout est estime a zero et le budget quotidien ne
+    protege plus rien.
+    """
+    if not model:
+        return ""
+    if model in PRICES:
+        return model
+    candidate = model.split(".")[-1]
+    candidate = _DATE_SUFFIX.sub("", candidate)
+    if candidate in PRICES:
+        return candidate
+    # Dernier recours: le prefixe connu le plus long (`claude-opus-5-preview`).
+    known = [key for key in PRICES if candidate.startswith(key)]
+    return max(known, key=len) if known else model
+
 
 def estimate_cost_usd(model: str, usage: Usage) -> float:
     """Estime le cout d'un appel."""
-    price = PRICES.get(model)
+    price = PRICES.get(normalize_model(model))
     if price is None:
         if model and model not in _warned:
             _warned.add(model)

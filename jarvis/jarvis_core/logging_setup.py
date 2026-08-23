@@ -42,3 +42,8 @@ def setup_logging(level: str = "INFO") -> None:
     for name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
         logging.getLogger(name).handlers.clear()
         logging.getLogger(name).propagate = True
+
+    # Les clients HTTP journalisent chaque requete en INFO: illisible au milieu
+    # d'une conversation. On ne garde que leurs avertissements et erreurs.
+    for name in ("httpx", "httpx2", "httpcore", "httpcore2", "anthropic", "urllib3"):
+        logging.getLogger(name).setLevel(logging.WARNING)
