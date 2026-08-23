@@ -238,7 +238,17 @@ async def check_voice(runtime: Any) -> list[CheckResult]:
         return results
 
     # 3. Transcription reelle d'un echantillon genere.
-    print("  … chargement du moteur (le premier appel peut telecharger le modele)")
+    if settings.stt_provider == "faster_whisper":
+        from jarvis_core.voice.stt.local_whisper import MODEL_SIZES_MB
+
+        weight = MODEL_SIZES_MB.get(settings.stt_local_model)
+        detail = f" (~{weight} Mo)" if weight else ""
+        print(
+            f"  … chargement du modele « {settings.stt_local_model} »{detail}. "
+            "Au premier lancement il est telecharge: patiente, c'est normal."
+        )
+    else:
+        print("  … appel du service de transcription")
     import time
 
     started = time.perf_counter()

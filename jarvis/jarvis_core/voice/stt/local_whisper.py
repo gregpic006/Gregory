@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import tempfile
 import time
 from pathlib import Path
@@ -18,6 +19,24 @@ from jarvis_core.errors import ConfigurationError, SpeechError
 from jarvis_core.voice.stt.base import SpeechToTextProvider, Transcript
 
 logger = logging.getLogger(__name__)
+
+
+#: Poids approximatif des modeles, pour annoncer l'attente du premier appel.
+MODEL_SIZES_MB = {"tiny": 75, "base": 145, "small": 490, "medium": 1500, "large-v3": 3100}
+
+
+def _quiet_model_hub() -> None:
+    """Fait taire les avertissements du telechargeur de modeles.
+
+    Deux messages effraient sans rien apporter ici: l'absence de jeton
+    Hugging Face (qui ne change que le debit) et l'absence de liens
+    symboliques sous Windows (qui coute du disque, pas du fonctionnement).
+    Sur un premier lancement, ce mur de texte ressemble a une panne.
+    """
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    for name in ("huggingface_hub", "huggingface_hub.utils._http", "urllib3"):
+        logging.getLogger(name).setLevel(logging.ERROR)
 
 
 class FasterWhisperProvider(SpeechToTextProvider):
@@ -38,6 +57,7 @@ class FasterWhisperProvider(SpeechToTextProvider):
         async with self._lock:
             if self._model is not None:
                 return self._model
+            _quiet_model_hub()
             try:
                 from faster_whisper import WhisperModel
             except ImportError as exc:  # pragma: no cover - depend de l'install
@@ -45,10 +65,12 @@ class FasterWhisperProvider(SpeechToTextProvider):
                     "faster-whisper n'est pas installe. "
                     "Installer avec: pip install 'jarvis-core[local-stt]'"
                 ) from exc
+            weight = MODEL_SIZES_MB.get(self._model_size)
             logger.info(
-                "chargement du modele Whisper local (%s) — le premier appel telecharge "
-                "le modele, ce qui peut prendre une minute",
+                "chargement du modele Whisper local « %s »%s — au premier lancement "
+                "il est telecharge, les appels suivants sont immediats",
                 self._model_size,
+                f" (~{weight} Mo a telecharger)" if weight else "",
             )
             try:
                 self._model = await asyncio.to_thread(
