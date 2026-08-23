@@ -106,21 +106,41 @@ jarvis/
 
 ## Installation (Windows)
 
-Prerequis : **Python 3.11+**, **Node.js 20+**.
+Prerequis : **Python 3.12**, **Node.js 20+**, **Git**.
+
+> **Pourquoi 3.12 et pas plus recent ?** Le coeur de JARVIS tourne sur 3.11+,
+> mais `faster-whisper` (reconnaissance vocale locale) n'a pas toujours de
+> version compilee pour les toutes dernieres versions de Python. 3.12 est le
+> choix sur. Tu peux garder une version plus recente comme Python principal :
+> `py -3.12` cible explicitement la bonne.
+>
+> Installer 3.12 : `py install 3.12` (gestionnaire Python officiel), ou
+> depuis python.org.
+
+Ouvre PowerShell (**Windows + R**, puis `powershell`) et lance ces commandes
+**une a la fois**, en attendant que chacune rende la main :
 
 ```powershell
-git clone <ton-depot>
-cd jarvis
-.\scripts\setup.ps1
+cd $HOME\Documents
+git clone https://github.com/<toi>/<ton-depot>.git
+cd <ton-depot>\jarvis
+py -3.12 -m venv .venv
+powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
 ```
 
-Le script cree l'environnement virtuel, installe les dependances, genere le
-fichier `.env` et une cle de chiffrement.
+> **Pourquoi `powershell -ExecutionPolicy Bypass -File` ?** Windows refuse par
+> defaut d'executer les scripts `.ps1`. Cette forme lance le script dans un
+> processus enfant avec l'autorisation, **sans modifier aucun reglage systeme**.
 
-Puis ouvre `.env` et ajoute ta cle Claude :
+Le script cree l'environnement virtuel s'il n'existe pas, installe les
+dependances Python et l'interface, genere le fichier `.env` et une cle de
+chiffrement.
+
+Puis ouvre `.env` dans un editeur de texte et ajoute ta cle Claude :
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
+JARVIS_USER_NAME=TonPrenom
 ```
 
 Verifie l'installation :
@@ -182,7 +202,8 @@ variables. Les essentielles :
 
 ## Lancer
 
-**Interface complete** (deux terminaux, ou `.\scripts\dev.ps1`) :
+**Interface complete** (deux terminaux, ou
+`powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1`) :
 
 ```powershell
 # terminal 1 — API
@@ -331,6 +352,15 @@ Chaque jalon produit quelque chose de testable.
 ---
 
 ## Depannage
+
+**« ... setup.ps1 ne peut pas etre charge car l'execution de scripts est
+desactivee »** — c'est la protection par defaut de Windows. Lance le script
+ainsi, ca ne change aucun reglage systeme :
+`powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1`
+
+**Une commande collee se colle a la precedente** (`cd jarvispy -3.12 ...`) — le
+terminal n'avait pas recu de retour a la ligne. Appuie sur Entree avant de
+coller, et colle **une commande a la fois**.
 
 **« Le serveur JARVIS ne repond pas »** — l'API n'est pas lancee, ou pas sur le
 port attendu. Verifie `JARVIS_PORT` et lance `jarvis serve`.

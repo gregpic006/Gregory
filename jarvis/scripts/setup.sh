@@ -5,7 +5,18 @@ cd "$(dirname "$0")/.."
 
 echo "== JARVIS : installation =="
 
-[ -d .venv ] || python3 -m venv .venv
+if [ ! -d .venv ]; then
+  # 3.12 en priorite: faster-whisper n'a pas toujours de roue pour les
+  # versions les plus recentes de Python.
+  for candidate in python3.12 python3.13 python3.11 python3; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      echo "-> creation de l'environnement Python ($candidate)"
+      "$candidate" -m venv .venv
+      break
+    fi
+  done
+fi
+[ -d .venv ] || { echo "Python 3.11+ introuvable." >&2; exit 1; }
 ./.venv/bin/python -m pip install --upgrade pip
 ./.venv/bin/python -m pip install -e ".[anthropic,dev]"
 
