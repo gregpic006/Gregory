@@ -1,6 +1,8 @@
 /** Client REST minimal de l'API JARVIS. */
 
-import type { GoogleStatus, SystemInfo } from "./types";
+import type {
+  BusinessOrg, GoogleStatus, MemoryEntry, Overview, SystemInfo,
+} from "./types";
 
 async function get<T>(path: string): Promise<T> {
   const response = await fetch(path);
@@ -66,4 +68,34 @@ export async function connectGoogle(): Promise<void> {
 
 export function disconnectGoogle(): Promise<{ disconnected: number }> {
   return post("/api/integrations/google/disconnect");
+}
+
+// --- Donnees du centre de commande ------------------------------------------
+
+export function fetchOverview(): Promise<Overview> {
+  return get("/api/overview");
+}
+
+export function fetchBusinesses(): Promise<{ organizations: BusinessOrg[]; note: string }> {
+  return get("/api/businesses");
+}
+
+export interface MemoryResponse {
+  enabled: boolean;
+  memories: MemoryEntry[];
+  kinds: Record<string, number>;
+  total?: number;
+}
+
+export function fetchMemory(query = "", kind = ""): Promise<MemoryResponse> {
+  const params = new URLSearchParams();
+  if (query) params.set("query", query);
+  if (kind) params.set("kind", kind);
+  const suffix = params.toString();
+  return get(`/api/memory${suffix ? `?${suffix}` : ""}`);
+}
+
+export async function forgetMemory(id: string): Promise<void> {
+  const response = await fetch(`/api/memory/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!response.ok) throw new Error(`suppression refusee (${response.status})`);
 }

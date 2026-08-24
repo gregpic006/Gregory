@@ -11,6 +11,29 @@ export class MicRecorder {
   private stream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
+  private context: AudioContext | null = null;
+  private analyser: AnalyserNode | null = null;
+  private samples: Uint8Array<ArrayBuffer> | null = null;
+
+  /** Niveau sonore instantane, 0..1.
+   *
+   * Le noyau visuel s'en sert pour reagir a la voix reelle plutot qu'a une
+   * animation decorative. C'est ce qui fait la difference entre « ca bouge »
+   * et « il m'ecoute ».
+   */
+  level(): number {
+    if (!this.analyser || !this.samples) return 0;
+    this.analyser.getByteTimeDomainData(this.samples);
+    let sum = 0;
+    for (let i = 0; i < this.samples.length; i += 1) {
+      const deviation = (this.samples[i] - 128) / 128;
+      sum += deviation * deviation;
+    }
+    const rms = Math.sqrt(sum / this.samples.length);
+    // La parole normale tourne autour de 0.05-0.25 en RMS: on etale cette
+    // plage sur 0..1, sinon le noyau bougerait a peine.
+    return Math.min(1, rms * 4.2);
+  }
 
   get supported(): boolean {
     return typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices;
@@ -23,6 +46,7 @@ export class MicRecorder {
         audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
       });
     }
+    this.attachAnalyser();
     this.chunks = [];
     const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
@@ -50,6 +74,31 @@ export class MicRecorder {
   release(): void {
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;
+    this.analyser = null;
+    this.samples = null;
+    void this.context?.close().catch(() => undefined);
+    this.context = null;
+  }
+
+  /** Branche l'analyseur sur le flux, une seule fois. */
+  private attachAnalyser(): void {
+    if (this.analyser || !this.stream) return;
+    try {
+      const AudioContextClass =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextClass) return;
+      this.context = new AudioContextClass();
+      const source = this.context.createMediaStreamSource(this.stream);
+      const analyser = this.context.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.6;
+      source.connect(analyser);
+      this.analyser = analyser;
+      this.samples = new Uint8Array(new ArrayBuffer(analyser.fftSize));
+    } catch {
+      /* analyse indisponible: le noyau retombe sur son animation propre */
+    }
   }
 }
 

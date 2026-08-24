@@ -22,9 +22,10 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from jarvis_core.api.routes_data import router as data_router
 from jarvis_core.api.routes_integrations import router as integrations_router
 from jarvis_core.api.schemas import ChatRequest, ConfirmRequest, SpeakRequest, TurnResponse
 from jarvis_core.api.ws import websocket_endpoint
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(integrations_router)
+    app.include_router(data_router)
 
     @app.exception_handler(JarvisError)
     async def jarvis_error_handler(request: Request, exc: JarvisError) -> JSONResponse:
@@ -192,11 +194,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # -- interface ------------------------------------------------------------
 
     if UI_DIST.is_dir():
-        app.mount("/assets", StaticFiles(directory=UI_DIST / "assets"), name="assets")
-
-        @app.get("/")
-        async def index() -> FileResponse:
-            return FileResponse(UI_DIST / "index.html")
+        # Monte a la racine, en DERNIER: les routes d'API et le WebSocket sont
+        # deja enregistres, donc prioritaires. Cette forme sert aussi la
+        # favicon et tout futur fichier statique, sans route dediee.
+        app.mount("/", StaticFiles(directory=UI_DIST, html=True), name="ui")
     else:
 
         @app.get("/")

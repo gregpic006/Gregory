@@ -549,7 +549,64 @@ injoignable.
 
 ---
 
-## 13. Ce que JARVIS ne fait pas encore
+## 13. Interface : le centre de commande
+
+L'interface est servie par l'API elle-meme (`StaticFiles` monte sur `/`, **en
+dernier**, pour que les routes `/api/*` et `/ws` gardent la priorite). Une seule
+adresse, un seul processus, pas de CORS en production.
+
+### Contrat de donnees honnete
+
+C'est la regle qui structure tout l'ecran. Chaque panneau et chaque metrique
+transporte un etat explicite :
+
+| Etat | Sens | Ce que l'ecran affiche |
+|---|---|---|
+| `connected` | La source repond | Les donnees reelles |
+| `not_connected` | La source n'est pas branchee | « Gmail n'est pas active » |
+| `error` | La source a echoue | « Je n'ai pas pu regarder » |
+
+Un panneau vide et un panneau non branche ne se ressemblent pas. La distinction
+est portee par le serveur, pas devinee par le client : `PaneBody` est le seul
+endroit de l'interface qui decide quoi montrer quand une source manque.
+
+Les metriques d'entreprise renvoient toutes `{"status": "not_connected",
+"value": null}` tant qu'aucune source reelle n'est branchee (M4). Aucun chiffre
+d'affaires, aucune reservation, aucune masse salariale n'est fabriquee — ni
+comme exemple, ni comme demonstration.
+
+### Routes de lecture
+
+| Route | Reponse |
+|---|---|
+| `GET /api/overview` | Les panneaux de l'accueil : agenda du jour, courriels non lus, rappels, entreprises — chacun avec son etat |
+| `GET /api/businesses` | Une organisation par contexte, ses metriques et leur etat |
+| `GET /api/memory` | Ce que JARVIS retient, avec la source obligatoire de chaque souvenir |
+| `DELETE /api/memory/{id}` | Oublier un souvenir (404 s'il n'existe plus) |
+
+### Le noyau
+
+Un `<canvas>` pilote par `requestAnimationFrame`, mis a l'echelle selon le
+`devicePixelRatio`. Chaque etat de l'assistant (`idle`, `listening`,
+`transcribing`, `understanding`, `working`, `speaking`) definit un profil
+— rotation, energie, halo, respiration, balayage, reactivite au micro — et les
+transitions sont lissees (`k = 1 - exp(-dt * 3.2)`) plutot que commutees : le
+noyau *devient* attentif, il ne saute pas d'un etat a l'autre.
+
+En ecoute, l'energie suit le **niveau reel du micro** (RMS mesure par un
+`AnalyserNode`), pas une animation decorative.
+
+Sa taille se calcule a partir de la place disponible (`useCoreSize`) : les
+constantes viennent de mesures sur le rendu reel, pas d'estimations, parce
+qu'un noyau de taille fixe pousse les cartes sous la ligne de flottaison sur un
+portable.
+
+Sous le noyau s'affiche **l'outil en cours de consultation** — jamais le
+raisonnement du modele, conformement au principe de la section 11.
+
+---
+
+## 14. Ce que JARVIS ne fait pas encore
 
 Enonce explicitement pour eviter toute illusion :
 
@@ -557,7 +614,8 @@ Enonce explicitement pour eviter toute illusion :
 - pas de lecture de documents ni de recherche semantique (M3) ;
 - pas de donnees d'entreprise (M4) ;
 - pas de wake word, pas de service en arriere-plan, pas de notifications
-  proactives, pas de briefing quotidien, pas de controle de l'ordinateur (M5) ;
+  proactives, pas de controle de l'ordinateur (M5) — le briefing existe, mais
+  sur demande seulement, jamais declenche tout seul ;
 - pas de recherche web ;
 - pas de graphe de connaissances — il sera evalue en M4, seulement s'il apporte
   une valeur reelle par rapport a la recherche semantique + metadonnees.

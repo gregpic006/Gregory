@@ -1,335 +1,196 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { Composer } from "./components/Composer";
+import { CommandBar } from "./components/CommandBar";
+import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmBar } from "./components/ConfirmBar";
-import { Conversation } from "./components/Conversation";
-import { Orb } from "./components/Orb";
-import { SidePanel } from "./components/SidePanel";
-import { fetchMetrics, fetchSystem, type MetricsSnapshot } from "./lib/api";
-import { MicRecorder, SpeechPlayer } from "./lib/audio";
-import type {
-  AssistantState,
-  ChatMessage,
-  Citation,
-  PendingAction,
-  ServerEvent,
-  SystemInfo,
-  ToolActivity,
-} from "./lib/types";
-import { JarvisSocket } from "./lib/ws";
+import { Sidebar } from "./components/layout/Sidebar";
+import { TopBar } from "./components/layout/TopBar";
+import { useJarvis } from "./lib/useJarvis";
+import type { ViewId } from "./lib/types";
+import { BusinessesView } from "./views/BusinessesView";
+import { ConversationView } from "./views/ConversationView";
+import { DashboardView } from "./views/DashboardView";
+import { HomeView } from "./views/HomeView";
+import { IntegrationsView } from "./views/IntegrationsView";
+import { MemoryView } from "./views/MemoryView";
+import { SettingsView } from "./views/SettingsView";
+import { CalendarView, EmailView, TasksView } from "./views/SourceViews";
 
-let counter = 0;
-const nextId = () => `m${++counter}`;
+const BRIEFING_PROMPT =
+  "Fais-moi mon briefing: mes rendez-vous d'aujourd'hui, les courriels qui " +
+  "meritent une reponse, et mes rappels en attente. Sois bref.";
 
-function greetingFor(name: string): string {
-  const hour = new Date().getHours();
-  if (hour < 5) return "Bonne nuit.";
-  if (hour < 12) return "Bon matin.";
-  if (hour < 18) return `Bon apres-midi${name ? `, ${name}` : ""}.`;
-  return `Bonsoir${name ? `, ${name}` : ""}.`;
-}
-
+/** Centre de commande JARVIS.
+ *
+ * Trois principes de disposition:
+ * 1. Le noyau est l'element principal; l'information l'entoure.
+ * 2. La barre de commande est toujours accessible, quelle que soit la vue.
+ * 3. Le mode plein ecran efface la navigation et agrandit le noyau — c'est la
+ *    vue « poste de pilotage » qu'on laisse ouverte sur un ecran dedie.
+ */
 export default function App() {
-  const [system, setSystem] = useState<SystemInfo | null>(null);
-  const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [state, setState] = useState<AssistantState>("idle");
-  const [detail, setDetail] = useState("");
-  const [activity, setActivity] = useState<ToolActivity[]>([]);
-  const [pending, setPending] = useState<PendingAction | null>(null);
-  const [error, setError] = useState("");
-  const [recording, setRecording] = useState(false);
+  const jarvis = useJarvis();
+  const [view, setView] = useState<ViewId>("home");
+  const [collapsed, setCollapsed] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
-  const socket = useRef<JarvisSocket | null>(null);
-  const recorder = useRef(new MicRecorder());
-  const player = useRef(new SpeechPlayer());
-  const streamingId = useRef<string | null>(null);
-  const serverVoice = useRef(false);
+  const navigate = useCallback((next: ViewId) => setView(next), []);
 
-  const assistantName = system?.name ?? "Jarvis";
-  const greeting = useMemo(() => greetingFor(system?.user ?? ""), [system?.user]);
-
-  /** Interrompt la parole de JARVIS des que l'utilisateur reprend la main. */
-  /** Le micro n'est utilisable que si un moteur de transcription existe.
-   *  Sans cette condition, on demanderait l'acces au micro pour finalement
-   *  echouer a la transcription — la pire des sequences pour l'utilisateur. */
-  const micAvailable =
-    recorder.current.supported && (system?.providers.stt_available ?? false);
-
-  const voiceLabel = system?.providers.tts_available
-    ? system.providers.tts
-    : player.current.voiceName();
-
-  const bargeIn = useCallback(() => {
-    player.current.beginTurn();
-    socket.current?.send({ type: "cancel" });
-  }, []);
-
-  const appendToken = useCallback((text: string) => {
-    setMessages((current) => {
-      const id = streamingId.current;
-      if (id) {
-        return current.map((message) =>
-          message.id === id ? { ...message, text: message.text + text } : message,
-        );
-      }
-      const created = nextId();
-      streamingId.current = created;
-      return [...current, { id: created, role: "assistant", text, streaming: true }];
-    });
-  }, []);
-
-  const handleEvent = useCallback(
-    (event: ServerEvent) => {
-      switch (event.type) {
-        case "state": {
-          setState(event.state as AssistantState);
-          setDetail((event.detail as string) ?? "");
-          if (event.system) setSystem(event.system as SystemInfo);
-          break;
-        }
-        case "transcript": {
-          const text = event.text as string;
-          setMessages((current) => [...current, { id: nextId(), role: "user", text }]);
-          break;
-        }
-        case "token": {
-          const chunk = event.text as string;
-          appendToken(chunk);
-          // Aucun moteur serveur: on parle des qu'une phrase est complete,
-          // au lieu d'attendre la fin de la reponse.
-          if (!serverVoice.current) {
-            player.current.pushStreamedText(chunk, system?.language ?? "fr-CA");
-          }
-          break;
-        }
-        case "tool_start":
-          setActivity((current) =>
-            [
-              {
-                id: nextId(),
-                tool: event.tool as string,
-                label: event.label as string,
-                status: "running" as const,
-              },
-              ...current,
-            ].slice(0, 20),
-          );
-          break;
-        case "tool_end":
-          setActivity((current) => {
-            const index = current.findIndex(
-              (item) => item.tool === event.tool && item.status === "running",
-            );
-            if (index === -1) return current;
-            const copy = [...current];
-            copy[index] = {
-              ...copy[index],
-              status: event.ok ? "ok" : "failed",
-              summary: String(event.summary ?? "").slice(0, 90),
-            };
-            return copy;
-          });
-          break;
-        case "confirmation_required":
-          setPending(event.action as PendingAction);
-          break;
-        case "message": {
-          const text = event.text as string;
-          const citations = (event.citations as Citation[]) ?? [];
-          setMessages((current) => {
-            const id = streamingId.current;
-            if (id) {
-              return current.map((message) =>
-                message.id === id
-                  ? { ...message, text, citations, streaming: false }
-                  : message,
-              );
-            }
-            return [...current, { id: nextId(), role: "assistant", text, citations }];
-          });
-          streamingId.current = null;
-          if (!event.pending_confirmation) setPending(null);
-          // Aucun moteur de voix serveur: la voix du systeme termine le tour.
-          if (!serverVoice.current) {
-            player.current.flushStreamedText(text, system?.language ?? "fr-CA");
-          }
-          void fetchMetrics().then(setMetrics).catch(() => undefined);
-          break;
-        }
-        case "audio":
-          serverVoice.current = true;
-          player.current.enqueueBase64(
-            event.audio_base64 as string,
-            event.mime as string,
-          );
-          break;
-        case "error":
-          setError(event.message as string);
-          streamingId.current = null;
-          setMessages((current) =>
-            current.map((message) => ({ ...message, streaming: false })),
-          );
-          break;
-        default:
-          break;
-      }
+  const ask = useCallback(
+    (question: string) => {
+      jarvis.sendText(question);
+      setView("home");
     },
-    [appendToken, system?.language],
+    [jarvis],
   );
 
-  useEffect(() => {
-    const connection = new JarvisSocket();
-    socket.current = connection;
-    const unsubscribe = connection.onEvent(handleEvent);
-    connection.connect();
-    fetchSystem()
-      .then((info) => {
-        setSystem(info);
-        serverVoice.current = info.providers.tts_available;
-      })
-      .catch(() => setError("Le serveur JARVIS ne repond pas. Est-il lance?"));
-    return () => {
-      unsubscribe();
-      connection.close();
-      recorder.current.release();
-    };
-  }, [handleEvent]);
+  const briefing = useCallback(() => {
+    jarvis.sendText(BRIEFING_PROMPT);
+    jarvis.refreshOverview();
+    setView("home");
+  }, [jarvis]);
 
-  const refreshSystem = useCallback(() => {
-    fetchSystem()
-      .then((info) => {
-        setSystem(info);
-        serverVoice.current = info.providers.tts_available;
-      })
-      .catch(() => undefined);
-  }, []);
-
-  const sendText = useCallback(
-    (text: string) => {
-      setError("");
-      bargeIn();
-      streamingId.current = null;
-      setMessages((current) => [...current, { id: nextId(), role: "user", text }]);
-      socket.current?.send({ type: "text", text });
-      setState("understanding");
-    },
-    [bargeIn],
-  );
-
-  const startRecording = useCallback(async () => {
-    if (recording) return;
-    if (!micAvailable) {
-      setError(
-        "La reconnaissance vocale n'est pas configuree (JARVIS_STT_PROVIDER). " +
-          "Ecris ta demande ci-dessous — tout fonctionne aussi en texte.",
-      );
-      return;
-    }
-    setError("");
-    bargeIn();
-    try {
-      await recorder.current.start();
-      setRecording(true);
-      setState("listening");
-    } catch {
-      setError("Acces au micro refuse. Utilise le mode texte.");
-    }
-  }, [bargeIn, micAvailable, recording]);
-
-  const stopRecording = useCallback(async () => {
-    if (!recording) return;
-    setRecording(false);
-    setState("transcribing");
-    const captured = await recorder.current.stop();
-    if (!captured) {
-      setState("idle");
-      return;
-    }
-    socket.current?.send({
-      type: "audio",
-      audio_base64: captured.base64,
-      mime: captured.mime,
-    });
-  }, [recording]);
-
-  // Push-to-talk au clavier: Espace maintenu, hors champ de saisie.
+  // Raccourcis globaux. Espace ne declenche le micro que hors champ de saisie
+  // et seulement si un moteur de transcription existe reellement.
   useEffect(() => {
     const isTyping = (target: EventTarget | null) =>
       target instanceof HTMLElement &&
-      (target.tagName === "TEXTAREA" || target.tagName === "INPUT");
+      (target.tagName === "TEXTAREA" ||
+        target.tagName === "INPUT" ||
+        target.isContentEditable);
 
     const down = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+        return;
+      }
+      if (event.key === "Escape") {
+        setPaletteOpen(false);
+        return;
+      }
+      if (event.code === "Space" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        void jarvis.startRecording();
+        return;
+      }
       if (event.code !== "Space" || event.repeat || isTyping(event.target)) return;
-      if (!micAvailable) return;
+      if (!jarvis.micAvailable || paletteOpen) return;
       event.preventDefault();
-      void startRecording();
+      void jarvis.startRecording();
     };
+
     const up = (event: KeyboardEvent) => {
       if (event.code !== "Space" || isTyping(event.target)) return;
-      if (!micAvailable) return;
+      if (!jarvis.micAvailable) return;
       event.preventDefault();
-      void stopRecording();
+      void jarvis.stopRecording();
     };
+
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [micAvailable, startRecording, stopRecording]);
+  }, [jarvis, paletteOpen]);
 
-  const decide = (approved: boolean) => {
-    if (!pending) return;
-    socket.current?.send({
-      type: "confirm",
-      action_id: pending.action_id,
-      approved,
-    });
-    setPending(null);
+  const voiceLabel = jarvis.system?.providers.tts_available
+    ? jarvis.system.providers.tts
+    : jarvis.player.voiceName();
+
+  const badges = {
+    email:
+      jarvis.overview?.panes.email.status === "connected"
+        ? jarvis.overview.panes.email.messages.length
+        : undefined,
+    tasks: jarvis.overview?.panes.tasks.reminders.length || undefined,
   };
 
   return (
-    <div className="shell">
-      <header className="topbar">
-        <span className="brand">{assistantName}</span>
-        {system?.dry_run && <span className="chip warn">mode developpement</span>}
-        {system?.providers.llm === "mock" && (
-          <span className="chip warn">moteur local — sans LLM</span>
-        )}
-        {!micAvailable && <span className="chip">voix desactivee</span>}
-        <span className="spacer" />
-        <span className="chip">{system?.providers.llm_models.balanced ?? "…"}</span>
-        <span className="chip" title="Voix utilisee pour la reponse">{voiceLabel}</span>
-        <span className="chip ok">{system?.timezone ?? ""}</span>
-      </header>
+    <div className="app" data-collapsed={collapsed} data-fullscreen={fullscreen}>
+      <Sidebar
+        view={view}
+        onNavigate={navigate}
+        collapsed={collapsed}
+        onToggle={() => setCollapsed((value) => !value)}
+        badges={badges}
+      />
 
       <main className="main">
-        <Orb state={state} greeting={greeting} detail={detail} />
-        {error && <div className="banner">{error}</div>}
-        <Conversation messages={messages} assistantName={assistantName} />
-        {pending && <ConfirmBar action={pending} onDecision={decide} />}
-        <div className="hint">
-          {micAvailable
-            ? "Espace = parler · Entree = envoyer · parler pendant la reponse l'interrompt"
-            : "Entree = envoyer · voix desactivee: aucun moteur de transcription configure"}
+        <TopBar
+          system={jarvis.system}
+          fullscreen={fullscreen}
+          onToggleFullscreen={() => setFullscreen((value) => !value)}
+          onOpenSearch={() => setPaletteOpen(true)}
+          voiceLabel={voiceLabel}
+        />
+
+        <div className="view">
+          {jarvis.error && (
+            <div className="banner" onClick={jarvis.dismissError} role="presentation">
+              {jarvis.error}
+            </div>
+          )}
+
+          {view === "home" && (
+            <HomeView
+              state={jarvis.state}
+              detail={jarvis.detail}
+              levelRef={jarvis.levelRef}
+              overview={jarvis.overview}
+              lastTurn={jarvis.lastTurn}
+              transcript={jarvis.transcript}
+              activity={jarvis.activity}
+              fullscreen={fullscreen}
+              onNavigate={navigate}
+            />
+          )}
+          {view === "dashboard" && (
+            <DashboardView
+              overview={jarvis.overview}
+              onNavigate={navigate}
+              onBriefing={briefing}
+            />
+          )}
+          {view === "conversation" && (
+            <ConversationView
+              messages={jarvis.messages}
+              activity={jarvis.activity}
+              assistantName={jarvis.system?.name ?? "Jarvis"}
+            />
+          )}
+          {view === "calendar" && <CalendarView overview={jarvis.overview} />}
+          {view === "email" && <EmailView overview={jarvis.overview} />}
+          {view === "tasks" && <TasksView overview={jarvis.overview} />}
+          {view === "businesses" && <BusinessesView />}
+          {view === "memory" && <MemoryView />}
+          {view === "integrations" && (
+            <IntegrationsView system={jarvis.system} onChanged={jarvis.refreshSystem} />
+          )}
+          {view === "settings" && (
+            <SettingsView system={jarvis.system} player={jarvis.player} />
+          )}
         </div>
-        <Composer
-          onSend={sendText}
-          onMicDown={() => void startRecording()}
-          onMicUp={() => void stopRecording()}
-          recording={recording}
-          micAvailable={micAvailable}
-          disabled={false}
+
+        {jarvis.pending && <ConfirmBar action={jarvis.pending} onDecision={jarvis.decide} />}
+
+        <CommandBar
+          onSend={jarvis.sendText}
+          onMicDown={() => void jarvis.startRecording()}
+          onMicUp={() => void jarvis.stopRecording()}
+          recording={jarvis.recording}
+          micAvailable={jarvis.micAvailable}
         />
       </main>
 
-      <SidePanel
-        system={system}
-        activity={activity}
-        metrics={metrics}
-        onIntegrationsChanged={refreshSystem}
-        player={player.current}
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        overview={jarvis.overview}
+        onNavigate={navigate}
+        onAsk={ask}
       />
     </div>
   );
