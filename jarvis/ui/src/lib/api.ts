@@ -1,7 +1,8 @@
 /** Client REST minimal de l'API JARVIS. */
 
 import type {
-  BusinessOrg, GoogleStatus, MemoryEntry, Overview, SystemInfo,
+  BusinessOrg, DocumentEntry, DocumentHit, GoogleStatus, MemoryEntry, Overview,
+  PaneStatus, SystemInfo,
 } from "./types";
 
 async function get<T>(path: string): Promise<T> {
@@ -98,4 +99,47 @@ export function fetchMemory(query = "", kind = ""): Promise<MemoryResponse> {
 export async function forgetMemory(id: string): Promise<void> {
   const response = await fetch(`/api/memory/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!response.ok) throw new Error(`suppression refusee (${response.status})`);
+}
+
+export interface DocumentsResponse {
+  enabled: boolean;
+  status: PaneStatus;
+  detail: string;
+  documents: DocumentEntry[];
+  hits?: DocumentHit[];
+  total: number;
+  /** Ce que la recherche sait reellement faire: « lexical », « semantique ». */
+  search_modes: string[];
+  documents_dir?: string;
+}
+
+export function fetchDocuments(query = ""): Promise<DocumentsResponse> {
+  const suffix = query ? `?query=${encodeURIComponent(query)}` : "";
+  return get(`/api/documents${suffix}`);
+}
+
+export async function forgetDocument(id: string): Promise<void> {
+  const response = await fetch(`/api/documents/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!response.ok) throw new Error(`suppression refusee (${response.status})`);
+}
+
+export interface ReindexResponse {
+  summary: string;
+  total: number;
+  report: {
+    indexed: string[];
+    unchanged: string[];
+    skipped: { name: string; reason: string }[];
+    failed: { name: string; reason: string }[];
+    chunks: number;
+  };
+}
+
+export async function reindexDocuments(): Promise<ReindexResponse> {
+  const response = await fetch("/api/documents/reindex", { method: "POST" });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: "" }));
+    throw new Error(detail.detail || `indexation refusee (${response.status})`);
+  }
+  return response.json();
 }

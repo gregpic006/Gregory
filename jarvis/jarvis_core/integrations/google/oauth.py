@@ -46,12 +46,17 @@ SCOPES_GMAIL_WRITE = ("https://www.googleapis.com/auth/gmail.compose",)
 #: `calendar.events` couvre lecture et ecriture des evenements, rien d'autre.
 SCOPES_CALENDAR = ("https://www.googleapis.com/auth/calendar.events",)
 SCOPES_CONTACTS = ("https://www.googleapis.com/auth/contacts.readonly",)
+#: `drive.readonly` donne acces a tout le Drive: on la demande seulement si
+#: la fonctionnalite est activee, et l'indexation reste bornee a un dossier.
+SCOPES_DRIVE = ("https://www.googleapis.com/auth/drive.readonly",)
 
 #: Duree de vie d'une demande d'autorisation en attente.
 PENDING_TTL_SECONDS = 600
 
 
-def scopes_for(*, gmail: bool, gmail_write: bool, calendar: bool, contacts: bool) -> list[str]:
+def scopes_for(
+    *, gmail: bool, gmail_write: bool, calendar: bool, contacts: bool, drive: bool = False
+) -> list[str]:
     """Portees a demander compte tenu des capacites activees."""
     scopes: list[str] = list(SCOPES_IDENTITY)
     if gmail:
@@ -62,6 +67,8 @@ def scopes_for(*, gmail: bool, gmail_write: bool, calendar: bool, contacts: bool
         scopes.extend(SCOPES_CALENDAR)
     if contacts:
         scopes.extend(SCOPES_CONTACTS)
+    if drive:
+        scopes.extend(SCOPES_DRIVE)
     return scopes
 
 

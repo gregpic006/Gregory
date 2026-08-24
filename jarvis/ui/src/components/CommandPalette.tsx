@@ -25,6 +25,7 @@ const PAGES: { view: ViewId; label: string }[] = [
   { view: "calendar", label: "Calendrier" },
   { view: "email", label: "Courriels" },
   { view: "tasks", label: "Rappels" },
+  { view: "documents", label: "Documents" },
   { view: "businesses", label: "Entreprises" },
   { view: "memory", label: "Memoire" },
   { view: "integrations", label: "Integrations" },

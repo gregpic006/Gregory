@@ -4,10 +4,11 @@ L'import de ce module enregistre les outils dans le registre global.
 """
 
 from jarvis_core.tools.builtin import (  # noqa: F401
+    document_tools,
     memory_tools,
     reminder_tools,
     system_tools,
     time_tools,
 )
 
-__all__ = ["memory_tools", "reminder_tools", "system_tools", "time_tools"]
+__all__ = ["document_tools", "memory_tools", "reminder_tools", "system_tools", "time_tools"]

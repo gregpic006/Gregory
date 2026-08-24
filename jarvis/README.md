@@ -14,6 +14,7 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 
 - [Ce qui fonctionne aujourd'hui](#ce-qui-fonctionne-aujourdhui)
 - [L'interface](#linterface)
+- [Documents](#indexer-tes-documents)
 - [Architecture en bref](#architecture-en-bref)
 - [Installation (Windows)](#installation-windows)
 - [Installation (Linux / macOS)](#installation-linux--macos)
@@ -48,7 +49,10 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 | Gmail : brouillon, reponse, envoi (avec confirmation) | oui |
 | Calendar : consulter, creer, modifier, annuler | oui |
 | Contacts : « envoie ca a Xavier » -> adresse resolue | oui |
-| Documents et recherche semantique | **non — M3** |
+| Documents : PDF, Word, Markdown, texte | oui |
+| Recherche dans les documents (mots exacts) | oui, hors ligne, sans telechargement |
+| Recherche par le sens | oui, quand le modele local est telecharge |
+| Google Drive : indexer un dossier | oui (consentement supplementaire requis) |
 | Donnees d'entreprise | **non — M4** |
 | Wake word, briefing quotidien, controle de l'ordinateur | **non — M5** |
 
@@ -69,6 +73,7 @@ cherche, il repond — et l'information utile l'entoure.
 | **Tableau de bord** | La journee en cartes + **Lancer le briefing** |
 | **Conversation** | Le fil complet, la transcription en direct, les sources citees |
 | **Calendrier / Courriels / Rappels** | Une source a la fois, en detail |
+| **Documents** | Ce qui est indexe, la recherche plein texte, et **quel mode** de recherche tourne |
 | **Entreprises** | Un contexte par organisation (Grande Allee, Maguire, Bouvier, Portail, Immobilier) |
 | **Memoire** | Ce que JARVIS retient, avec sa source — et un bouton pour l'oublier |
 | **Integrations** | Ce qui est branche, ce qui ne l'est pas, comment le brancher |
@@ -128,6 +133,7 @@ jarvis/
 │  ├─ cli.py               jarvis serve | chat | doctor | keygen
 │  ├─ llm/                 abstraction fournisseur, routage, tarification
 │  ├─ voice/               stt/ et tts/, une classe par fournisseur
+│  ├─ documents/           extraction, decoupage, index lexical + vecteurs
 │  ├─ memory/              session (court terme) et magasin persistant
 │  ├─ tools/               registre, validation de schema, outils integres
 │  ├─ security/            permissions, anti-injection, chiffrement, audit
@@ -267,6 +273,61 @@ total a la boite. Les jetons sont chiffres au repos, et se revoquent d'un clic.
 
 ---
 
+### Indexer tes documents
+
+Depose tes fichiers (`.pdf`, `.docx`, `.md`, `.txt`) dans le dossier surveille,
+puis :
+
+```powershell
+.\.venv\Scripts\python.exe -m jarvis_core.cli index
+```
+
+Chaque fichier est annonce : indexe, inchange, ignore (avec la raison) ou en
+echec (avec la cause). Rien n'est saute en silence — un document illisible
+absent de l'index ferait repondre « je n'ai rien trouve » sur un contrat que
+JARVIS n'a jamais lu.
+
+Active d'abord la fonctionnalite dans `.env` :
+
+```
+JARVIS_FEATURE_DOCUMENTS=true
+JARVIS_DOCUMENTS_DIR=C:\Users\greg\Documents\JARVIS
+```
+
+**Deux recherches, pas une.** La recherche par **mots exacts** fonctionne
+immediatement, hors ligne, sans rien telecharger — et elle ignore les accents,
+donc « reservation » trouve « réservation ». La recherche **par le sens**
+(« combien ca coute » -> « loyer ») demande un modele local de ~220 Mo,
+telecharge une seule fois au premier usage.
+
+Si ce modele ne se charge pas, **la recherche continue en mots exacts et le
+dit**, dans l'interface comme dans les reponses de JARVIS. Pour verifier lequel
+des deux tourne :
+
+```powershell
+.\.venv\Scripts\python.exe -m jarvis_core.cli check-documents
+```
+
+### Indexer un dossier Google Drive
+
+Drive demande une autorisation **supplementaire** : la portee `drive.readonly`
+donne acces a tout ton Drive. JARVIS la compense en n'indexant qu'un seul
+dossier, celui que tu declares.
+
+1. Dans `.env` : `JARVIS_FEATURE_DRIVE=true` et `JARVIS_DRIVE_FOLDER=JARVIS`
+2. Reconnecte le compte Google (l'ecran de consentement redemande l'acces) :
+   ouvre l'onglet **Integrations** et clique sur **Reconnecter**.
+3. Puis :
+
+```powershell
+.\.venv\Scripts\python.exe -m jarvis_core.cli sync-drive
+```
+
+Sans ces deux drapeaux, la portee Drive n'apparait meme pas sur l'ecran de
+consentement Google.
+
+---
+
 ## Lancer
 
 **Une seule commande.** Elle recompile l'interface si elle a change, puis
@@ -331,7 +392,10 @@ La suite couvre en particulier les situations dangereuses :
   devinee ;
 - une metrique d'entreprise sans source branchee → **`non connecte`**, jamais
   un chiffre invente ;
-- une API Google qui repond 500 → **`erreur`**, jamais une liste vide.
+- une API Google qui repond 500 → **`erreur`**, jamais une liste vide ;
+- un document illisible → **nomme dans le rapport**, jamais saute en silence ;
+- une recherche sans modele semantique → **annoncee comme « mots exacts »**,
+  jamais presentee comme une comprehension du sens.
 
 ---
 
@@ -422,7 +486,7 @@ sensible n'est pas recopie integralement.
 | **M0** | Fondations : config, erreurs, base, journalisation | fait |
 | **M1** | Cerveau + outils + permissions + memoire + voix + interface | fait |
 | **M2** | Google : Gmail, Calendar, Contacts (OAuth + PKCE, jetons chiffres) | fait |
-| **M3** | Documents : PDF/DOCX/XLSX, embeddings, recherche semantique, citations | a venir |
+| **M3** | Documents : PDF/DOCX/MD/TXT, index lexical + vecteurs, Drive, citations | fait |
 | **M4** | Entreprises : multi-organisation, POS, Stripe, KPI, PostgreSQL + pgvector | a venir |
 | **M5** | Wake word, service en arriere-plan, briefing quotidien, notifications, Tauri | a venir |
 | **M6** | Mobile, acces distant, objets connectes | a venir |

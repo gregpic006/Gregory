@@ -12,6 +12,7 @@ import { ConversationView } from "./views/ConversationView";
 import { DashboardView } from "./views/DashboardView";
 import { HomeView } from "./views/HomeView";
 import { IntegrationsView } from "./views/IntegrationsView";
+import { DocumentsView } from "./views/DocumentsView";
 import { MemoryView } from "./views/MemoryView";
 import { SettingsView } from "./views/SettingsView";
 import { CalendarView, EmailView, TasksView } from "./views/SourceViews";
@@ -165,6 +166,7 @@ export default function App() {
           {view === "email" && <EmailView overview={jarvis.overview} />}
           {view === "tasks" && <TasksView overview={jarvis.overview} />}
           {view === "businesses" && <BusinessesView />}
+          {view === "documents" && <DocumentsView />}
           {view === "memory" && <MemoryView />}
           {view === "integrations" && (
             <IntegrationsView system={jarvis.system} onChanged={jarvis.refreshSystem} />

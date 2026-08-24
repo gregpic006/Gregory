@@ -140,6 +140,33 @@ class GoogleClient:
 
         return self._handle(response, url)
 
+    async def download(
+        self, url: str, *, params: dict[str, Any] | None = None, max_bytes: int = 0
+    ) -> bytes:
+        """Telecharge un contenu binaire (export Drive, piece jointe).
+
+        Meme contrat que `request` pour le 401: un seul rafraichissement, un
+        seul reessai. `max_bytes` refuse un fichier demesure plutot que de le
+        charger entierement en memoire.
+        """
+        access_token = await self._access_token()
+        response = await self._send("GET", url, access_token, params, None)
+        if response.status_code == 401:
+            access_token = await self._access_token(force_refresh=True)
+            response = await self._send("GET", url, access_token, params, None)
+
+        if response.status_code >= 400:
+            # Reutilise la traduction d'erreurs commune (401, 403, 429...).
+            self._handle(response, url)
+
+        content = response.content
+        if max_bytes and len(content) > max_bytes:
+            raise IntegrationUnavailableError(
+                "Google",
+                f"fichier trop volumineux ({len(content)} octets) sur {url}",
+            )
+        return content
+
     async def _send(
         self,
         method: str,

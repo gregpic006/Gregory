@@ -15,6 +15,7 @@ from jarvis_core.config import Settings
 from jarvis_core.integrations.google.calendar import CalendarService
 from jarvis_core.integrations.google.client import PROVIDER, GoogleClient
 from jarvis_core.integrations.google.contacts import ContactsService
+from jarvis_core.integrations.google.drive import DriveService
 from jarvis_core.integrations.google.gmail import GmailService
 from jarvis_core.integrations.google.oauth import GoogleOAuth, scopes_for
 from jarvis_core.integrations.google.tokens import OAuthTokenRepository
@@ -47,6 +48,7 @@ class GoogleWorkspace:
         self.gmail = GmailService(self.client)
         self.calendar = CalendarService(self.client)
         self.contacts = ContactsService(self.client)
+        self.drive = DriveService(self.client)
 
     # -- capacites -----------------------------------------------------------
 
@@ -73,6 +75,7 @@ class GoogleWorkspace:
             gmail_write=self.settings.feature_gmail,
             calendar=self.settings.feature_calendar,
             contacts=self.settings.feature_gmail or self.settings.feature_calendar,
+            drive=self.settings.feature_drive and self.settings.feature_documents,
         )
 
     def status(self) -> dict[str, Any]:
@@ -84,6 +87,7 @@ class GoogleWorkspace:
             "features": {
                 "gmail": self.settings.feature_gmail,
                 "calendar": self.settings.feature_calendar,
+                "drive": self.settings.feature_drive and self.settings.feature_documents,
             },
         }
 

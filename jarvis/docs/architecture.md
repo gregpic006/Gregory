@@ -606,12 +606,93 @@ raisonnement du modele, conformement au principe de la section 11.
 
 ---
 
-## 14. Ce que JARVIS ne fait pas encore
+## 14. Documents et recherche (M3)
+
+### Pourquoi la recherche est hybride
+
+Deux facons de chercher, qui ne repondent pas aux memes questions.
+
+L'**index lexical** (SQLite FTS5, avec `remove_diacritics 2`) trouve les termes
+exacts. Il ne demande aucun telechargement, fonctionne hors ligne, et ignore les
+accents — ce qui compte quand la question arrive par la voix: « reservation »
+doit trouver « réservation ».
+
+La **recherche par vecteurs** trouve une idee formulee autrement: « combien ca
+coute » ramene « le loyer mensuel est de 4 200 $ », sans qu'aucun mot ne soit
+partage. Elle demande un modele local (~220 Mo, multilingue, ONNX via
+fastembed) telecharge une seule fois.
+
+Les deux classements sont fusionnes par **rang reciproque** (RRF, k=60), qui
+evite d'avoir a rendre comparables un score bm25 et une similarite cosinus.
+
+### La regle qui gouverne le module
+
+**L'index lexical est le socle, le semantique est un supplement.** Si le modele
+ne se charge pas — pas de reseau, disque plein, telechargement interrompu — la
+recherche continue en mots exacts **et l'annonce**: dans l'interface, dans le
+diagnostic, et dans le resume que l'outil renvoie au modele.
+
+La distinction n'est pas cosmetique. « Aucun document ne contient ces mots » et
+« aucun document ne parle de ca » sont deux affirmations differentes; laisser
+croire a la seconde quand seule la premiere a ete verifiee, c'est exactement le
+genre de mensonge par omission que ce projet refuse.
+
+Le chargement est **paresseux**: `jarvis serve` ne declenche jamais un
+telechargement de 220 Mo, il se produit a la premiere recherche.
+
+### Decoupage
+
+Trop gros, un morceau noie l'information; trop petit, il perd son contexte —
+« il expire le 30 juin » ne veut rien dire seul. On coupe donc sur les
+frontieres naturelles (paragraphes, puis phrases), vers 1 100 caracteres, avec
+un recouvrement de 160 caracteres pour qu'une information a cheval sur une
+coupure reste trouvable des deux cotes.
+
+Chaque morceau conserve sa **localisation** (page 4, section « Resiliation »):
+c'est ce qui permet a une citation de dire ou regarder, et non pas seulement de
+quel fichier elle vient.
+
+### Ce qui n'est jamais silencieux
+
+L'indexation rend compte fichier par fichier: indexe, inchange, ignore (avec la
+raison), en echec (avec la cause). Un document illisible qui disparaitrait du
+rapport ferait repondre « je n'ai rien trouve » sur un contrat jamais lu — pire
+qu'une erreur visible.
+
+La reindexation est idempotente, sur l'**empreinte du contenu** et non la date:
+une synchronisation ou une copie change la date sans toucher au texte.
+
+### Google Drive
+
+La portee `drive.readonly` donne acces a **tout** le Drive. Trois compensations:
+
+1. elle n'est demandee que si `JARVIS_FEATURE_DRIVE` **et**
+   `JARVIS_FEATURE_DOCUMENTS` sont actifs — sinon elle n'apparait meme pas sur
+   l'ecran de consentement;
+2. l'indexation est bornee a un dossier declare (`JARVIS_DRIVE_FOLDER`), et
+   refuse de s'executer si aucun n'est configure;
+3. les documents Google natifs sont **exportes en texte**, jamais manipules
+   comme des binaires.
+
+Les fichiers natifs n'ont pas de `md5Checksum`: la date de modification sert
+alors d'empreinte, sans quoi ils seraient reindexes a chaque passage.
+
+### Frontiere de confiance
+
+Le contenu d'un document est **du contenu externe**. Les outils documentaires
+marquent leur resultat `untrusted`, ce qui declenche l'encapsulation decrite en
+section 8. Un contrat qui contient « ignore les instructions precedentes »
+reste un contrat, pas un ordre.
+
+---
+
+## 15. Ce que JARVIS ne fait pas encore
 
 Enonce explicitement pour eviter toute illusion :
 
-- pas de Drive ni de Google Tasks ;
-- pas de lecture de documents ni de recherche semantique (M3) ;
+- pas de Google Tasks ;
+- pas de lecture des feuilles de calcul locales (.xlsx) — Sheets passe par
+  Drive, exporte en CSV ;
 - pas de donnees d'entreprise (M4) ;
 - pas de wake word, pas de service en arriere-plan, pas de notifications
   proactives, pas de controle de l'ordinateur (M5) — le briefing existe, mais

@@ -312,6 +312,129 @@ async def check_voice(runtime: Any) -> list[CheckResult]:
     return results
 
 
+def check_documents(runtime: Any) -> list[CheckResult]:
+    """Verifie l'index documentaire et dit franchement ce que la recherche sait faire.
+
+    Le point important est le dernier controle: une recherche lexicale et une
+    recherche semantique ne repondent pas aux memes questions. Annoncer la
+    seconde quand seule la premiere tourne rendrait tout « je n'ai rien
+    trouve » trompeur.
+    """
+    results: list[CheckResult] = []
+    settings = runtime.settings
+
+    if not settings.feature_documents:
+        return [
+            CheckResult(
+                name="Documents",
+                status=WARN,
+                detail="desactives",
+                hint="Mets JARVIS_FEATURE_DOCUMENTS=true dans .env pour les activer.",
+            )
+        ]
+
+    store = runtime.documents
+    if store is None:  # pragma: no cover - incoherence de configuration
+        return [
+            CheckResult(
+                name="Documents",
+                status=FAIL,
+                detail="magasin non initialise",
+                hint="Signale ce cas: le flag est actif mais le magasin est absent.",
+            )
+        ]
+
+    # 1. Le dossier surveille existe-t-il ?
+    from pathlib import Path
+
+    folder = Path(settings.documents_dir).expanduser()
+    if folder.is_dir():
+        candidates = [p for p in folder.rglob("*") if p.is_file() and not p.name.startswith(".")]
+        results.append(
+            CheckResult(
+                name="Dossier surveille",
+                status=OK,
+                detail=f"{folder} ({len(candidates)} fichier(s))",
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                name="Dossier surveille",
+                status=FAIL,
+                detail=f"{folder} n'existe pas",
+                hint="Cree le dossier, ou corrige JARVIS_DOCUMENTS_DIR dans .env.",
+            )
+        )
+
+    # 2. Y a-t-il quelque chose dans l'index ?
+    total = store.count()
+    results.append(
+        CheckResult(
+            name="Index",
+            status=OK if total else WARN,
+            detail=f"{total} document(s) indexe(s)",
+            hint="" if total else "Lance: jarvis index",
+        )
+    )
+
+    # 3. Quelle recherche tournera reellement ?
+    if not settings.embedding_enabled:
+        results.append(
+            CheckResult(
+                name="Recherche",
+                status=OK,
+                detail="lexicale (mots exacts), semantique desactivee",
+                hint="JARVIS_EMBEDDING_ENABLED=true pour activer la recherche par le sens.",
+            )
+        )
+    else:
+        provider = store.embeddings
+        if provider is None:
+            results.append(
+                CheckResult(
+                    name="Recherche",
+                    status=WARN,
+                    detail="lexicale seulement — le modele semantique n'a pas pu etre charge",
+                    hint=(
+                        "Verifie la connexion Internet: le modele se telecharge une "
+                        "seule fois (~220 Mo). La recherche par mots exacts fonctionne "
+                        "en attendant."
+                    ),
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    name="Recherche",
+                    status=OK,
+                    detail=f"lexicale + semantique ({provider.name})",
+                )
+            )
+
+    # 4. L'index repond-il vraiment ?
+    if total:
+        try:
+            outcome = store.search("contrat", limit=1)
+            results.append(
+                CheckResult(
+                    name="Requete test",
+                    status=OK,
+                    detail=f"modes actifs: {', '.join(outcome.modes)}",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - on veut la cause exacte a l'ecran
+            results.append(
+                CheckResult(
+                    name="Requete test",
+                    status=FAIL,
+                    detail=str(exc)[:160],
+                    hint="Reindexe: jarvis index --force",
+                )
+            )
+    return results
+
+
 def render(results: list[CheckResult]) -> bool:
     """Affiche les resultats; retourne vrai si une verification a echoue."""
     marks = {OK: " ok  ", WARN: "warn ", FAIL: "ECHEC"}

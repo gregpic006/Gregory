@@ -57,6 +57,15 @@ Write-Host "-> installation des dependances Python"
 & $venvPython -m pip install --upgrade pip
 & $venvPython -m pip install -e ".[anthropic,dev]"
 
+# Recherche par le sens dans les documents. Le paquet s'installe maintenant;
+# le modele (~220 Mo) ne se telecharge qu'a la premiere recherche.
+Write-Host "-> installation de la recherche semantique (optionnelle)"
+& $venvPython -m pip install -e ".[semantic-search]"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "   Non installee. La recherche dans les documents fonctionnera" -ForegroundColor Yellow
+    Write-Host "   sur les mots exacts, ce qui reste utilisable." -ForegroundColor Yellow
+}
+
 if (-not (Test-Path ".env")) {
     Write-Host "-> creation du fichier .env"
     Copy-Item ".env.example" ".env"
@@ -78,4 +87,4 @@ Set-Location $root
 
 Write-Host ""
 Write-Host "Termine. Pour demarrer :" -ForegroundColor Green
-Write-Host "  powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1"
+Write-Host "  powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1"

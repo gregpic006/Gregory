@@ -15,11 +15,18 @@ dependencies = [
     "cryptography>=43",
     "httpx>=0.27",
     "python-multipart>=0.0.9",
+    # Lecture des documents (M3). Legers et sans dependance lourde: la
+    # recherche par mots exacts doit fonctionner sans installation optionnelle.
+    "pypdf>=5.0",
+    "python-docx>=1.1",
 ]
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=1.0.0"]
 local-stt = ["faster-whisper>=1.0.3"]
+# Recherche par le sens. Optionnelle: sans elle, la recherche reste lexicale
+# (et le dit). onnxruntime, pas PyTorch.
+semantic-search = ["fastembed>=0.4"]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

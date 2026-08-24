@@ -65,6 +65,7 @@ async def overview(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, A
             "tasks": _tasks_pane(runtime),
             "business": _business_pane(runtime),
             "memory": _memory_pane(runtime),
+            "documents": _documents_pane(runtime),
         },
     }
 
@@ -128,6 +129,20 @@ def _memory_pane(runtime: JarvisRuntime) -> dict[str, Any]:
     if runtime.memory_store is None:
         return _pane(NOT_CONNECTED, "La memoire persistante est desactivee", count=0)
     return _pane(CONNECTED, "", count=runtime.memory_store.count())
+
+
+def _documents_pane(runtime: JarvisRuntime) -> dict[str, Any]:
+    store = runtime.documents
+    if store is None:
+        return _pane(NOT_CONNECTED, "La recherche documentaire n'est pas activee")
+    total = store.count()
+    if total == 0:
+        return _pane(
+            CONNECTED,
+            f"Aucun document indexe. Depose des fichiers dans {runtime.settings.documents_dir}",
+            count=0,
+        )
+    return _pane(CONNECTED, "", count=total)
 
 
 @router.get("/businesses")
@@ -207,3 +222,81 @@ async def forget_memory(
     if not store.forget(memory_id):
         raise HTTPException(status_code=404, detail="Souvenir introuvable.")
     return {"deleted": memory_id}
+
+
+@router.get("/documents")
+async def list_documents(
+    query: str = "",
+    limit: int = 50,
+    runtime: JarvisRuntime = Depends(get_runtime),
+) -> dict[str, Any]:
+    """Les documents indexes, et — sans mentir — ce que la recherche sait faire.
+
+    `search_modes` dit ce qui tournerait reellement: sans modele semantique
+    charge, l'interface annonce « mots exacts » plutot que de laisser croire a
+    une comprehension du sens.
+    """
+    store = runtime.documents
+    if store is None:
+        return {
+            "enabled": False,
+            "status": NOT_CONNECTED,
+            "detail": "La recherche documentaire est desactivee (JARVIS_FEATURE_DOCUMENTS).",
+            "documents": [],
+            "total": 0,
+            "search_modes": [],
+        }
+
+    if query:
+        outcome = store.search(query, limit=min(limit, 50))
+        return {
+            "enabled": True,
+            "status": CONNECTED,
+            "detail": "",
+            "query": query,
+            "hits": [hit.as_dict() for hit in outcome.hits],
+            "search_modes": list(outcome.modes),
+            "total": outcome.indexed_documents,
+            "documents": [],
+        }
+
+    documents = store.list_documents(limit=min(limit, 200))
+    modes = ["lexical"] + (["semantique"] if store.embeddings is not None else [])
+    return {
+        "enabled": True,
+        "status": CONNECTED,
+        "detail": "",
+        "documents": [doc.as_dict() for doc in documents],
+        "total": store.count(),
+        "search_modes": modes,
+        "documents_dir": runtime.settings.documents_dir,
+    }
+
+
+@router.delete("/documents/{document_id}")
+async def forget_document(
+    document_id: str, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    """Retire un document de l'index (le fichier d'origine n'est pas touche)."""
+    store = runtime.documents
+    if store is None:
+        raise HTTPException(status_code=400, detail="La recherche documentaire est desactivee.")
+    if not store.delete(document_id):
+        raise HTTPException(status_code=404, detail="Document introuvable dans l'index.")
+    return {"deleted": document_id}
+
+
+@router.post("/documents/reindex")
+async def reindex_documents(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    """Relance l'indexation du dossier local configure."""
+    from jarvis_core.documents.ingest import ingest_directory
+    from jarvis_core.errors import DocumentError
+
+    store = runtime.documents
+    if store is None:
+        raise HTTPException(status_code=400, detail="La recherche documentaire est desactivee.")
+    try:
+        report = ingest_directory(store, runtime.settings.documents_dir)
+    except DocumentError as exc:
+        raise HTTPException(status_code=400, detail=exc.user_message) from exc
+    return {"report": report.as_dict(), "summary": report.summary(), "total": store.count()}

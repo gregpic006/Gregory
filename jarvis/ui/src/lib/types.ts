@@ -108,6 +108,7 @@ export type ViewId =
   | "tasks"
   | "businesses"
   | "memory"
+  | "documents"
   | "integrations"
   | "settings";
 
@@ -165,6 +166,7 @@ export interface Overview {
     tasks: { status: PaneStatus; detail: string; reminders: Reminder[] };
     business: { status: PaneStatus; detail: string; organizations: Organization[] };
     memory: { status: PaneStatus; detail: string; count: number };
+    documents: { status: PaneStatus; detail: string; count: number };
   };
 }
 
@@ -188,4 +190,26 @@ export interface MemoryEntry {
   confidence: number;
   happened_at: string | null;
   created_at: string;
+}
+
+export interface DocumentEntry {
+  id: string;
+  title: string;
+  source: string;
+  path: string;
+  url: string;
+  chunk_count: number;
+  bytes: number;
+  modified_at: string;
+  indexed_at: string;
+}
+
+export interface DocumentHit {
+  document_id: string;
+  title: string;
+  locator: string;
+  text: string;
+  score: number;
+  matched_by: string[];
+  url: string;
 }

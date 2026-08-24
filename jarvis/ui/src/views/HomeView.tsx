@@ -2,7 +2,9 @@ import { ActivityRail } from "../components/ActivityRail";
 import { Card } from "../components/Card";
 import { JarvisCore } from "../components/core/JarvisCore";
 import { Sources } from "../components/Sources";
-import { IconBuilding, IconCalendar, IconCheck, IconMail } from "../components/layout/icons";
+import {
+  IconBuilding, IconCalendar, IconCheck, IconDocument, IconMail,
+} from "../components/layout/icons";
 import { greeting } from "../lib/format";
 import type { AssistantState, ChatMessage, Overview, ToolActivity, ViewId } from "../lib/types";
 import { useCoreSize } from "../lib/viewport";
@@ -83,6 +85,21 @@ export function HomeView({
           <PaneBody
             status={panes?.business.status ?? "not_connected"}
             detail={panes?.business.detail ?? "Chargement…"}
+            empty=""
+          >
+            {null}
+          </PaneBody>
+        </Card>
+
+        <Card
+          title="Documents"
+          icon={<IconDocument size={14} />}
+          count={panes?.documents.count || ""}
+          onClick={() => onNavigate("documents")}
+        >
+          <PaneBody
+            status={panes?.documents.status ?? "not_connected"}
+            detail={panes?.documents.detail ?? "Chargement…"}
             empty=""
           >
             {null}

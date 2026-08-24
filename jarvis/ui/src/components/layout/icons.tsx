@@ -67,6 +67,17 @@ export const IconChevron = ({ size = 17 }: IconProps) => (
 export const IconAlert = ({ size = 17 }: IconProps) => (
   <svg {...base(size)}><path d="M12 3.5 2.5 20h19zM12 10v4M12 17h.01" /></svg>
 );
+export const IconDocument = ({ size = 17 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+    <path d="M14 3v5h5M9 13h6M9 17h4" />
+  </svg>
+);
+export const IconRefresh = ({ size = 15 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" />
+  </svg>
+);
 export const IconTrash = ({ size = 15 }: IconProps) => (
   <svg {...base(size)}><path d="M4 6h16M9 6V4h6v2M6.5 6l.8 14h9.4l.8-14M10 10.5v6M14 10.5v6" /></svg>
 );

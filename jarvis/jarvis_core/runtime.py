@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from jarvis_core.config import Settings, get_settings
+from jarvis_core.documents.embeddings import build_embedding_provider
+from jarvis_core.documents.store import DocumentStore
 from jarvis_core.integrations.google import GoogleWorkspace
 from jarvis_core.llm.router import LLMRouter, build_router
 from jarvis_core.memory.session import SessionStore
@@ -49,6 +51,7 @@ class JarvisRuntime:
     sessions: SessionStore
     memory_store: MemoryStore | None
     reminders: ReminderRepository
+    documents: DocumentStore | None
     audit_sink: SqliteAuditSink
     stt: SpeechToTextProvider
     tts: TextToSpeechProvider
@@ -102,6 +105,25 @@ class JarvisRuntime:
         }
 
 
+def build_document_store(settings: Settings, db: Database) -> DocumentStore | None:
+    """Construit le magasin documentaire, si la fonctionnalite est active.
+
+    Le modele d'embedding n'est pas charge ici mais a la premiere recherche:
+    demarrer l'application ne doit jamais declencher un telechargement de
+    220 Mo. S'il ne se charge pas, la recherche continue en mode lexical.
+    """
+    if not settings.feature_documents:
+        return None
+    return DocumentStore(
+        db,
+        embeddings=lambda: build_embedding_provider(
+            enabled=settings.embedding_enabled,
+            model_name=settings.embedding_model,
+            cache_dir=settings.embedding_cache_dir,
+        ),
+    )
+
+
 def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
     """Construit l'application complete."""
     settings = settings or get_settings()
@@ -117,6 +139,7 @@ def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
 
     memory_store = MemoryStore(db) if settings.feature_persistent_memory else None
     reminders = ReminderRepository(db)
+    documents = build_document_store(settings, db)
     router = build_router(settings)
     secret_box = SecretBox(settings.encryption_key, allow_ephemeral=settings.is_dev)
     google = GoogleWorkspace(settings=settings, db=db, secret_box=secret_box)
@@ -129,6 +152,7 @@ def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
         audit=audit,
         memory_store=memory_store,
         reminders=reminders,
+        documents=documents,
         google=google,
     )
 
@@ -141,6 +165,7 @@ def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
         sessions=SessionStore(),
         memory_store=memory_store,
         reminders=reminders,
+        documents=documents,
         audit_sink=audit_sink,
         stt=build_stt(settings),
         tts=build_tts(settings),

@@ -87,5 +87,11 @@ class BudgetExceededError(LLMError):
     user_message = "J'ai atteint le budget quotidien que tu m'as fixe."
 
 
+class DocumentError(JarvisError):
+    """Un document n'a pas pu etre lu, decoupe ou indexe."""
+
+    user_message = "Je n'arrive pas a lire ce document."
+
+
 class SpeechError(JarvisError):
     user_message = "Probleme avec le systeme vocal."

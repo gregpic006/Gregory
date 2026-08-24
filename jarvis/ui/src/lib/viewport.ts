@@ -12,7 +12,7 @@ import { useEffect, useState } from "react";
 
 /** Barre du haut (62) + salut (57) + legende (34) + barre de commande (108) + marges. */
 const CHROME = 310;
-/** Les deux rangees de cartes plus leurs gouttieres, quand elles passent sous le noyau. */
+/** Les rangees de cartes plus leurs gouttieres, quand elles passent sous le noyau. */
 const STACKED_PANES = 285;
 /** En dessous, la grille d'accueil s'empile en une seule colonne (cf. global.css). */
 const STACK_BREAKPOINT = 1180;

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import type { ViewId } from "../../lib/types";
 import {
   IconBrain, IconBuilding, IconCalendar, IconChat, IconCheck, IconChevron,
-  IconGear, IconGrid, IconHome, IconMail, IconPlug,
+  IconDocument, IconGear, IconGrid, IconHome, IconMail, IconPlug,
 } from "./icons";
 
 interface NavEntry {
@@ -20,6 +20,7 @@ const ENTRIES: NavEntry[] = [
   { id: "calendar", label: "Calendrier", icon: <IconCalendar />, group: "Sources" },
   { id: "email", label: "Courriels", icon: <IconMail />, group: "Sources" },
   { id: "tasks", label: "Rappels", icon: <IconCheck />, group: "Sources" },
+  { id: "documents", label: "Documents", icon: <IconDocument />, group: "Sources" },
   { id: "businesses", label: "Entreprises", icon: <IconBuilding />, group: "Sources" },
   { id: "memory", label: "Memoire", icon: <IconBrain />, group: "Systeme" },
   { id: "integrations", label: "Integrations", icon: <IconPlug />, group: "Systeme" },

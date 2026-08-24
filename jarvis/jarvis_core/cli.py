@@ -14,9 +14,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from pathlib import Path
 
 from jarvis_core.config import Settings, get_settings
-from jarvis_core.errors import ConfigurationError
+from jarvis_core.errors import ConfigurationError, DocumentError, JarvisError
 from jarvis_core.logging_setup import setup_logging
 from jarvis_core.security.crypto import SecretBox
 
@@ -295,6 +296,120 @@ def _print_checks(checks: list[tuple[str, str, str]]) -> bool:
     return failed
 
 
+def _cmd_index(settings: Settings, path: str, force: bool) -> int:
+    """Indexe un dossier de documents et rend compte, fichier par fichier."""
+    from jarvis_core.documents.ingest import ingest_directory
+    from jarvis_core.persistence.db import build_database
+    from jarvis_core.runtime import build_document_store
+
+    if not settings.feature_documents:
+        print("[ECHEC] La recherche documentaire est desactivee.")
+        print("        Mets JARVIS_FEATURE_DOCUMENTS=true dans le fichier .env.")
+        return 1
+
+    target = path or settings.documents_dir
+    db = build_database(settings.database_url)
+    db.migrate()
+    store = build_document_store(settings, db)
+    if store is None:  # pragma: no cover - deja couvert par le garde ci-dessus
+        print("[ECHEC] Magasin documentaire indisponible.")
+        return 1
+
+    print(f"Dossier: {Path(target).expanduser().resolve()}")
+    try:
+        report = ingest_directory(store, target, force=force)
+    except DocumentError as exc:
+        print(f"[ECHEC] {exc.user_message}")
+        return 1
+
+    for name in report.indexed:
+        print(f"  [indexe]    {name}")
+    for name in report.unchanged:
+        print(f"  [inchange]  {name}")
+    for name, reason in report.skipped:
+        print(f"  [ignore]    {name} — {reason}")
+    for name, reason in report.failed:
+        print(f"  [ECHEC]     {name} — {reason}")
+
+    print(f"\n{report.summary()} ({report.chunk_total} passage(s) indexes).")
+    print(f"Total dans l'index: {store.count()} document(s).")
+
+    # Dire franchement quel type de recherche sera possible.
+    if not settings.embedding_enabled:
+        print("Recherche: lexicale (mots exacts). JARVIS_EMBEDDING_ENABLED=false.")
+    elif store.embeddings is None:
+        print(
+            "Recherche: lexicale seulement — le modele semantique n'a pas pu etre charge.\n"
+            "           Les documents restent trouvables par mots exacts."
+        )
+    else:
+        print(f"Recherche: lexicale + semantique ({store.embeddings.name}).")
+    db.close()
+    return 1 if report.failed else 0
+
+
+async def _cmd_sync_drive(settings: Settings, force: bool) -> int:
+    """Indexe le dossier Drive configure et rend compte fichier par fichier."""
+    from jarvis_core.documents.drive_sync import sync_drive
+    from jarvis_core.runtime import build_runtime
+
+    if not settings.feature_documents:
+        print("[ECHEC] JARVIS_FEATURE_DOCUMENTS=false — la recherche documentaire est desactivee.")
+        return 1
+    if not settings.feature_drive:
+        print("[ECHEC] JARVIS_FEATURE_DRIVE=false — l'acces a Drive est desactive.")
+        return 1
+
+    runtime = build_runtime(settings)
+    try:
+        if not runtime.google.connected:
+            print("[ECHEC] Aucun compte Google connecte. Lance d'abord: jarvis check-google")
+            return 1
+        if runtime.documents is None:  # pragma: no cover - garde deja posee plus haut
+            print("[ECHEC] Magasin documentaire indisponible.")
+            return 1
+
+        print(f"Dossier Drive: {settings.drive_folder}")
+        try:
+            report = await sync_drive(
+                runtime.documents,
+                runtime.google.drive,
+                folder=settings.drive_folder,
+                force=force,
+            )
+        except (DocumentError, JarvisError) as exc:
+            print(f"[ECHEC] {exc.user_message}")
+            return 1
+
+        for name in report.indexed:
+            print(f"  [indexe]    {name}")
+        for name in report.unchanged:
+            print(f"  [inchange]  {name}")
+        for name, reason in report.skipped:
+            print(f"  [ignore]    {name} — {reason}")
+        for name, reason in report.failed:
+            print(f"  [ECHEC]     {name} — {reason}")
+
+        print(f"\n{report.summary()} ({report.chunk_total} passage(s) indexes).")
+        print(f"Total dans l'index: {runtime.documents.count()} document(s).")
+        return 1 if report.failed else 0
+    finally:
+        await runtime.aclose()
+
+
+def _cmd_check_documents(settings: Settings) -> int:
+    """Diagnostic de la recherche documentaire."""
+    from jarvis_core.diagnostics import check_documents, render
+    from jarvis_core.runtime import build_runtime
+
+    runtime = build_runtime(settings)
+    try:
+        print("Verification de la recherche documentaire\n")
+        return 0 if render(check_documents(runtime)) else 1
+    finally:
+        runtime.db.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jarvis", description="Assistant personnel JARVIS")
     sub = parser.add_subparsers(dest="command")
@@ -304,6 +419,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("sync-env", help="ajoute a .env les nouvelles variables du modele")
     sub.add_parser("check-google", help="teste Gmail, Calendar et Contacts")
     sub.add_parser("check-voice", help="charge le moteur vocal et transcrit un echantillon")
+    index = sub.add_parser("index", help="indexe un dossier de documents")
+    index.add_argument("path", nargs="?", default="", help="dossier (defaut: JARVIS_DOCUMENTS_DIR)")
+    index.add_argument("--force", action="store_true", help="reindexe meme si inchange")
+    drive = sub.add_parser("sync-drive", help="indexe le dossier Google Drive configure")
+    drive.add_argument("--force", action="store_true", help="reindexe meme si inchange")
+    sub.add_parser("check-documents", help="verifie l'index et le mode de recherche")
     sub.add_parser("keygen", help="genere une cle de chiffrement")
 
     args = parser.parse_args(argv)
@@ -321,6 +442,12 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(_cmd_check_google(settings))
     if args.command == "check-voice":
         return asyncio.run(_cmd_check_voice(settings))
+    if args.command == "index":
+        return _cmd_index(settings, args.path, args.force)
+    if args.command == "sync-drive":
+        return asyncio.run(_cmd_sync_drive(settings, args.force))
+    if args.command == "check-documents":
+        return _cmd_check_documents(settings)
     if args.command == "doctor":
         return _cmd_doctor(settings)
     if args.command == "serve" or args.command is None:

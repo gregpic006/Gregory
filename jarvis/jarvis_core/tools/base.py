@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover
     from jarvis_core.config import Settings
+    from jarvis_core.documents.store import DocumentStore
     from jarvis_core.integrations.google import GoogleWorkspace
     from jarvis_core.memory.session import SessionMemory
     from jarvis_core.memory.store import MemoryStore
@@ -93,6 +94,7 @@ class ToolContext:
     session: SessionMemory
     memory_store: MemoryStore | None = None
     reminders: ReminderRepository | None = None
+    documents: DocumentStore | None = None
     google: GoogleWorkspace | None = None
     dry_run: bool = True
     organization: str = "PERSONAL"

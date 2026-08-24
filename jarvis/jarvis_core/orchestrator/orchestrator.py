@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from jarvis_core.config import Settings
+from jarvis_core.documents.store import DocumentStore
 from jarvis_core.errors import (
     ConfigurationError,
     IntegrationNotConfiguredError,
@@ -124,6 +125,7 @@ class JarvisOrchestrator:
         audit: AuditTrail,
         memory_store: MemoryStore | None = None,
         reminders: ReminderRepository | None = None,
+        documents: DocumentStore | None = None,
         google: object | None = None,
     ) -> None:
         self.settings = settings
@@ -133,6 +135,7 @@ class JarvisOrchestrator:
         self.audit = audit
         self.memory_store = memory_store
         self.reminders = reminders
+        self.documents = documents
         self.google = google
 
     # -- point d'entree ------------------------------------------------------
@@ -576,6 +579,7 @@ class JarvisOrchestrator:
             session=session,
             memory_store=self.memory_store,
             reminders=self.reminders,
+            documents=self.documents,
             google=self.google,  # type: ignore[arg-type]
             dry_run=self.settings.dry_run,
             organization=session.organization,

@@ -188,3 +188,111 @@ def test_api_routes_win_over_the_static_mount(client: TestClient) -> None:
     assert client.get("/api/health").json()["status"] == "ok"
     assert client.get("/api/system").status_code == 200
     assert client.get("/api/overview").status_code == 200
+
+
+# =============================================================================
+# Documents (M3)
+# =============================================================================
+
+
+@pytest.fixture()
+def docs_client(tmp_path: Any) -> Iterator[TestClient]:
+    """Client avec la recherche documentaire active et un dossier reel."""
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    (folder / "bail.md").write_text(
+        "# Bail\n\n## Loyer\nLe loyer mensuel est de 4200 dollars par mois.\n",
+        encoding="utf-8",
+    )
+    (folder / "photo.png").write_bytes(b"\x89PNG pas du texte")
+    settings = _settings(
+        tmp_path,
+        JARVIS_FEATURE_DOCUMENTS=True,
+        JARVIS_EMBEDDING_ENABLED=False,
+        JARVIS_DOCUMENTS_DIR=str(folder),
+    )
+    with TestClient(create_app(settings)) as test_client:
+        yield test_client
+
+
+def test_documents_disabled_is_stated_not_faked(client: TestClient) -> None:
+    """Fonctionnalite eteinte: l'interface le dit au lieu d'afficher un index vide."""
+    payload = client.get("/api/documents").json()
+
+    assert payload["enabled"] is False
+    assert payload["status"] == "not_connected"
+    assert "JARVIS_FEATURE_DOCUMENTS" in payload["detail"]
+    assert payload["documents"] == []
+    assert payload["search_modes"] == []
+
+
+def test_documents_pane_appears_in_the_overview(docs_client: TestClient) -> None:
+    pane = docs_client.get("/api/overview").json()["panes"]["documents"]
+
+    assert pane["status"] == "connected"
+    assert pane["count"] == 0
+    # Un index vide dit ou deposer les fichiers plutot que de rester muet.
+    assert "documents" in pane["detail"].lower()
+
+
+def test_search_modes_admit_the_absence_of_the_semantic_model(
+    docs_client: TestClient,
+) -> None:
+    """Sans modele charge, l'interface annonce « mots exacts », pas « sens »."""
+    payload = docs_client.get("/api/documents").json()
+
+    assert payload["search_modes"] == ["lexical"]
+    assert "semantique" not in payload["search_modes"]
+
+
+def test_reindex_reports_every_skipped_file(docs_client: TestClient) -> None:
+    payload = docs_client.post("/api/documents/reindex").json()
+
+    assert payload["report"]["indexed"] == ["bail.md"]
+    skipped = {item["name"] for item in payload["report"]["skipped"]}
+    assert skipped == {"photo.png"}
+    assert payload["total"] == 1
+
+
+def test_search_returns_passages_with_their_provenance(docs_client: TestClient) -> None:
+    docs_client.post("/api/documents/reindex")
+
+    payload = docs_client.get("/api/documents", params={"query": "loyer mensuel"}).json()
+
+    assert payload["hits"], "le passage indexe doit etre retrouve"
+    hit = payload["hits"][0]
+    assert hit["title"] == "bail"
+    assert hit["locator"] == "Loyer"
+    assert hit["matched_by"] == ["lexical"]
+
+
+def test_no_match_keeps_the_index_size_visible(docs_client: TestClient) -> None:
+    """« rien trouve » et « rien d'indexe » ne doivent pas se confondre."""
+    docs_client.post("/api/documents/reindex")
+
+    payload = docs_client.get("/api/documents", params={"query": "cryptomonnaie"}).json()
+
+    assert payload["hits"] == []
+    assert payload["total"] == 1
+
+
+def test_deleting_an_unknown_document_is_a_404(docs_client: TestClient) -> None:
+    assert docs_client.delete("/api/documents/doc_inexistant").status_code == 404
+
+
+def test_deleting_a_document_removes_it_from_search(docs_client: TestClient) -> None:
+    docs_client.post("/api/documents/reindex")
+    document_id = docs_client.get("/api/documents").json()["documents"][0]["id"]
+
+    assert docs_client.delete(f"/api/documents/{document_id}").status_code == 200
+
+    payload = docs_client.get("/api/documents", params={"query": "loyer"}).json()
+    assert payload["hits"] == []
+    assert payload["total"] == 0
+
+
+def test_reindex_refused_when_the_feature_is_off(client: TestClient) -> None:
+    response = client.post("/api/documents/reindex")
+
+    assert response.status_code == 400
+    assert "desactivee" in response.json()["detail"]

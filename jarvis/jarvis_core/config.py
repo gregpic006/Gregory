@@ -99,12 +99,25 @@ class Settings(BaseSettings):
     auto_approve_max_level: int = Field(default=1, alias="JARVIS_AUTO_APPROVE_MAX_LEVEL")
     auto_send_email: bool = Field(default=False, alias="JARVIS_AUTO_SEND_EMAIL")
 
+    # --- Documents (M3) ------------------------------------------------------
+    documents_dir: str = Field(default="data/documents", alias="JARVIS_DOCUMENTS_DIR")
+    embedding_enabled: bool = Field(default=True, alias="JARVIS_EMBEDDING_ENABLED")
+    embedding_model: str = Field(
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        alias="JARVIS_EMBEDDING_MODEL",
+    )
+    embedding_cache_dir: str = Field(default="", alias="JARVIS_EMBEDDING_CACHE_DIR")
+    #: Dossier Drive a indexer. Vide = rien: on n'aspire jamais tout le Drive
+    #: par defaut, meme quand la portee le permettrait.
+    drive_folder: str = Field(default="JARVIS", alias="JARVIS_DRIVE_FOLDER")
+
     # --- Feature flags -------------------------------------------------------
     feature_voice: bool = Field(default=True, alias="JARVIS_FEATURE_VOICE")
     feature_wake_word: bool = Field(default=False, alias="JARVIS_FEATURE_WAKE_WORD")
     feature_gmail: bool = Field(default=False, alias="JARVIS_FEATURE_GMAIL")
     feature_calendar: bool = Field(default=False, alias="JARVIS_FEATURE_CALENDAR")
     feature_documents: bool = Field(default=False, alias="JARVIS_FEATURE_DOCUMENTS")
+    feature_drive: bool = Field(default=False, alias="JARVIS_FEATURE_DRIVE")
     feature_persistent_memory: bool = Field(
         default=True, alias="JARVIS_FEATURE_PERSISTENT_MEMORY"
     )
@@ -160,6 +173,7 @@ class Settings(BaseSettings):
             "gmail": self.feature_gmail,
             "calendar": self.feature_calendar,
             "documents": self.feature_documents,
+            "drive": self.feature_drive,
             "persistent_memory": self.feature_persistent_memory,
             "computer_control": self.feature_computer_control,
             "autonomous_mode": self.feature_autonomous_mode,
