@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis_core.config_sync import parse_keys, sync_env
+from jarvis_core.config_sync import parse_keys, set_values, sync_env
 
 EXAMPLE = """\
 # JARVIS - modele
@@ -135,3 +135,82 @@ def test_the_shipped_template_stays_in_sync_with_settings() -> None:
         if field.alias
     }
     assert used - documented == set(), "variables lues mais absentes de .env.example"
+
+
+# =============================================================================
+# Ecriture ciblee dans .env
+# =============================================================================
+
+
+def test_set_values_never_touches_other_lines(tmp_path: Path) -> None:
+    """Le fichier contient des secrets irrecuperables: tout le reste doit survivre."""
+    env = tmp_path / ".env"
+    env.write_text(
+        "# Mon commentaire\n"
+        "ANTHROPIC_API_KEY=sk-ant-SECRET\n"
+        "\n"
+        "JARVIS_FEATURE_BUSINESS=false\n",
+        encoding="utf-8",
+    )
+
+    changed = set_values(env, {"JARVIS_FEATURE_BUSINESS": "true"})
+
+    content = env.read_text(encoding="utf-8")
+    assert changed == ["JARVIS_FEATURE_BUSINESS"]
+    assert "ANTHROPIC_API_KEY=sk-ant-SECRET" in content
+    assert "# Mon commentaire" in content
+    assert "JARVIS_FEATURE_BUSINESS=true" in content
+
+
+def test_set_values_writes_a_backup_before_changing(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_text("JARVIS_FEATURE_BUSINESS=false\n", encoding="utf-8")
+
+    set_values(env, {"JARVIS_FEATURE_BUSINESS": "true"})
+
+    backup = tmp_path / ".env.bak"
+    assert backup.exists()
+    assert "JARVIS_FEATURE_BUSINESS=false" in backup.read_text(encoding="utf-8")
+
+
+def test_set_values_is_a_no_op_when_nothing_changes(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_text("JARVIS_FEATURE_BUSINESS=true\n", encoding="utf-8")
+
+    assert set_values(env, {"JARVIS_FEATURE_BUSINESS": "true"}) == []
+    assert not (tmp_path / ".env.bak").exists()
+
+
+def test_set_values_appends_a_key_that_is_absent(tmp_path: Path) -> None:
+    """Une cle absente doit etre ajoutee, pas ignoree en silence."""
+    env = tmp_path / ".env"
+    env.write_text("JARVIS_FEATURE_BUSINESS=false\n", encoding="utf-8")
+
+    changed = set_values(env, {"JARVIS_DOCUMENTS_DIR": "C:/docs"})
+
+    assert changed == ["JARVIS_DOCUMENTS_DIR"]
+    assert "JARVIS_DOCUMENTS_DIR=C:/docs" in env.read_text(encoding="utf-8")
+
+
+def test_set_values_ignores_commented_out_keys(tmp_path: Path) -> None:
+    """Une ligne commentee est une intention, pas un reglage a ecraser."""
+    env = tmp_path / ".env"
+    env.write_text(
+        "# JARVIS_FEATURE_BUSINESS=false\nJARVIS_FEATURE_BUSINESS=false\n", encoding="utf-8"
+    )
+
+    set_values(env, {"JARVIS_FEATURE_BUSINESS": "true"})
+
+    lines = env.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "# JARVIS_FEATURE_BUSINESS=false"
+    assert lines[1] == "JARVIS_FEATURE_BUSINESS=true"
+
+
+def test_set_values_preserves_windows_line_endings(tmp_path: Path) -> None:
+    """Le Bloc-notes ecrit en CRLF: ne pas melanger les fins de ligne."""
+    env = tmp_path / ".env"
+    env.write_bytes(b"JARVIS_FEATURE_BUSINESS=false\r\nJARVIS_FEATURE_VOICE=true\r\n")
+
+    set_values(env, {"JARVIS_FEATURE_BUSINESS": "true"})
+
+    assert env.read_bytes() == b"JARVIS_FEATURE_BUSINESS=true\r\nJARVIS_FEATURE_VOICE=true\r\n"

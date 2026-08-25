@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 
 import { Card } from "../components/Card";
 import { IconGear, IconMic } from "../components/layout/icons";
-import { fetchMetrics, type MetricsSnapshot } from "../lib/api";
+import {
+  fetchMetrics,
+  fetchSettings,
+  updateSettings,
+  type MetricsSnapshot,
+  type SettingsResponse,
+} from "../lib/api";
 import type { SpeechPlayer } from "../lib/audio";
 import type { SystemInfo } from "../lib/types";
 
@@ -11,17 +17,22 @@ interface Props {
   player: SpeechPlayer;
 }
 
-/** Reglages: ce qui est modifiable ici, et ce qui vit dans `.env`.
+/** Reglages.
  *
- * Le choix de la voix est le seul reglage reellement local — tout le reste est
- * de la configuration serveur, affichee en lecture seule pour eviter deux
- * sources de verite.
+ * Les interrupteurs ecrivent directement dans `.env`: personne ne devrait
+ * avoir a ouvrir un fichier texte et trouver la bonne ligne pour activer une
+ * fonctionnalite. Les cles d'API, elles, n'apparaissent jamais ici — ni en
+ * lecture ni en ecriture.
  */
 export function SettingsView({ system, player }: Props) {
   const [voices, setVoices] = useState<{ name: string; lang: string; natural: boolean }[]>([]);
   const [selected, setSelected] = useState("");
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
+  const [config, setConfig] = useState<SettingsResponse | null>(null);
+  const [pending, setPending] = useState("");
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const refresh = () => {
@@ -42,7 +53,28 @@ export function SettingsView({ system, player }: Props) {
       .then((all) => setDevices(all.filter((device) => device.kind !== "videoinput")))
       .catch(() => undefined);
     fetchMetrics().then(setMetrics).catch(() => undefined);
+    fetchSettings().then(setConfig).catch(() => undefined);
   }, []);
+
+  const toggle = async (key: string, enabled: boolean) => {
+    setPending(key);
+    setError("");
+    try {
+      const result = await updateSettings({ features: { [key]: enabled } });
+      setConfig(await fetchSettings());
+      if (result.restart_needed) {
+        setNotice(
+          result.reconnect_google
+            ? "Enregistre. Redemarre JARVIS, puis reconnecte Google dans Integrations."
+            : "Enregistre. Le changement prend effet au prochain demarrage de JARVIS.",
+        );
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Modification impossible.");
+    } finally {
+      setPending("");
+    }
+  };
 
   const inputs = devices.filter((device) => device.kind === "audioinput");
   const outputs = devices.filter((device) => device.kind === "audiooutput");
@@ -51,10 +83,46 @@ export function SettingsView({ system, player }: Props) {
     <>
       <div className="dash-head">
         <h1>Reglages</h1>
-        <p>Le necessaire ici, le reste dans le fichier .env.</p>
+        <p>Coche ce que tu veux activer. Pas besoin d'ouvrir de fichier.</p>
       </div>
 
+      {notice && <div className="banner info">{notice}</div>}
+      {error && <div className="banner">{error}</div>}
+
       <div className="grid">
+        <Card title="Fonctionnalites" icon={<IconGear size={14} />}>
+          <div className="stack">
+            {config === null ? (
+              <p className="card-empty">Chargement…</p>
+            ) : (
+              config.features.map((feature) => (
+                <label className="switch-row" key={feature.key}>
+                  <input
+                    type="checkbox"
+                    checked={feature.enabled}
+                    disabled={pending === feature.key}
+                    onChange={(event) => toggle(feature.key, event.target.checked)}
+                  />
+                  <span className="switch-text">
+                    <span className="switch-label">
+                      {feature.label}
+                      {feature.needs_reconnect && feature.enabled === false && (
+                        <span className="switch-tag">reconnexion Google</span>
+                      )}
+                    </span>
+                    <span className="switch-desc">{feature.description}</span>
+                  </span>
+                </label>
+              ))
+            )}
+            <p className="card-empty">
+              Le controle de l'ordinateur et le mode autonome ne sont volontairement
+              pas modifiables ici: une capacite qui agit seule sur ta machine ne doit
+              pas s'activer d'un clic.
+            </p>
+          </div>
+        </Card>
+
         <Card title="Voix de reponse" icon={<IconMic size={14} />}>
           <div className="stack">
             {system?.providers.tts_available ? (

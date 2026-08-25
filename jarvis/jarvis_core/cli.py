@@ -474,11 +474,64 @@ def _cmd_check_business(settings: Settings) -> int:
         runtime.db.close()
 
 
+def _cmd_setup(settings: Settings, quiet: bool = False) -> int:
+    """Configure JARVIS automatiquement, puis verifie que tout repond.
+
+    C'est la commande a lancer quand « ca marche pas »: elle repare ce qu'elle
+    peut et nomme precisement ce qui reste.
+    """
+    from jarvis_core.config import get_settings
+    from jarvis_core.diagnostics import check_business, check_documents, render
+    from jarvis_core.setup_assistant import find_project_root, render_report, run_setup
+
+    root = find_project_root()
+    report = run_setup(root, settings)
+
+    # En mode discret (appele par start.ps1), on ne parle que s'il y a du
+    # nouveau: un demarrage quotidien ne doit pas rejouer tout le rapport.
+    if not quiet or report.changed_keys or report.blocking:
+        render_report(report)
+
+    if report.restart_needed:
+        # Les valeurs viennent de changer: relire pour verifier l'etat reel.
+        get_settings.cache_clear()
+        settings = get_settings()
+
+    if report.blocking:
+        return 1
+    if quiet:
+        if report.changed_keys:
+            print("Configuration mise a jour.")
+        return 0
+
+    from jarvis_core.runtime import build_runtime
+
+    runtime = build_runtime(settings)
+    try:
+        print("\nVerification des documents\n")
+        documents_ok = render(check_documents(runtime))
+        print("\nVerification des donnees business\n")
+        business_ok = render(check_business(runtime))
+    finally:
+        runtime.db.close()
+
+    print()
+    if documents_ok and business_ok:
+        print("JARVIS est pret. Lance-le avec: .\\scripts\\start.ps1")
+    else:
+        print("JARVIS demarre quand meme; les points ci-dessus sont juste inactifs.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jarvis", description="Assistant personnel JARVIS")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("serve", help="lance l'API et l'interface")
     sub.add_parser("chat", help="conversation en mode texte")
+    setup_parser = sub.add_parser("setup", help="configure tout automatiquement et verifie")
+    setup_parser.add_argument(
+        "--quiet", action="store_true", help="ne parler que s'il y a du nouveau"
+    )
     sub.add_parser("doctor", help="verifie la configuration")
     sub.add_parser("sync-env", help="ajoute a .env les nouvelles variables du modele")
     sub.add_parser("check-google", help="teste Gmail, Calendar et Contacts")
@@ -505,6 +558,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "chat":
         return asyncio.run(_chat_loop(settings))
+    if args.command == "setup":
+        return _cmd_setup(settings, args.quiet)
     if args.command == "sync-env":
         return _cmd_sync_env()
     if args.command == "check-google":

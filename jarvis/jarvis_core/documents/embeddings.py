@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import struct
+import warnings
 from typing import Protocol, runtime_checkable
 
 from jarvis_core.errors import DocumentError
@@ -62,10 +63,14 @@ class FastEmbedProvider:
             ) from exc
 
         try:
-            self._model = TextEmbedding(
-                model_name=model_name,
-                cache_dir=cache_dir or None,
-            )
+            # fastembed avertit d'un changement interne de pooling. C'est du
+            # bruit pour l'utilisateur, qui n'a aucune action a en tirer.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                self._model = TextEmbedding(
+                    model_name=model_name,
+                    cache_dir=cache_dir or None,
+                )
         except Exception as exc:  # noqa: BLE001 - reseau, disque, modele inconnu
             raise DocumentError(
                 f"modele d'embedding indisponible: {model_name} ({exc})",

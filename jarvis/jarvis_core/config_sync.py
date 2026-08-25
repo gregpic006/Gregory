@@ -103,3 +103,72 @@ def sync_env(env_path: Path, example_path: Path) -> SyncReport:
     )
     env_path.write_text(env_text + addition, encoding="utf-8")
     return SyncReport(added=missing, already_present=len(existing))
+
+
+def set_values(env_path: Path, values: dict[str, str]) -> list[str]:
+    """Modifie des cles precises dans `.env`, en preservant tout le reste.
+
+    Ecrit uniquement les cles demandees dont la valeur change reellement.
+    Commentaires, ordre, espacement et — surtout — toutes les autres valeurs
+    (cles d'API, secrets) sont conserves a l'octet pres.
+
+    Une sauvegarde `.env.bak` est ecrite avant toute modification: le fichier
+    contient des secrets qu'on ne peut pas regenerer.
+
+    Args:
+        values: cles a definir et leur nouvelle valeur.
+
+    Returns:
+        Les noms des cles reellement modifiees.
+    """
+    if not env_path.exists():
+        raise FileNotFoundError(env_path)
+    if not values:
+        return []
+
+    # `newline=""` empeche Python de convertir les fins de ligne: le fichier de
+    # l'utilisateur vient souvent du Bloc-notes (CRLF), et le reecrire en LF
+    # serait une modification qu'il n'a pas demandee.
+    with env_path.open("r", encoding="utf-8", newline="") as handle:
+        original = handle.read()
+    lines = original.splitlines(keepends=True)
+
+    changed: list[str] = []
+    seen: set[str] = set()
+
+    for index, line in enumerate(lines):
+        match = _ASSIGNMENT.match(line)
+        if not match or line.lstrip().startswith("#"):
+            continue
+        key = match.group(1)
+        if key not in values or key in seen:
+            continue
+        seen.add(key)
+
+        current = line.split("=", 1)[1].strip() if "=" in line else ""
+        target = values[key]
+        if current == target:
+            continue
+        ending = "\r\n" if line.endswith("\r\n") else ("\n" if line.endswith("\n") else "")
+        lines[index] = f"{key}={target}{ending}"
+        changed.append(key)
+
+    # Une cle absente du fichier est ajoutee plutot qu'ignoree en silence.
+    missing = [key for key in values if key not in seen]
+    if missing:
+        newline = "\r\n" if original.count("\r\n") > original.count("\n") // 2 else "\n"
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            lines.append(newline)
+        for key in missing:
+            lines.append(f"{key}={values[key]}{newline}")
+            changed.append(key)
+
+    if not changed:
+        return []
+
+    backup = env_path.with_suffix(env_path.suffix + ".bak")
+    with backup.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(original)
+    with env_path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write("".join(lines))
+    return changed

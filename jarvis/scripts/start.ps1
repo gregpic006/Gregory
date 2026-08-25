@@ -16,6 +16,18 @@ if (-not (Test-Path $venvPython)) {
     exit 1
 }
 
+# Configuration automatique: ajoute les nouvelles options, active ce qui doit
+# l'etre, cree les dossiers manquants. Idempotent — ne change que ce qui doit
+# changer, et ne touche jamais a une cle d'API. L'utilisateur n'a donc jamais a
+# ouvrir .env a la main.
+Write-Host "-> verification de la configuration" -ForegroundColor Cyan
+& $venvPython -m jarvis_core.cli setup --quiet
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Configuration incomplete (voir ci-dessus). JARVIS ne demarre pas." -ForegroundColor Red
+    exit 1
+}
+
 # L'interface est recompilee seulement si les sources ont bouge depuis le build.
 $dist = "ui\dist\index.html"
 $needsBuild = -not (Test-Path $dist)

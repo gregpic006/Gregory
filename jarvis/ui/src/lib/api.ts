@@ -180,3 +180,47 @@ export async function reindexDocuments(): Promise<ReindexResponse> {
   }
   return response.json();
 }
+
+export interface FeatureToggle {
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  /** Vrai si activer demande de reconnecter un compte externe. */
+  needs_reconnect: boolean;
+}
+
+export interface SettingsResponse {
+  features: FeatureToggle[];
+  documents_dir: string;
+  timezone: string;
+  /** Presence seulement — la valeur d'une cle ne transite jamais. */
+  anthropic_key_present: boolean;
+  google_configured: boolean;
+}
+
+export function fetchSettings(): Promise<SettingsResponse> {
+  return get("/api/settings");
+}
+
+export interface SettingsPatchResult {
+  changed: string[];
+  restart_needed: boolean;
+  reconnect_google: boolean;
+}
+
+export async function updateSettings(patch: {
+  features?: Record<string, boolean>;
+  documents_dir?: string;
+}): Promise<SettingsPatchResult> {
+  const response = await fetch("/api/settings", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const payload = await response.json().catch(() => ({ detail: "" }));
+  if (!response.ok) {
+    throw new Error(payload.detail || `modification refusee (${response.status})`);
+  }
+  return payload;
+}

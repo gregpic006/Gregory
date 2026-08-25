@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 from jarvis_core.api.routes_data import router as data_router
 from jarvis_core.api.routes_integrations import router as integrations_router
+from jarvis_core.api.routes_settings import router as settings_router
 from jarvis_core.api.schemas import ChatRequest, ConfirmRequest, SpeakRequest, TurnResponse
 from jarvis_core.api.ws import websocket_endpoint
 from jarvis_core.config import Settings, get_settings
@@ -84,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(integrations_router)
     app.include_router(data_router)
+    app.include_router(settings_router)
 
     @app.exception_handler(JarvisError)
     async def jarvis_error_handler(request: Request, exc: JarvisError) -> JSONResponse:

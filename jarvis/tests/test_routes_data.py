@@ -424,3 +424,116 @@ def test_clearing_data_returns_the_metrics_to_not_connected(biz_client: TestClie
     payload = biz_client.get("/api/businesses", params={"days": 400}).json()
     grande = next(o for o in payload["organizations"] if o["id"] == "RESTAURANT_GA")
     assert all(m["status"] == "not_connected" for m in grande["metrics"])
+
+
+# =============================================================================
+# Reglages modifiables depuis l'interface
+# =============================================================================
+
+
+@pytest.fixture()
+def settings_client(tmp_path: Any, monkeypatch: Any) -> Iterator[TestClient]:
+    """Client dont le `.env` est un fichier jetable, contenant un faux secret."""
+    env = tmp_path / ".env"
+    env.write_text(
+        "# Ne jamais toucher\n"
+        "ANTHROPIC_API_KEY=sk-ant-SECRET\n"
+        "GOOGLE_CLIENT_SECRET=GOCSPX-SECRET\n"
+        "\n"
+        "JARVIS_FEATURE_DOCUMENTS=false\n"
+        "JARVIS_FEATURE_BUSINESS=false\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env.example").write_text("JARVIS_FEATURE_DOCUMENTS=false\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "jarvis_core.api.routes_settings.find_project_root", lambda: tmp_path
+    )
+    with TestClient(create_app(_settings(tmp_path))) as test_client:
+        yield test_client
+
+
+def test_settings_never_expose_a_secret(settings_client: TestClient) -> None:
+    payload = settings_client.get("/api/settings").json()
+
+    serialized = str(payload)
+    assert "sk-ant-" not in serialized
+    assert "GOCSPX-" not in serialized
+    # La presence est dite, la valeur jamais.
+    assert "anthropic_key_present" in payload
+
+
+def test_toggling_a_feature_writes_to_env(settings_client: TestClient, tmp_path: Any) -> None:
+    response = settings_client.patch(
+        "/api/settings", json={"features": {"JARVIS_FEATURE_BUSINESS": True}}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["changed"] == ["JARVIS_FEATURE_BUSINESS"]
+    assert response.json()["restart_needed"] is True
+    assert "JARVIS_FEATURE_BUSINESS=true" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_toggling_never_damages_the_secrets(settings_client: TestClient, tmp_path: Any) -> None:
+    """Le fichier contient des cles irrecuperables: elles doivent survivre intactes."""
+    settings_client.patch(
+        "/api/settings", json={"features": {"JARVIS_FEATURE_DOCUMENTS": True}}
+    )
+
+    content = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "ANTHROPIC_API_KEY=sk-ant-SECRET" in content
+    assert "GOOGLE_CLIENT_SECRET=GOCSPX-SECRET" in content
+    assert "# Ne jamais toucher" in content
+
+
+def test_an_unlisted_variable_cannot_be_written(settings_client: TestClient) -> None:
+    """Le controle de l'ordinateur ne doit pas s'activer via l'API."""
+    response = settings_client.patch(
+        "/api/settings", json={"features": {"JARVIS_FEATURE_COMPUTER_CONTROL": True}}
+    )
+
+    assert response.status_code == 400
+    assert "non modifiable" in response.json()["detail"]
+
+
+def test_an_api_key_cannot_be_written_through_settings(settings_client: TestClient) -> None:
+    response = settings_client.patch(
+        "/api/settings", json={"features": {"ANTHROPIC_API_KEY": True}}
+    )
+
+    assert response.status_code == 400
+
+
+def test_enabling_google_asks_for_a_reconnection(settings_client: TestClient) -> None:
+    """Une nouvelle portee OAuth ne s'applique qu'apres un nouveau consentement."""
+    response = settings_client.patch(
+        "/api/settings", json={"features": {"JARVIS_FEATURE_DRIVE": True}}
+    )
+
+    assert response.json()["reconnect_google"] is True
+
+
+def test_disabling_does_not_ask_for_a_reconnection(settings_client: TestClient) -> None:
+    settings_client.patch("/api/settings", json={"features": {"JARVIS_FEATURE_DRIVE": True}})
+
+    response = settings_client.patch(
+        "/api/settings", json={"features": {"JARVIS_FEATURE_DRIVE": False}}
+    )
+
+    assert response.json()["reconnect_google"] is False
+
+
+def test_an_empty_documents_folder_is_refused(settings_client: TestClient) -> None:
+    response = settings_client.patch("/api/settings", json={"documents_dir": "   "})
+
+    assert response.status_code == 400
+
+
+def test_setting_the_same_value_changes_nothing(settings_client: TestClient) -> None:
+    settings_client.patch("/api/settings", json={"features": {"JARVIS_FEATURE_BUSINESS": True}})
+
+    response = settings_client.patch(
+        "/api/settings", json={"features": {"JARVIS_FEATURE_BUSINESS": True}}
+    )
+
+    assert response.json()["changed"] == []
+    assert response.json()["restart_needed"] is False

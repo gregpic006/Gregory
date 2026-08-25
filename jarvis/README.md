@@ -549,12 +549,39 @@ Chaque jalon produit quelque chose de testable.
 
 ## Depannage
 
+### Si quelque chose ne marche pas, commence par ca
+
+```powershell
+.\.venv\Scripts\python.exe -m jarvis_core.cli setup
+```
+
+Une seule commande. Elle ajoute les nouvelles options apparues depuis ta
+derniere mise a jour, active ce qui doit l'etre, cree les dossiers manquants,
+puis verifie que tout repond — et te dit en francais clair ce qui reste a
+faire, s'il reste quelque chose.
+
+Elle est **sans risque** : elle ne modifie que ce qui doit changer, ne touche
+jamais a une cle d'API, et ecrit une sauvegarde `.env.bak` avant tout
+changement.
+
+`.\scripts\start.ps1` la lance deja automatiquement a chaque demarrage. En
+pratique, tu n'as donc jamais a ouvrir `.env` toi-meme.
+
+### Activer ou desactiver une fonctionnalite
+
+Onglet **Reglages** dans l'interface : coche ou decoche, puis redemarre
+JARVIS. Pas de fichier a editer.
+
+Deux reglages restent volontairement hors de l'interface — le controle de
+l'ordinateur et le mode autonome. Une capacite qui peut agir seule sur ta
+machine ne doit pas s'activer d'un clic distrait.
+
+### Le reste
+
 **Une variable de `.env.example` est introuvable dans ton `.env`** — ton `.env`
 date d'un jalon anterieur. Git ne le suit pas (il contient tes secrets), donc
-`git pull` ne l'a pas mis a jour. Lance :
-`.\\.venv\\Scripts\\python.exe -m jarvis_core.cli sync-env`
-Les variables manquantes sont ajoutees avec leurs commentaires, et **aucune
-valeur existante n'est modifiee**. `jarvis doctor` signale ce decalage.
+`git pull` ne l'a pas mis a jour. `jarvis setup` le repare ; `sync-env` fait
+seulement cette partie, sans rien activer.
 
 **Gmail ou Calendar ne repond pas comme attendu** — lance le diagnostic, il
 teste les API directement, sans passer par le modele :
