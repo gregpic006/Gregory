@@ -671,3 +671,60 @@ def test_a_newly_created_organization_appears_in_the_overview(
     pane = biz_client.get("/api/overview").json()["panes"]["business"]
 
     assert "Chez Gaston" in {org["name"] for org in pane["organizations"]}
+
+
+# =============================================================================
+# Import par collage
+# =============================================================================
+
+
+def test_pasting_from_excel_works(biz_client: TestClient) -> None:
+    """Excel copie en colonnes separees par des tabulations."""
+    colle = "Date\tVentes\tCouverts\n19/08/2026\t6 180,50\t142\n20/08/2026\t5 920,25\t131"
+
+    response = biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import", json={"content": colle}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["report"]["rows_ok"] == 2
+
+
+def test_pasting_a_report_with_its_title(biz_client: TestClient) -> None:
+    """On colle souvent le titre du rapport avec les chiffres."""
+    colle = (
+        "Rapport quotidien - Grande Allee\n"
+        "Du 19 au 20 aout 2026\n"
+        "\n"
+        "Date;Ventes;Couverts\n"
+        "19/08/2026;6180,50;142\n"
+    )
+
+    report = biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import", json={"content": colle}
+    ).json()["report"]
+
+    assert report["rows_ok"] == 1
+    assert report["preamble_lines"] == 3
+
+
+def test_pasting_nothing_is_refused(biz_client: TestClient) -> None:
+    response = biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import", json={"content": "   "}
+    )
+
+    assert response.status_code == 400
+    assert "Rien a importer" in response.json()["detail"]
+
+
+def test_pasted_data_reaches_the_dashboard(biz_client: TestClient) -> None:
+    biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import",
+        json={"content": "Date;Ventes\n19/08/2026;6180,50\n"},
+    )
+
+    payload = biz_client.get("/api/businesses", params={"days": 400}).json()
+    grande = next(o for o in payload["organizations"] if o["id"] == "RESTAURANT_GA")
+    sales = next(m for m in grande["metrics"] if m["metric"] == "sales")
+
+    assert sales["value"] == 6180.50

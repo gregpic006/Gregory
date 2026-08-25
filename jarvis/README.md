@@ -399,10 +399,18 @@ relue a chaque fois qu'elle change, et un fichier simplement renomme ne
 retriche pas les totaux. Un fichier en cours d'ecriture est saute et repris au
 tour suivant.
 
-**2. Par l'interface.** Onglet **Entreprises**, bouton « Importer un CSV » sur
-la carte concernee.
+**2. En collant.** Onglet **Entreprises**, bouton **Coller des chiffres**.
+Ouvre ton rapport, selectionne les lignes, copie, colle. C'est le chemin le
+plus court quand produire un export demande de fouiller dans les menus.
 
-**3. En ligne de commande :**
+Excel copie en colonnes separees par des tabulations — reconnues telles
+quelles. Garde la ligne des titres de colonnes ; les lignes de titre du
+rapport au-dessus sont ignorees toutes seules.
+
+**3. Par l'interface.** Meme onglet, bouton « Importer un CSV » si tu as
+deja un fichier.
+
+**4. En ligne de commande :**
 
 ```powershell
 .\.venv\Scripts\python.exe -m jarvis_core.cli import-business ventes-aout.csv --org "Grande Allee"

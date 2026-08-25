@@ -8,6 +8,7 @@ import {
   fetchBusinesses,
   importBusinessCsv,
   ORG_KINDS,
+  pasteBusinessData,
   renameOrganization,
   type BusinessImportReport,
   type BusinessesResponse,
@@ -83,6 +84,8 @@ export function BusinessesView() {
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState("restaurant");
+  const [pasting, setPasting] = useState("");
+  const [pasted, setPasted] = useState("");
 
   const load = useCallback(() => {
     fetchBusinesses(days)
@@ -129,6 +132,22 @@ export function BusinessesView() {
       load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Retrait impossible.");
+    }
+  };
+
+  const paste = async (orgId: string, orgName: string) => {
+    if (!pasted.trim()) return;
+    setBusy(orgId);
+    setError("");
+    try {
+      setReport({ org: orgName, report: await pasteBusinessData(orgId, pasted) });
+      setPasted("");
+      setPasting("");
+      load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Import impossible.");
+    } finally {
+      setBusy("");
     }
   };
 
@@ -272,6 +291,17 @@ export function BusinessesView() {
                     <button
                       className="btn small"
                       disabled={busy === org.id}
+                      onClick={() => {
+                        setPasting(pasting === org.id ? "" : org.id);
+                        setPasted("");
+                      }}
+                      title="Copier-coller depuis Excel ou depuis un rapport a l'ecran"
+                    >
+                      Coller des chiffres
+                    </button>
+                    <button
+                      className="btn small"
+                      disabled={busy === org.id}
                       onClick={() => inputs.current[org.id]?.click()}
                       title="Importer un export CSV de ta caisse"
                     >
@@ -301,6 +331,45 @@ export function BusinessesView() {
                     >
                       Retirer
                     </button>
+                  </div>
+                )}
+
+                {pasting === org.id && (
+                  <div className="stack" style={{ marginTop: 10 }}>
+                    <textarea
+                      className="input"
+                      style={{
+                        fontFamily: "var(--mono)",
+                        fontSize: 12,
+                        minHeight: 130,
+                        resize: "vertical",
+                      }}
+                      autoFocus
+                      placeholder={
+                        "Colle ici, depuis Excel ou depuis ton rapport :\n\n" +
+                        "Date\tVentes\tCouverts\n" +
+                        "19/08/2026\t6 180,50\t142\n" +
+                        "20/08/2026\t5 920,25\t131"
+                      }
+                      value={pasted}
+                      onChange={(event) => setPasted(event.target.value)}
+                    />
+                    <p className="card-empty">
+                      Garde la ligne des titres de colonnes. Les lignes de titre du
+                      rapport au-dessus, s'il y en a, sont ignorees toutes seules.
+                    </p>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        className="btn primary"
+                        onClick={() => paste(org.id, org.name)}
+                        disabled={!pasted.trim() || busy === org.id}
+                      >
+                        {busy === org.id ? "Import…" : "Importer ce texte"}
+                      </button>
+                      <button className="btn small" onClick={() => setPasting("")}>
+                        Annuler
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

@@ -101,6 +101,23 @@ export interface BusinessImportReport {
   summary: string;
 }
 
+/** Import par collage: le plus court chemin quand produire un export est penible. */
+export async function pasteBusinessData(
+  orgId: string,
+  content: string,
+): Promise<BusinessImportReport> {
+  const response = await fetch(`/api/businesses/${encodeURIComponent(orgId)}/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, name: "colle" }),
+  });
+  const payload = await response.json().catch(() => ({ detail: "" }));
+  if (!response.ok) {
+    throw new Error(payload.detail || `import refuse (${response.status})`);
+  }
+  return payload.report;
+}
+
 export async function importBusinessCsv(
   orgId: string,
   file: File,

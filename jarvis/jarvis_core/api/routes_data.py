@@ -261,7 +261,13 @@ async def businesses(
 async def import_business_csv(
     org_id: str, request: Request, runtime: JarvisRuntime = Depends(get_runtime)
 ) -> dict[str, Any]:
-    """Importe un CSV de donnees quotidiennes pour une organisation."""
+    """Importe des chiffres quotidiens: fichier televerse, ou texte colle.
+
+    Le collage existe parce que produire un export n'est pas toujours simple.
+    Selectionner les lignes d'un rapport a l'ecran et les coller, si.
+    Excel copie en colonnes separees par des tabulations, que le lecteur CSV
+    reconnait deja.
+    """
     from jarvis_core.business.csv_import import ImportError_, import_csv
 
     store = runtime.business
@@ -273,16 +279,27 @@ async def import_business_csv(
     if org is None:
         raise HTTPException(status_code=404, detail="Entreprise inconnue.")
 
-    form = await request.form()
-    upload = form.get("file")
-    if upload is None or isinstance(upload, str):
-        raise HTTPException(status_code=400, detail="Aucun fichier recu.")
+    content = ""
+    source_ref = "colle"
 
-    raw = await upload.read()
-    try:
-        content = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        content = raw.decode("cp1252", errors="replace")
+    if request.headers.get("content-type", "").startswith("application/json"):
+        payload = await request.json()
+        content = str(payload.get("content") or "")
+        source_ref = str(payload.get("name") or "colle")
+    else:
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or isinstance(upload, str):
+            raise HTTPException(status_code=400, detail="Aucun fichier recu.")
+        raw = await upload.read()
+        source_ref = upload.filename or "import.csv"
+        try:
+            content = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            content = raw.decode("cp1252", errors="replace")
+
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Rien a importer.")
 
     try:
         report = import_csv(
@@ -290,7 +307,7 @@ async def import_business_csv(
             content,
             org_id=org_id,
             kind=str(org["kind"]),
-            source_ref=upload.filename or "import.csv",
+            source_ref=source_ref,
         )
     except ImportError_ as exc:
         raise HTTPException(status_code=400, detail=exc.user_message) from exc
