@@ -174,7 +174,11 @@ def run_setup(root: Path, settings: Settings) -> SetupReport:
             action=f"Cree le dossier a la main: {folder}",
         )
 
-    # 4. Activer ce qui doit l'etre.
+    # 4. Dossier d'import business, avec un sous-dossier par entreprise.
+    if settings.feature_business and settings.business_watch_dir.strip():
+        _prepare_business_folders(root, settings, report)
+
+    # 5. Activer ce qui doit l'etre.
     changed = set_values(env_path, desired)
     report.changed_keys = changed
     if changed:
@@ -187,7 +191,7 @@ def run_setup(root: Path, settings: Settings) -> SetupReport:
     else:
         report.add("Fonctionnalites", done=True, detail="deja activees")
 
-    # 5. Ce que JARVIS ne peut pas faire a la place de l'utilisateur.
+    # 6. Ce que JARVIS ne peut pas faire a la place de l'utilisateur.
     if not settings.anthropic_api_key:
         report.add(
             "Cle Claude",
@@ -213,6 +217,47 @@ def run_setup(root: Path, settings: Settings) -> SetupReport:
         )
 
     return report
+
+
+def _prepare_business_folders(
+    root: Path, settings: Settings, report: SetupReport
+) -> None:
+    """Cree un sous-dossier par entreprise, nomme d'apres son identifiant.
+
+    Sans cela, l'utilisateur devrait deviner la convention de nommage — et un
+    dossier mal nomme est ignore en silence par la surveillance.
+    """
+    from jarvis_core.business.watch_folder import ensure_layout
+    from jarvis_core.persistence.db import build_database
+
+    target = Path(settings.business_watch_dir).expanduser()
+    if not target.is_absolute():
+        target = root / target
+
+    try:
+        db = build_database(settings.database_url)
+        db.migrate()
+        org_ids = [
+            str(row["id"])
+            for row in db.query(
+                "SELECT id FROM organizations WHERE id != 'PERSONAL' AND archived = 0"
+            )
+        ]
+        db.close()
+        created = ensure_layout(target, org_ids)
+    except Exception as exc:  # noqa: BLE001 - un echec ici n'empeche rien d'autre
+        report.add(
+            "Dossier d'import business",
+            done=False,
+            detail=str(exc)[:120],
+            action=f"Cree le dossier a la main: {target}",
+        )
+        return
+
+    detail = f"{target} ({len(org_ids)} entreprise(s))"
+    if created:
+        detail += f" — {len(created)} sous-dossier(s) cree(s)"
+    report.add("Dossier d'import business", done=True, detail=detail)
 
 
 def render_report(report: SetupReport) -> None:

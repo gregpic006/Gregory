@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     #: Frequence de la surveillance proactive, en minutes.
     watch_interval_minutes: int = Field(default=5, alias="JARVIS_WATCH_INTERVAL_MINUTES")
 
+    #: Dossier surveille pour l'import automatique des chiffres business.
+    #: Un sous-dossier par entreprise. Vide = pas de surveillance.
+    business_watch_dir: str = Field(default="data/business", alias="JARVIS_BUSINESS_WATCH_DIR")
+
     #: Dossier Drive a indexer. Vide = rien: on n'aspire jamais tout le Drive
     #: par defaut, meme quand la portee le permettrait.
     drive_folder: str = Field(default="JARVIS", alias="JARVIS_DRIVE_FOLDER")

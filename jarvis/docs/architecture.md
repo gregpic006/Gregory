@@ -652,6 +652,28 @@ Chaque morceau conserve sa **localisation** (page 4, section « Resiliation »):
 c'est ce qui permet a une citation de dire ou regarder, et non pas seulement de
 quel fichier elle vient.
 
+### Le dossier surveille
+
+C'est la reponse la plus solide a « je veux mes chiffres en direct » sans
+dependre d'un fournisseur. Un sous-dossier par entreprise, nomme d'apres son
+identifiant; JARVIS scrute toutes les deux minutes et importe ce qui arrive.
+Aucune entente d'integration, aucune cle d'API, aucun service tiers entre les
+donnees et la machine.
+
+Trois precautions le rendent utilisable en production:
+
+**L'empreinte porte sur le contenu, pas sur le nom.** Une caisse qui reecrit
+`ventes.csv` chaque nuit doit etre relue a chaque changement; un fichier
+simplement renomme ne doit pas gonfler les totaux une seconde fois.
+
+**Un fichier modifie il y a moins de dix secondes n'est pas lu**, sinon on
+importerait la moitie d'un export en cours d'ecriture. Il est repris au tour
+suivant.
+
+**Un dossier dont le nom ne correspond a aucune entreprise est nomme dans le
+rapport**, pas ignore en silence — c'est l'erreur la plus probable au premier
+essai.
+
 ### Ce qui n'est jamais silencieux
 
 L'indexation rend compte fichier par fichier: indexe, inchange, ignore (avec la

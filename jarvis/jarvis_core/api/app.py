@@ -78,6 +78,21 @@ def _register_jobs(runtime: JarvisRuntime) -> None:
                 settings.briefing_time,
             )
 
+    if settings.feature_business and settings.business_watch_dir.strip():
+
+        async def import_job() -> None:
+            from jarvis_core.business.watch_folder import scan_folder
+
+            if runtime.business is None:  # pragma: no cover - garde de coherence
+                return
+            report = scan_folder(runtime.business, settings.business_watch_dir)
+            if report.changed:
+                logger.info("dossier surveille: %s", report.summary())
+
+        # Toutes les 2 minutes: assez frequent pour que « depose le fichier »
+        # ressemble a du direct, assez rare pour ne rien couter.
+        runtime.scheduler.every(2, name="import-business", handler=import_job)
+
     if settings.feature_proactive:
 
         async def watch_job() -> None:

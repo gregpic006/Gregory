@@ -14,6 +14,13 @@ import {
 } from "../lib/api";
 import type { BusinessMetric } from "../lib/types";
 
+/** Modele CSV par type: l'utilisateur ouvre le fichier, remplace les chiffres. */
+const TEMPLATES: Record<string, string> = {
+  restaurant: "/modele-restaurant.csv",
+  saas: "/modele-saas.csv",
+  realestate: "/modele-immobilier.csv",
+};
+
 const PERIODS = [
   { days: 7, label: "7 jours" },
   { days: 30, label: "30 jours" },
@@ -270,6 +277,16 @@ export function BusinessesView() {
                     >
                       {busy === org.id ? "Import…" : "Importer un CSV"}
                     </button>
+                    {TEMPLATES[org.kind] && (
+                      <a
+                        className="btn small"
+                        href={TEMPLATES[org.kind]}
+                        download
+                        title="Telecharger un fichier d'exemple a remplir"
+                      >
+                        Modele CSV
+                      </a>
+                    )}
                     <button
                       className="btn small"
                       onClick={() => rename(org.id, org.name, org.kind)}

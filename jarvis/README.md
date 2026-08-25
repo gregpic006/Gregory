@@ -57,7 +57,7 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 | Recherche dans les documents (mots exacts) | oui, hors ligne, sans telechargement |
 | Recherche par le sens | oui, quand le modele local est telecharge |
 | Google Drive : indexer un dossier | oui (consentement supplementaire requis) |
-| Donnees d'entreprise (ventes, couverts, masse salariale) | oui, par import CSV |
+| Donnees d'entreprise (ventes, couverts, masse salariale) | oui, import CSV manuel ou automatique |
 | Comparaison de periodes, ratio masse salariale | oui |
 | Briefing quotidien automatique | oui |
 | Surveillance proactive (reunion imminente, rappel echu, donnees arretees) | oui |
@@ -143,7 +143,7 @@ jarvis/
 │  ├─ cli.py               jarvis serve | chat | doctor | keygen
 │  ├─ llm/                 abstraction fournisseur, routage, tarification
 │  ├─ voice/               stt/ et tts/, une classe par fournisseur
-│  ├─ business/            indicateurs, faits dates et sources, import CSV
+│  ├─ business/            indicateurs, faits dates et sources, import CSV et dossier surveille
 │  ├─ scheduler.py         taches quotidiennes et periodiques
 │  ├─ proactive.py         observateurs et alertes, avec deduplication
 │  ├─ briefing.py          briefing du matin, a partir des seules sources reelles
@@ -362,8 +362,39 @@ redemarre.
   conserves**. On ne detruit pas des annees de donnees sur un clic ; une
   entreprise retiree peut etre restauree.
 
-Puis importe, soit par l'onglet **Entreprises** (bouton « Importer un CSV »),
-soit en ligne de commande :
+#### Qu'est-ce qu'un CSV ?
+
+Un tableau enregistre en format simple : une ligne par jour, une colonne par
+chiffre. Toutes les caisses savent en produire un — cherche « Exporter »,
+« Rapport » ou « Telecharger » dans son menu. Excel en ouvre un directement.
+
+Le bouton **Modele CSV** sur chaque carte telecharge un fichier d'exemple :
+ouvre-le, remplace les chiffres par les tiens, importe-le.
+
+#### Trois facons de les faire entrer
+
+**1. Automatiquement (recommande).** Depose un CSV dans le sous-dossier de
+l'entreprise, JARVIS l'importe dans les deux minutes :
+
+```
+data/business/RESTAURANT_GA/ventes.csv
+data/business/PORTAIL/mrr.csv
+```
+
+`jarvis setup` cree ces dossiers pour toi. Si ta caisse sait deposer un export
+a heure fixe dans un dossier — beaucoup le font deja pour la comptabilite —
+pointe-la la et tes chiffres arrivent seuls, sans que tu touches a rien.
+
+Un fichier deja importe ne l'est pas deux fois : l'empreinte du **contenu** est
+retenue, pas le nom. Une caisse qui reecrit `ventes.csv` chaque nuit est donc
+relue a chaque fois qu'elle change, et un fichier simplement renomme ne
+retriche pas les totaux. Un fichier en cours d'ecriture est saute et repris au
+tour suivant.
+
+**2. Par l'interface.** Onglet **Entreprises**, bouton « Importer un CSV » sur
+la carte concernee.
+
+**3. En ligne de commande :**
 
 ```powershell
 .\.venv\Scripts\python.exe -m jarvis_core.cli import-business ventes-aout.csv --org "Grande Allee"
