@@ -204,7 +204,11 @@ export default function App() {
           {view === "documents" && <DocumentsView />}
           {view === "memory" && <MemoryView />}
           {view === "integrations" && (
-            <IntegrationsView system={jarvis.system} onChanged={jarvis.refreshSystem} />
+            <IntegrationsView
+              system={jarvis.system}
+              onChanged={jarvis.refreshSystem}
+              onNavigate={navigate}
+            />
           )}
           {view === "settings" && (
             <SettingsView system={jarvis.system} player={jarvis.player} wake={wake} />

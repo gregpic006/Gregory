@@ -988,6 +988,31 @@ de choisir: fixe, elle mangerait la moitie d'un ecran de 414 px.
 
 ---
 
+### La page Integrations ne promet pas de jalon
+
+Elle affichait « prevu M3 » et « prevu M4 » a partir d'une liste ecrite en dur.
+Une fois M3 et M4 livres, ces etiquettes sont devenues fausses de deux facons:
+elles annoncaient comme a venir une chose deja construite (Drive), et elles
+laissaient croire qu'un connecteur arriverait dans un jalon deja termine.
+
+Le plus grave: elles cachaient a l'utilisateur la voie qui, elle, fonctionne.
+Un restaurateur lisant « Maitre'D — prevu M4 » conclut qu'il doit attendre,
+alors que ses chiffres peuvent entrer aujourd'hui par collage.
+
+Chaque carte porte donc un etat, jamais un jalon:
+
+| Etat | Sens |
+|---|---|
+| `connecte` | Lu depuis la configuration reelle, pas depuis une liste |
+| `disponible` | Construit, il reste a l'activer — avec le bouton pour le faire |
+| `autrement` | Pas de connecteur, mais une voie qui marche — avec le lien vers elle |
+| `non construit` | Rien, et on le dit |
+
+Drive n'est plus une entree de liste: son etat se deduit du flag et des
+permissions reellement accordees.
+
+---
+
 ## 18. Ce que JARVIS ne fait pas encore
 
 Enonce explicitement pour eviter toute illusion :

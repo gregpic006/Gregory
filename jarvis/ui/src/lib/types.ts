@@ -56,7 +56,7 @@ export interface GoogleStatus {
   expired?: boolean;
   requested_scopes: string[];
   redirect_uri: string;
-  features: { gmail: boolean; calendar: boolean };
+  features: { gmail: boolean; calendar: boolean; drive?: boolean };
 }
 
 export interface SystemInfo {

@@ -86,7 +86,7 @@ cherche, il repond — et l'information utile l'entoure.
 | **Documents** | Ce qui est indexe, la recherche plein texte, et **quel mode** de recherche tourne |
 | **Entreprises** | Tes entreprises, leurs chiffres reels et leur couverture. Ajout, renommage et retrait |
 | **Memoire** | Ce que JARVIS retient, avec sa source — et un bouton pour l'oublier |
-| **Integrations** | Ce qui est branche, ce qui ne l'est pas, comment le brancher |
+| **Integrations** | Ce qui est branche, et pour le reste, la voie qui marche quand meme |
 
 Details qui comptent :
 

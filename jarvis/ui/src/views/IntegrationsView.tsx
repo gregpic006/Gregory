@@ -3,28 +3,134 @@ import { useState } from "react";
 import { Card } from "../components/Card";
 import { IconPlug } from "../components/layout/icons";
 import { connectGoogle, disconnectGoogle } from "../lib/api";
-import type { SystemInfo } from "../lib/types";
+import type { SystemInfo, ViewId } from "../lib/types";
 
 interface Props {
   system: SystemInfo | null;
   onChanged: () => void;
+  onNavigate: (view: ViewId) => void;
 }
 
-/** Integrations a venir, avec leur jalon. On annonce, on ne simule pas. */
-const PLANNED = [
-  { name: "Google Drive", detail: "Documents et recherche semantique", milestone: "M3" },
-  { name: "Stripe", detail: "Revenus et abonnements", milestone: "M4" },
-  { name: "7Shifts", detail: "Horaires et masse salariale", milestone: "M4" },
-  { name: "OpenTable", detail: "Reservations", milestone: "M4" },
-  { name: "Maitre'D / PayFacto", detail: "Ventes des restaurants", milestone: "M4" },
-  { name: "Recherche web", detail: "Informations externes et recentes", milestone: "M4" },
+/** Ce qu'on peut dire d'une integration.
+ *
+ * Trois etats, et jamais de jalon a la place: annoncer « prevu M4 » quand M4
+ * est livre laisse croire qu'une chose arrive alors qu'elle a ete tranchee.
+ * Surtout, ca cache a l'utilisateur la voie qui, elle, fonctionne deja.
+ */
+type Availability =
+  | { kind: "ready"; note: string }
+  | { kind: "workaround"; note: string; action: string }
+  | { kind: "absent"; note: string };
+
+interface Service {
+  name: string;
+  detail: string;
+  availability: Availability;
+}
+
+/** Systemes sans connecteur direct, et ce qui marche a la place. */
+const SERVICES: Service[] = [
+  {
+    name: "Maitre'D / PayFacto",
+    detail: "Ventes, couverts et pourboires des restaurants",
+    availability: {
+      kind: "workaround",
+      note:
+        "Aucun connecteur direct. Tes chiffres entrent quand meme: colle-les " +
+        "depuis un rapport, ou fais deposer un export dans le dossier surveille.",
+      action: "Voir Entreprises",
+    },
+  },
+  {
+    name: "7Shifts",
+    detail: "Horaires et masse salariale",
+    availability: {
+      kind: "workaround",
+      note:
+        "Aucun connecteur direct. La masse salariale s'importe comme le reste, " +
+        "par collage ou par fichier.",
+      action: "Voir Entreprises",
+    },
+  },
+  {
+    name: "OpenTable",
+    detail: "Reservations",
+    availability: {
+      kind: "workaround",
+      note:
+        "Aucun connecteur direct. La colonne « Reservations » d'un import est " +
+        "reconnue si tu l'ajoutes a tes chiffres.",
+      action: "Voir Entreprises",
+    },
+  },
+  {
+    name: "Stripe",
+    detail: "Revenus recurrents et abonnements",
+    availability: {
+      kind: "absent",
+      note:
+        "Pas construit. A faire quand la facturation de Portail sera en place — " +
+        "d'ici la, le MRR s'importe a la main.",
+    },
+  },
+  {
+    name: "Recherche web",
+    detail: "Informations externes et recentes",
+    availability: { kind: "absent", note: "Pas construit." },
+  },
 ];
 
-/** Page Integrations: connecter un service en un clic, quand c'est possible. */
-export function IntegrationsView({ system, onChanged }: Props) {
+function AvailabilityLine({
+  availability,
+  onNavigate,
+}: {
+  availability: Availability;
+  onNavigate: (view: ViewId) => void;
+}) {
+  if (availability.kind === "ready") {
+    return (
+      <>
+        <span className="not-connected" style={{ color: "var(--accent)" }}>
+          disponible
+        </span>
+        <span className="card-empty">{availability.note}</span>
+      </>
+    );
+  }
+  if (availability.kind === "workaround") {
+    return (
+      <>
+        <span className="not-connected" style={{ color: "var(--warn)" }}>
+          autrement
+        </span>
+        <span className="card-empty">{availability.note}</span>
+        <button
+          className="btn small"
+          style={{ alignSelf: "flex-start", marginTop: 4 }}
+          onClick={() => onNavigate("businesses")}
+        >
+          {availability.action}
+        </button>
+      </>
+    );
+  }
+  return (
+    <>
+      <span className="not-connected">non construit</span>
+      <span className="card-empty">{availability.note}</span>
+    </>
+  );
+}
+
+/** Page Integrations: ce qui est branche, et pour le reste, ce qui marche quand meme. */
+export function IntegrationsView({ system, onChanged, onNavigate }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const google = system?.integrations?.google ?? null;
+  const driveEnabled = Boolean(google?.features?.drive);
+  const driveGranted = Boolean(
+    google?.scopes?.some((scope) => scope.includes("drive.readonly")),
+  );
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -43,7 +149,7 @@ export function IntegrationsView({ system, onChanged }: Props) {
     <>
       <div className="dash-head">
         <h1>Integrations</h1>
-        <p>Ce qui est branche, et ce qui ne l'est pas encore.</p>
+        <p>Ce qui est branche, et pour le reste, comment faire entrer tes donnees.</p>
       </div>
 
       {error && <div className="banner">{error}</div>}
@@ -52,7 +158,9 @@ export function IntegrationsView({ system, onChanged }: Props) {
         <Card
           title="Google Workspace"
           icon={<IconPlug size={14} />}
-          count={google?.connected ? "connecte" : google?.configured ? "a connecter" : "non configure"}
+          count={
+            google?.connected ? "connecte" : google?.configured ? "a connecter" : "non configure"
+          }
         >
           <div className="stack">
             {google?.connected && google.account && (
@@ -89,8 +197,8 @@ export function IntegrationsView({ system, onChanged }: Props) {
               !google.features.gmail &&
               !google.features.calendar && (
                 <p className="card-empty">
-                  Active JARVIS_FEATURE_GMAIL ou JARVIS_FEATURE_CALENDAR dans .env,
-                  sinon aucune permission utile ne serait demandee.
+                  Active Gmail ou Calendrier dans Reglages, sinon aucune permission
+                  utile ne serait demandee.
                 </p>
               )}
 
@@ -112,11 +220,62 @@ export function IntegrationsView({ system, onChanged }: Props) {
           </div>
         </Card>
 
-        {PLANNED.map((service) => (
+        {/* Drive est construit: son etat se lit, il ne s'annonce pas. */}
+        <Card
+          title="Google Drive"
+          icon={<IconPlug size={14} />}
+          count={driveEnabled && driveGranted ? "connecte" : ""}
+        >
+          <div className="stack">
+            {driveEnabled && driveGranted ? (
+              <>
+                <span className="not-connected" style={{ color: "var(--ok)" }}>
+                  connecte
+                </span>
+                <span className="card-empty">
+                  Le dossier configure est indexe. Lance « jarvis sync-drive » pour
+                  le mettre a jour.
+                </span>
+              </>
+            ) : driveEnabled ? (
+              <>
+                <span className="not-connected" style={{ color: "var(--warn)" }}>
+                  reconnexion requise
+                </span>
+                <span className="card-empty">
+                  Drive est active mais la permission n'a pas ete accordee.
+                  Deconnecte puis reconnecte Google ci-contre.
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="not-connected" style={{ color: "var(--accent)" }}>
+                  disponible
+                </span>
+                <span className="card-empty">
+                  Indexation d'un dossier Drive, prete a l'emploi. Coche « Google Drive »
+                  dans Reglages, puis reconnecte ton compte Google — la permission est
+                  demandee a ce moment-la.
+                </span>
+                <button
+                  className="btn small"
+                  style={{ alignSelf: "flex-start", marginTop: 4 }}
+                  onClick={() => onNavigate("settings")}
+                >
+                  Ouvrir les Reglages
+                </button>
+              </>
+            )}
+          </div>
+        </Card>
+
+        {SERVICES.map((service) => (
           <Card title={service.name} icon={<IconPlug size={14} />} key={service.name}>
             <div className="stack">
-              <span className="not-connected">prevu {service.milestone}</span>
-              <span className="card-empty">{service.detail}</span>
+              <AvailabilityLine availability={service.availability} onNavigate={onNavigate} />
+              <span className="metric-label" style={{ marginTop: 4 }}>
+                {service.detail}
+              </span>
             </div>
           </Card>
         ))}
