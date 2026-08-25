@@ -84,7 +84,7 @@ cherche, il repond — et l'information utile l'entoure.
 | **Conversation** | Le fil complet, la transcription en direct, les sources citees |
 | **Calendrier / Courriels / Rappels** | Une source a la fois, en detail |
 | **Documents** | Ce qui est indexe, la recherche plein texte, et **quel mode** de recherche tourne |
-| **Entreprises** | Un contexte par organisation, ses chiffres reels et leur couverture |
+| **Entreprises** | Tes entreprises, leurs chiffres reels et leur couverture. Ajout, renommage et retrait |
 | **Memoire** | Ce que JARVIS retient, avec sa source — et un bouton pour l'oublier |
 | **Integrations** | Ce qui est branche, ce qui ne l'est pas, comment le brancher |
 
@@ -349,11 +349,18 @@ Toutes les caisses savent exporter un CSV. C'est le chemin le plus court entre
 tes vraies donnees et JARVIS — aucune entente d'integration, aucune cle a
 obtenir.
 
-Active la fonctionnalite dans `.env` :
+Active la fonctionnalite dans **Reglages** (case « Donnees business »), puis
+redemarre.
 
-```
-JARVIS_FEATURE_BUSINESS=true
-```
+**Tes entreprises t'appartiennent.** Onglet **Entreprises** :
+
+- **+ Ajouter une entreprise** — nom et type. Le type determine les
+  indicateurs proposes : ventes et couverts pour un restaurant, revenus
+  recurrents pour un logiciel, occupation et loyers pour de l'immobilier.
+- **Renommer** — change le nom ou le type.
+- **Retirer** — l'entreprise disparait de la liste, **ses chiffres sont
+  conserves**. On ne detruit pas des annees de donnees sur un clic ; une
+  entreprise retiree peut etre restauree.
 
 Puis importe, soit par l'onglet **Entreprises** (bouton « Importer un CSV »),
 soit en ligne de commande :

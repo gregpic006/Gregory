@@ -85,7 +85,7 @@ export function HomeView({
           <PaneBody
             status={panes?.business.status ?? "not_connected"}
             detail={panes?.business.detail ?? "Chargement…"}
-            empty=""
+            empty={panes?.business.detail || "Aucune donnee pour l'instant."}
           >
             {null}
           </PaneBody>
@@ -100,7 +100,12 @@ export function HomeView({
           <PaneBody
             status={panes?.documents.status ?? "not_connected"}
             detail={panes?.documents.detail ?? "Chargement…"}
-            empty=""
+            // Source branchee mais sans lignes a montrer: on affiche quand meme
+            // ce qu'on sait, sinon la carte reste vide sans explication.
+            empty={
+              panes?.documents.detail ||
+              `${panes?.documents.count ?? 0} document(s) indexe(s).`
+            }
           >
             {null}
           </PaneBody>

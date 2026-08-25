@@ -282,3 +282,46 @@ export async function generateBriefing(): Promise<Briefing> {
   if (!response.ok) throw new Error(payload.detail || "briefing impossible");
   return payload.briefing;
 }
+
+export const ORG_KINDS = [
+  { value: "restaurant", label: "Restaurant" },
+  { value: "saas", label: "Logiciel / SaaS" },
+  { value: "realestate", label: "Immobilier" },
+  { value: "other", label: "Autre" },
+] as const;
+
+export async function createOrganization(name: string, kind: string): Promise<void> {
+  const response = await fetch("/api/businesses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, kind }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ detail: "" }));
+    throw new Error(payload.detail || "creation refusee");
+  }
+}
+
+export async function renameOrganization(
+  id: string,
+  name: string,
+  kind: string,
+): Promise<void> {
+  const response = await fetch(`/api/businesses/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, kind }),
+  });
+  if (!response.ok) throw new Error("modification refusee");
+}
+
+/** Archive par defaut: les chiffres sont conserves et l'entreprise restaurable. */
+export async function archiveOrganization(id: string): Promise<void> {
+  const response = await fetch(`/api/businesses/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ detail: "" }));
+    throw new Error(payload.detail || "retrait refuse");
+  }
+}

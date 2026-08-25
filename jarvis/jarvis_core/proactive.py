@@ -235,7 +235,8 @@ def watch_business(runtime: Any) -> list[Alert]:
     today = datetime.now(get_tz(runtime.settings.timezone)).date()
     alerts: list[Alert] = []
     rows = runtime.db.query(
-        "SELECT id, name FROM organizations WHERE id != 'PERSONAL' ORDER BY name"
+        "SELECT id, name FROM organizations"
+            " WHERE id != 'PERSONAL' AND archived = 0 ORDER BY position, name"
     )
     for row in rows:
         org_id, name = str(row["id"]), str(row["name"])

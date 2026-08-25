@@ -281,6 +281,7 @@ button { cursor: pointer; background: none; border: none; }
 
 .card {
   position: relative;
+  min-width: 0;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -428,8 +429,23 @@ button { cursor: pointer; background: none; border: none; }
   min-height: 100%;
   padding: 18px 0 8px;
 }
-.home-side { display: flex; flex-direction: column; gap: 16px; }
-.home-center { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+/* `min-width: 0` est indispensable: un enfant de grille vaut `auto` par
+   defaut, donc il refuse de retrecir sous la largeur de son contenu. Un
+   objet de courriel un peu long elargissait alors toute la page, qui se
+   mettait a defiler horizontalement. */
+.home-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.home-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
+}
 
 @media (max-width: 1180px) {
   .home { grid-template-columns: 1fr; }
@@ -473,6 +489,7 @@ button { cursor: pointer; background: none; border: none; }
 .dash-head p { margin: 6px 0 0; color: var(--text-dim); font-size: 13.5px; }
 
 .grid {
+  /* Voir .home-side: sans cela une cellule s'elargit a son contenu. */
   max-width: 1560px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -934,6 +951,24 @@ kbd {
   display: inline-flex;
 }
 .alert-dismiss:hover { color: var(--accent); background: rgba(255, 255, 255, 0.05); }
+
+/* Titre de section dans le tableau de bord: il separe des groupes de cartes
+   sans introduire une hierarchie visuelle lourde. */
+.section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 4px 0 12px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+.section-note-inline {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
 
 /* --------------------------------------------------------------- briefing */
 

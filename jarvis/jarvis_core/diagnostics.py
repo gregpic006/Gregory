@@ -468,7 +468,8 @@ def check_business(runtime: Any) -> list[CheckResult]:
 
     results: list[CheckResult] = []
     rows = runtime.db.query(
-        "SELECT id, name, kind FROM organizations WHERE id != 'PERSONAL' ORDER BY name"
+        "SELECT id, name, kind FROM organizations"
+        " WHERE id != 'PERSONAL' AND archived = 0 ORDER BY position, name"
     )
     if not rows:
         return [

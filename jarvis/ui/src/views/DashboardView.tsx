@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 
 import { Card, NotConnected } from "../components/Card";
-import { fetchBriefing, generateBriefing, type Briefing } from "../lib/api";
+import {
+  fetchBriefing,
+  fetchBusinesses,
+  generateBriefing,
+  type Briefing,
+  type BusinessesResponse,
+} from "../lib/api";
 import { IconAlert, IconBrain, IconBuilding, IconCalendar, IconCheck, IconMail } from "../components/layout/icons";
 import { greeting, longDate } from "../lib/format";
 import type { Overview, ViewId } from "../lib/types";
@@ -24,6 +30,7 @@ export function DashboardView({ overview, onNavigate, onBriefing }: Props) {
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [scheduledAt, setScheduledAt] = useState("");
   const [working, setWorking] = useState(false);
+  const [businesses, setBusinesses] = useState<BusinessesResponse | null>(null);
 
   useEffect(() => {
     fetchBriefing()
@@ -32,6 +39,7 @@ export function DashboardView({ overview, onNavigate, onBriefing }: Props) {
         setScheduledAt(payload.scheduled_at);
       })
       .catch(() => undefined);
+    fetchBusinesses(7).then(setBusinesses).catch(() => undefined);
   }, []);
 
   // Le briefing ecrit est genere par le serveur a partir des seules sources
@@ -93,6 +101,62 @@ export function DashboardView({ overview, onNavigate, onBriefing }: Props) {
             </span>
           </div>
         </div>
+      )}
+
+      {businesses?.enabled && businesses.organizations.length > 0 && (
+        <>
+          <h2 className="section-title">
+            Entreprises
+            <span className="section-note-inline">
+              {businesses.period.start
+                ? `du ${businesses.period.start} au ${businesses.period.end}`
+                : ""}
+            </span>
+          </h2>
+          <div className="grid" style={{ marginBottom: 22 }}>
+            {businesses.organizations.map((org) => {
+              const live = org.metrics.filter((metric) => metric.value !== null);
+              return (
+                <Card
+                  title={org.name}
+                  icon={<IconBuilding size={14} />}
+                  count={live.length || ""}
+                  onClick={() => onNavigate("businesses")}
+                  key={org.id}
+                >
+                  {live.length === 0 ? (
+                    <NotConnected
+                      detail={`Aucune donnee. Importe un CSV depuis l'onglet Entreprises.`}
+                    />
+                  ) : (
+                    <div className="stack">
+                      {live.slice(0, 4).map((metric) => (
+                        <div className="metric-row" key={metric.metric}>
+                          <div className="field">
+                            <span className="k">{metric.label}</span>
+                            <span
+                              className="v"
+                              style={
+                                metric.status === "stale" ? { color: "var(--warn)" } : {}
+                              }
+                            >
+                              {metric.display}
+                            </span>
+                          </div>
+                          {!metric.complete && (
+                            <span className="metric-note">
+                              {metric.days_covered}/{metric.days_requested} jours
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        </>
       )}
 
       <div className="grid">
@@ -162,24 +226,6 @@ export function DashboardView({ overview, onNavigate, onBriefing }: Props) {
               <ReminderRow reminder={reminder} key={reminder.id} />
             ))}
           </PaneBody>
-        </Card>
-
-        <Card
-          title="Entreprises"
-          icon={<IconBuilding size={14} />}
-          onClick={() => onNavigate("businesses")}
-        >
-          {panes?.business.status === "connected" ? (
-            <div className="row-list">
-              {panes.business.organizations.map((org) => (
-                <div className="row-item" key={org.id}>
-                  <span className="row-main">{org.name}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <NotConnected detail={panes?.business.detail ?? "Chargement…"} />
-          )}
         </Card>
 
         <Card

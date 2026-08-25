@@ -182,7 +182,8 @@ def _business_summary(runtime: Any, store: Any) -> str:
 
     pieces: list[str] = []
     rows = runtime.db.query(
-        "SELECT id, name, kind FROM organizations WHERE id != 'PERSONAL' ORDER BY name"
+        "SELECT id, name, kind FROM organizations"
+        " WHERE id != 'PERSONAL' AND archived = 0 ORDER BY position, name"
     )
     for row in rows:
         org_id, name, kind = str(row["id"]), str(row["name"]), str(row["kind"])

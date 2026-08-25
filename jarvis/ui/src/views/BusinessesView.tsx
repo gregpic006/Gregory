@@ -3,8 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card } from "../components/Card";
 import { IconBuilding, IconRefresh } from "../components/layout/icons";
 import {
+  archiveOrganization,
+  createOrganization,
   fetchBusinesses,
   importBusinessCsv,
+  ORG_KINDS,
+  renameOrganization,
   type BusinessImportReport,
   type BusinessesResponse,
 } from "../lib/api";
@@ -69,6 +73,9 @@ export function BusinessesView() {
   );
   const [busy, setBusy] = useState("");
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newKind, setNewKind] = useState("restaurant");
 
   const load = useCallback(() => {
     fetchBusinesses(days)
@@ -80,6 +87,43 @@ export function BusinessesView() {
   }, [days]);
 
   useEffect(load, [load]);
+
+  const add = async () => {
+    if (!newName.trim()) return;
+    try {
+      await createOrganization(newName.trim(), newKind);
+      setNewName("");
+      setAdding(false);
+      load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Creation impossible.");
+    }
+  };
+
+  const rename = async (id: string, current: string, kind: string) => {
+    const next = window.prompt("Nouveau nom de l'entreprise", current);
+    if (!next || next.trim() === current) return;
+    try {
+      await renameOrganization(id, next.trim(), kind);
+      load();
+    } catch {
+      setError("Renommage impossible.");
+    }
+  };
+
+  const archive = async (id: string, name: string) => {
+    // Archivage, pas suppression: les chiffres sont conserves. On le dit dans
+    // la question, sinon l'utilisateur hesitera a cliquer.
+    if (!window.confirm(`Retirer « ${name} » de la liste ?\n\nSes chiffres sont conserves et l'entreprise peut etre restauree.`)) {
+      return;
+    }
+    try {
+      await archiveOrganization(id);
+      load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Retrait impossible.");
+    }
+  };
 
   const upload = async (orgId: string, orgName: string, file: File) => {
     setBusy(orgId);
@@ -103,7 +147,7 @@ export function BusinessesView() {
             ? `Du ${data.period.start} au ${data.period.end}.`
             : "Une organisation, un contexte, ses propres sources de donnees."}
         </p>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {PERIODS.map((period) => (
             <button
               className={`btn small${days === period.days ? " primary" : ""}`}
@@ -113,8 +157,47 @@ export function BusinessesView() {
               {period.label}
             </button>
           ))}
+          <span style={{ flex: 1 }} />
+          <button className="btn small" onClick={() => setAdding((v) => !v)}>
+            {adding ? "Annuler" : "+ Ajouter une entreprise"}
+          </button>
         </div>
       </div>
+
+      {adding && (
+        <Card title="Nouvelle entreprise" icon={<IconBuilding size={14} />}>
+          <div className="stack">
+            <input
+              className="input"
+              style={{ fontFamily: "var(--sans)", fontSize: 13 }}
+              placeholder="Nom de l'entreprise"
+              value={newName}
+              autoFocus
+              onChange={(event) => setNewName(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && add()}
+            />
+            <select
+              className="input"
+              value={newKind}
+              onChange={(event) => setNewKind(event.target.value)}
+            >
+              {ORG_KINDS.map((kind) => (
+                <option value={kind.value} key={kind.value}>
+                  {kind.label}
+                </option>
+              ))}
+            </select>
+            <p className="card-empty">
+              Le type determine les indicateurs proposes: ventes et couverts pour un
+              restaurant, revenus recurrents pour un logiciel, occupation et loyers
+              pour de l'immobilier.
+            </p>
+            <button className="btn primary" onClick={add} disabled={!newName.trim()}>
+              Ajouter
+            </button>
+          </div>
+        </Card>
+      )}
 
       {data && !data.enabled && <p className="section-note">{data.note}</p>}
       {error && <div className="banner">{error}</div>}
@@ -186,6 +269,20 @@ export function BusinessesView() {
                       title="Importer un export CSV de ta caisse"
                     >
                       {busy === org.id ? "Import…" : "Importer un CSV"}
+                    </button>
+                    <button
+                      className="btn small"
+                      onClick={() => rename(org.id, org.name, org.kind)}
+                      title="Renommer"
+                    >
+                      Renommer
+                    </button>
+                    <button
+                      className="btn small"
+                      onClick={() => archive(org.id, org.name)}
+                      title="Retirer de la liste (les chiffres sont conserves)"
+                    >
+                      Retirer
                     </button>
                   </div>
                 )}

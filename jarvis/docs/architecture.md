@@ -708,7 +708,7 @@ deux rapporter un chiffre).
 
 Les indicateurs sont une liste declaree (`jarvis_core/business/metrics.py`),
 pas une chaine libre. Si le modele pouvait inventer un nom d'indicateur, il
-pourrait aussi inventer sa valeur: « la marge nette de Bouvier » sortirait
+pourrait aussi inventer sa valeur: « la marge nette de Maguire » sortirait
 d'une requete vide, qu'un modele complaisant lirait comme un zero.
 
 Chaque indicateur declare **comment il s'agrege**, parce que la reponse
@@ -741,6 +741,25 @@ Trois etats, jamais confondus:
 
 Un vrai zero (« lundi ferme, zero vente ») est une donnee et reste
 `connected`: la distinction est portee par le statut, pas par la valeur.
+
+### Les entreprises appartiennent a l'utilisateur
+
+La migration 0003 declarait cinq entreprises en dur, d'apres une premiere
+conversation. C'etait une erreur de conception, pas un detail: le code n'a pas
+a decider quelles entreprises sont celles de l'utilisateur, et l'une d'elles
+ne lui appartenait pas.
+
+Les valeurs de depart restent, mais ne sont que des valeurs de depart:
+l'ajout, le renommage et le retrait passent par l'interface.
+
+**Retirer archive, ne detruit pas.** Les chiffres restent en base et
+reapparaissent si l'entreprise est restauree. La suppression definitive existe
+(`purge=true`) mais n'est jamais le comportement par defaut: on ne detruit pas
+des annees de donnees sur un clic mal place.
+
+Toutes les lectures — volets, briefing, surveillance, outils, diagnostic —
+filtrent les organisations archivees. Une entreprise retiree ne doit plus
+produire d'alerte ni apparaitre dans un briefing.
 
 ### Pourquoi le CSV en premier
 

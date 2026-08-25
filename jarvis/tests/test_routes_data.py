@@ -126,7 +126,9 @@ def test_disconnected_google_is_reported_as_such(tmp_path: Any) -> None:
 def test_business_metrics_carry_no_invented_value(client: TestClient) -> None:
     payload = client.get("/api/businesses").json()
     names = {org["name"] for org in payload["organizations"]}
-    assert {"Grande Allee", "Maguire", "Bouvier", "Portail"} <= names
+    assert {"Grande Allee", "Maguire", "Portail"} <= names
+    # Bouvier n'appartient pas a l'utilisateur: la migration 0007 le retire.
+    assert "Bouvier" not in names
 
     for org in payload["organizations"]:
         assert org["metrics"], f"{org['name']} devrait declarer ses indicateurs"
@@ -537,3 +539,135 @@ def test_setting_the_same_value_changes_nothing(settings_client: TestClient) -> 
 
     assert response.json()["changed"] == []
     assert response.json()["restart_needed"] is False
+
+
+# =============================================================================
+# Les entreprises appartiennent a l'utilisateur
+# =============================================================================
+
+
+def test_creating_an_organization(biz_client: TestClient) -> None:
+    response = biz_client.post(
+        "/api/businesses", json={"name": "Chez Gaston", "kind": "restaurant"}
+    )
+
+    assert response.status_code == 201
+    created = response.json()
+    assert created["id"] == "CHEZ_GASTON"
+
+    names = {o["name"] for o in biz_client.get("/api/businesses").json()["organizations"]}
+    assert "Chez Gaston" in names
+
+
+def test_two_similar_names_do_not_collide(biz_client: TestClient) -> None:
+    """Sans suffixe, la seconde ecraserait silencieusement la premiere."""
+    first = biz_client.post("/api/businesses", json={"name": "Le Bistro"}).json()
+    second = biz_client.post("/api/businesses", json={"name": "Le Bistro"}).json()
+
+    assert first["id"] == "LE_BISTRO"
+    assert second["id"] == "LE_BISTRO_2"
+
+
+def test_accents_are_handled_in_identifiers(biz_client: TestClient) -> None:
+    created = biz_client.post("/api/businesses", json={"name": "Café Été"}).json()
+
+    assert created["id"] == "CAFE_ETE"
+    assert created["name"] == "Café Été"
+
+
+def test_an_unknown_kind_is_refused(biz_client: TestClient) -> None:
+    response = biz_client.post("/api/businesses", json={"name": "X", "kind": "banque"})
+
+    assert response.status_code == 400
+    assert "Type inconnu" in response.json()["detail"]
+
+
+def test_renaming_an_organization(biz_client: TestClient) -> None:
+    response = biz_client.patch(
+        "/api/businesses/RESTAURANT_GA", json={"name": "Grande-Allee", "kind": "restaurant"}
+    )
+
+    assert response.status_code == 200
+    names = {o["name"] for o in biz_client.get("/api/businesses").json()["organizations"]}
+    assert "Grande-Allee" in names
+
+
+def test_archiving_hides_without_destroying(biz_client: TestClient) -> None:
+    """On ne detruit pas des annees de chiffres sur un clic."""
+    biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import",
+        files={"file": ("v.csv", CSV_SAMPLE, "text/csv")},
+    )
+
+    assert biz_client.delete("/api/businesses/RESTAURANT_GA").json() == {
+        "archived": "RESTAURANT_GA"
+    }
+    ids = {o["id"] for o in biz_client.get("/api/businesses").json()["organizations"]}
+    assert "RESTAURANT_GA" not in ids
+
+    assert biz_client.post("/api/businesses/RESTAURANT_GA/restore").status_code == 200
+    payload = biz_client.get("/api/businesses", params={"days": 400}).json()
+    grande = next(o for o in payload["organizations"] if o["id"] == "RESTAURANT_GA")
+    sales = next(m for m in grande["metrics"] if m["metric"] == "sales")
+    assert sales["value"] == 12010.75, "les chiffres doivent avoir survecu"
+
+
+def test_purging_is_explicit_and_final(biz_client: TestClient) -> None:
+    biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import",
+        files={"file": ("v.csv", CSV_SAMPLE, "text/csv")},
+    )
+
+    assert biz_client.delete(
+        "/api/businesses/RESTAURANT_GA", params={"purge": "true"}
+    ).json() == {"purged": "RESTAURANT_GA"}
+    assert biz_client.post("/api/businesses/RESTAURANT_GA/restore").status_code == 404
+
+
+def test_the_personal_context_cannot_be_removed(biz_client: TestClient) -> None:
+    response = biz_client.delete("/api/businesses/PERSONAL")
+
+    assert response.status_code == 400
+
+
+def test_an_archived_organization_produces_no_alert(biz_client: TestClient) -> None:
+    """Une entreprise retiree ne doit plus rien signaler."""
+    biz_client.delete("/api/businesses/RESTAURANT_GA")
+
+    payload = biz_client.post("/api/alerts/check").json()
+
+    assert all("Grande Allee" not in alert["title"] for alert in payload["new"])
+
+
+def test_business_pane_reflects_reality_after_an_import(biz_client: TestClient) -> None:
+    """Ce volet repondait « non connecte » en dur, meme avec des donnees reelles."""
+    before = biz_client.get("/api/overview").json()["panes"]["business"]
+    assert before["status"] == "not_connected"
+    assert before["connected_count"] == 0
+
+    biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import",
+        files={"file": ("v.csv", CSV_SAMPLE, "text/csv")},
+    )
+
+    after = biz_client.get("/api/overview").json()["panes"]["business"]
+    assert after["status"] == "connected"
+    assert after["connected_count"] == 1
+    assert "Grande Allee" in after["detail"]
+
+
+def test_business_pane_says_disabled_rather_than_empty(client: TestClient) -> None:
+    pane = client.get("/api/overview").json()["panes"]["business"]
+
+    assert pane["status"] == "not_connected"
+    assert "JARVIS_FEATURE_BUSINESS" in pane["detail"]
+
+
+def test_a_newly_created_organization_appears_in_the_overview(
+    biz_client: TestClient,
+) -> None:
+    biz_client.post("/api/businesses", json={"name": "Chez Gaston"})
+
+    pane = biz_client.get("/api/overview").json()["panes"]["business"]
+
+    assert "Chez Gaston" in {org["name"] for org in pane["organizations"]}

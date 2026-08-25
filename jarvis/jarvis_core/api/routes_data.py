@@ -15,9 +15,13 @@ fictive.
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from jarvis_core.errors import JarvisError
 from jarvis_core.runtime import JarvisRuntime
@@ -102,16 +106,46 @@ def _tasks_pane(runtime: JarvisRuntime) -> dict[str, Any]:
 
 
 def _business_pane(runtime: JarvisRuntime) -> dict[str, Any]:
-    """Organisations declarees. Aucune donnee metier n'est encore branchee."""
+    """Etat reel des sources business.
+
+    Ce volet a longtemps repondu « non connecte » en dur, du temps ou aucune
+    donnee metier n'existait. Le laisser ainsi apres M4 en ferait un mensonge:
+    l'accueil afficherait « aucune source » pendant que la page Entreprises
+    montre de vrais chiffres.
+    """
     rows = runtime.db.query(
-        "SELECT id, name, kind FROM organizations WHERE id != 'PERSONAL' ORDER BY name"
+        "SELECT id, name, kind FROM organizations"
+        " WHERE id != 'PERSONAL' AND archived = 0 ORDER BY position, name"
     )
+    organizations = [
+        {"id": str(row["id"]), "name": str(row["name"]), "kind": str(row["kind"])}
+        for row in rows
+    ]
+
+    store = runtime.business
+    if store is None:
+        return _pane(
+            NOT_CONNECTED,
+            "Les donnees business sont desactivees (JARVIS_FEATURE_BUSINESS)",
+            organizations=organizations,
+            connected_count=0,
+        )
+
+    connected = [org for org in organizations if store.latest_day(org["id"])]
+    if not connected:
+        return _pane(
+            NOT_CONNECTED,
+            "Aucune donnee importee. Onglet Entreprises pour brancher un CSV",
+            organizations=organizations,
+            connected_count=0,
+        )
+
+    names = ", ".join(org["name"] for org in connected)
     return _pane(
-        NOT_CONNECTED,
-        "Aucune source de donnees business n'est branchee",
-        organizations=[
-            {"id": row["id"], "name": row["name"], "kind": row["kind"]} for row in rows
-        ],
+        CONNECTED,
+        f"{names} — donnees a jour",
+        organizations=organizations,
+        connected_count=len(connected),
     )
 
 
@@ -149,7 +183,8 @@ async def businesses(
     from jarvis_core.business.store import day_range
 
     rows = runtime.db.query(
-        "SELECT id, name, kind FROM organizations WHERE id != 'PERSONAL' ORDER BY name"
+        "SELECT id, name, kind FROM organizations"
+        " WHERE id != 'PERSONAL' AND archived = 0 ORDER BY position, name"
     )
     store = runtime.business
 
@@ -460,3 +495,113 @@ async def make_briefing(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[s
         return {"briefing": await generate_briefing(runtime)}
     except JarvisError as exc:
         raise HTTPException(status_code=400, detail=exc.user_message) from exc
+
+
+# --- gestion des organisations ------------------------------------------------
+# Les entreprises appartiennent a l'utilisateur, pas au code. Les valeurs de
+# depart ne sont que des valeurs de depart.
+
+
+class OrganizationInput(BaseModel):
+    """Creation ou modification d'une entreprise."""
+
+    name: str = Field(min_length=1, max_length=80)
+    kind: str = Field(default="restaurant")
+
+
+#: Types connus: chacun determine les indicateurs proposes.
+ORG_KINDS = ("restaurant", "saas", "realestate", "other")
+
+
+def _slug(name: str) -> str:
+    """Identifiant stable derive du nom, sans accents ni espaces."""
+    folded = unicodedata.normalize("NFKD", name)
+    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", folded).strip("_").upper()
+    return cleaned[:40] or "ORG"
+
+
+@router.post("/businesses", status_code=201)
+async def create_organization(
+    payload: OrganizationInput, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    """Ajoute une entreprise."""
+    if payload.kind not in ORG_KINDS:
+        raise HTTPException(
+            status_code=400, detail=f"Type inconnu. Choix: {', '.join(ORG_KINDS)}"
+        )
+
+    base = _slug(payload.name)
+    org_id = base
+    # Deux entreprises peuvent porter des noms proches: on suffixe plutot que
+    # d'ecraser silencieusement l'existante.
+    suffix = 2
+    while runtime.db.query_one("SELECT id FROM organizations WHERE id = ?", (org_id,)):
+        org_id = f"{base}_{suffix}"
+        suffix += 1
+
+    row = runtime.db.query_one("SELECT MAX(position) AS p FROM organizations")
+    position = int(row["p"] or 0) + 10 if row else 100
+    runtime.db.execute(
+        "INSERT INTO organizations (id, name, kind, created_at, position, archived)"
+        " VALUES (?,?,?,?,?,0)",
+        (
+            org_id,
+            payload.name.strip(),
+            payload.kind,
+            datetime.now(UTC).isoformat(),
+            position,
+        ),
+    )
+    return {"id": org_id, "name": payload.name.strip(), "kind": payload.kind}
+
+
+@router.patch("/businesses/{org_id}")
+async def rename_organization(
+    org_id: str, payload: OrganizationInput, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    """Renomme une entreprise ou change son type."""
+    if not runtime.db.query_one("SELECT id FROM organizations WHERE id = ?", (org_id,)):
+        raise HTTPException(status_code=404, detail="Entreprise inconnue.")
+    if payload.kind not in ORG_KINDS:
+        raise HTTPException(status_code=400, detail="Type inconnu.")
+    runtime.db.execute(
+        "UPDATE organizations SET name = ?, kind = ? WHERE id = ?",
+        (payload.name.strip(), payload.kind, org_id),
+    )
+    return {"id": org_id, "name": payload.name.strip(), "kind": payload.kind}
+
+
+@router.delete("/businesses/{org_id}")
+async def archive_organization(
+    org_id: str, purge: bool = False, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    """Retire une entreprise de la liste.
+
+    Par defaut elle est **archivee**, pas detruite: ses chiffres restent en
+    base et reapparaissent si elle est restauree. `purge=true` supprime pour de
+    bon — c'est irreversible, donc jamais le comportement par defaut.
+    """
+    if org_id == "PERSONAL":
+        raise HTTPException(status_code=400, detail="Le contexte personnel ne se retire pas.")
+    if not runtime.db.query_one("SELECT id FROM organizations WHERE id = ?", (org_id,)):
+        raise HTTPException(status_code=404, detail="Entreprise inconnue.")
+
+    if purge:
+        runtime.db.execute("DELETE FROM business_facts WHERE org_id = ?", (org_id,))
+        runtime.db.execute("DELETE FROM business_imports WHERE org_id = ?", (org_id,))
+        runtime.db.execute("DELETE FROM organizations WHERE id = ?", (org_id,))
+        return {"purged": org_id}
+
+    runtime.db.execute("UPDATE organizations SET archived = 1 WHERE id = ?", (org_id,))
+    return {"archived": org_id}
+
+
+@router.post("/businesses/{org_id}/restore")
+async def restore_organization(
+    org_id: str, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    if not runtime.db.query_one("SELECT id FROM organizations WHERE id = ?", (org_id,)):
+        raise HTTPException(status_code=404, detail="Entreprise inconnue.")
+    runtime.db.execute("UPDATE organizations SET archived = 0 WHERE id = ?", (org_id,))
+    return {"restored": org_id}

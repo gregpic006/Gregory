@@ -2,7 +2,7 @@
 
 Une liste fermee, volontairement.  Si le modele pouvait inventer un nom
 d'indicateur, il pourrait aussi inventer sa valeur: « la marge nette de
-Bouvier » sortirait d'une requete vide plutot que d'une erreur franche.
+Maguire » sortirait d'une requete vide plutot que d'une erreur franche.
 
 Chaque indicateur declare son unite et la maniere de l'agreger sur une
 periode.  Additionner des ventes a du sens; additionner un taux d'occupation

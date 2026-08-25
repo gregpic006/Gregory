@@ -55,7 +55,8 @@ def _resolve_org(ctx: ToolContext, organization: str) -> tuple[str, str, str]:
     if store is None:
         return "", "", ""
     needle = organization.strip().lower()
-    found = store.db.query("SELECT id, name, kind FROM organizations WHERE id != 'PERSONAL'")
+    found = store.db.query("SELECT id, name, kind FROM organizations"
+        " WHERE id != 'PERSONAL' AND archived = 0 ORDER BY position, name")
     for row in found:
         if needle in (str(row["id"]).lower(), str(row["name"]).lower()):
             return str(row["id"]), str(row["name"]), str(row["kind"])
@@ -338,7 +339,8 @@ async def list_business_sources(ctx: ToolContext) -> ToolResult:
         return _not_configured()
 
     rows = store.db.query(
-        "SELECT id, name, kind FROM organizations WHERE id != 'PERSONAL' ORDER BY name"
+        "SELECT id, name, kind FROM organizations"
+        " WHERE id != 'PERSONAL' AND archived = 0 ORDER BY position, name"
     )
     lines: list[str] = []
     payload: list[dict[str, object]] = []
