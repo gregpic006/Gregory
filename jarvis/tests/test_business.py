@@ -298,9 +298,11 @@ def test_ambiguous_or_invalid_date_is_refused(raw: str) -> None:
 # =============================================================================
 
 
-CSV_QUEBEC = """Date;Ventes;Couverts;Masse salariale;Pourboires
-18/08/2026;6 200,50;142;1 890,00;980,00
-19/08/2026;5 810,25;131;1 750,00;910,00
+# « Meteo » n'est pas un indicateur: elle sert a verifier qu'une colonne
+# inconnue est signalee plutot qu'ignoree en silence.
+CSV_QUEBEC = """Date;Ventes;Couverts;Masse salariale;Meteo
+18/08/2026;6 200,50;142;1 890,00;pluie
+19/08/2026;5 810,25;131;1 750,00;soleil
 oups;5 000,00;100;1 500,00;
 21/08/2026;pas ouvert;;;
 """
@@ -329,7 +331,7 @@ def test_every_rejected_line_is_named_with_its_reason(store: BusinessStore) -> N
 def test_unknown_columns_are_reported_not_silently_dropped(store: BusinessStore) -> None:
     report = import_csv(store, CSV_QUEBEC, org_id="RESTAURANT_GA")
 
-    assert report.ignored_columns == ["Pourboires"]
+    assert report.ignored_columns == ["Meteo"]
 
 
 def test_file_without_a_date_column_is_refused(store: BusinessStore) -> None:
@@ -428,3 +430,88 @@ def test_without_a_kind_all_metrics_stay_candidates(store: BusinessStore) -> Non
     report = import_csv(store, content, org_id="RESTAURANT_GA")
 
     assert report.metrics == ["sales"]
+
+
+# =============================================================================
+# Rapports de caisse reels (Maitre'D et compagnie)
+# =============================================================================
+
+
+RAPPORT_CAISSE = """Rapport des ventes quotidiennes
+Etablissement: Grande Allee
+Periode du 18/08/2026 au 20/08/2026
+Imprime le 25/08/2026 a 03:00
+
+Date;Ventes;Couverts;Masse salariale;Pourboires
+18/08/2026;6 200,50;142;1 890,00;980,00
+19/08/2026;5 810,25;131;1 750,00;910,00
+pas une date;1,00;1;1,00;1,00
+20/08/2026;6 340,00;149;1 905,50;1 020,00
+"""
+
+
+def test_report_titles_before_the_table_are_skipped(store: BusinessStore) -> None:
+    """Une caisse imprime un titre et une plage de dates avant le tableau."""
+    report = import_csv(store, RAPPORT_CAISSE, org_id="RESTAURANT_GA", kind="restaurant")
+
+    assert report.preamble_lines == 5
+    assert report.rows_ok == 3
+    assert "sales" in report.metrics
+
+
+def test_reported_line_numbers_match_the_real_file(store: BusinessStore) -> None:
+    """Sinon l'utilisateur cherche la mauvaise ligne dans son export."""
+    report = import_csv(store, RAPPORT_CAISSE, org_id="RESTAURANT_GA", kind="restaurant")
+
+    assert len(report.errors) == 1
+    line, reason = report.errors[0]
+    assert "date illisible" in reason
+    # Ligne 9 du fichier: 5 lignes de titre, l'en-tete, puis deux jours valides.
+    assert line == 9
+    assert RAPPORT_CAISSE.splitlines()[line - 1].startswith("pas une date")
+
+
+def test_tips_are_a_real_metric(store: BusinessStore) -> None:
+    """Les pourboires figurent dans tout rapport de restaurant."""
+    import_csv(store, RAPPORT_CAISSE, org_id="RESTAURANT_GA", kind="restaurant")
+
+    reading = store.read(
+        org_id="RESTAURANT_GA",
+        metric="tips",
+        start=date(2026, 8, 18),
+        end=date(2026, 8, 20),
+        today=date(2026, 8, 20),
+    )
+    assert reading.value == 2910.0
+
+
+def test_a_file_without_any_table_is_still_refused_clearly(store: BusinessStore) -> None:
+    """Chercher l'en-tete ne doit pas transformer une erreur en silence."""
+    with pytest.raises(ImportError_) as excinfo:
+        import_csv(
+            store,
+            "Rapport mensuel\nAucune donnee pour cette periode\n",
+            org_id="RESTAURANT_GA",
+            kind="restaurant",
+        )
+
+    assert "colonne de date" in excinfo.value.user_message
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        ("Date;Ventes nettes;Nb couverts", "sales"),
+        ("Date;Total ventes;Clients servis", "sales"),
+        ("Date;Ventes;Cout de main doeuvre", "labour_cost"),
+        ("Date;Ventes;Pourboires", "tips"),
+    ],
+)
+def test_common_pos_column_names_are_recognized(
+    store: BusinessStore, header: str, expected: str
+) -> None:
+    content = f"{header}\n18/08/2026;1000,00;10\n"
+
+    report = import_csv(store, content, org_id="RESTAURANT_GA", kind="restaurant")
+
+    assert expected in report.metrics

@@ -54,17 +54,23 @@ DATE_ALIASES = frozenset(
 COLUMN_ALIASES: dict[str, frozenset[str]] = {
     "sales": frozenset(
         {"ventes", "vente", "sales", "revenu", "revenus", "chiffre daffaires",
-         "ca", "net sales", "ventes nettes", "total"}
+         "ca", "net sales", "ventes nettes", "ventes brutes", "total ventes",
+         "gross sales", "total"}
     ),
-    "covers": frozenset({"couverts", "couvert", "covers", "clients", "guests", "nb clients"}),
+    "covers": frozenset(
+        {"couverts", "couvert", "covers", "clients", "guests", "nb clients",
+         "nb couverts", "nombre de couverts", "clients servis"}
+    ),
     "reservations": frozenset({"reservations", "reservation", "bookings", "resas"}),
     "labour_cost": frozenset(
         {"masse salariale", "salaires", "labour", "labor", "labour cost", "cout main doeuvre",
-         "main doeuvre"}
+         "main doeuvre", "cout de main doeuvre", "cout main d oeuvre", "paie"}
     ),
     "food_cost": frozenset(
-        {"cout aliments", "cout des aliments", "food cost", "cout matiere", "achats"}
+        {"cout aliments", "cout des aliments", "food cost", "cout matiere", "achats",
+         "cout des marchandises"}
     ),
+    "tips": frozenset({"pourboires", "pourboire", "tips", "gratuites", "gratuities"}),
     "mrr": frozenset({"mrr", "revenus recurrents", "recurring revenue", "abonnements"}),
     "doors": frozenset({"portes", "doors", "unites"}),
     "customers": frozenset({"clients", "customers", "comptes", "abonnes"}),
@@ -86,6 +92,8 @@ class ImportReport:
     metrics: list[str] = field(default_factory=list)
     ignored_columns: list[str] = field(default_factory=list)
     errors: list[tuple[int, str]] = field(default_factory=list)
+    preamble_lines: int = 0
+    """Lignes de titre ecartees avant le tableau."""
     first_day: str = ""
     last_day: str = ""
 
@@ -111,6 +119,7 @@ class ImportReport:
             "metrics": self.metrics,
             "ignored_columns": self.ignored_columns,
             "errors": [{"line": line, "reason": reason} for line, reason in self.errors],
+            "preamble_lines": self.preamble_lines,
             "first_day": self.first_day,
             "last_day": self.last_day,
             "summary": self.summary(),
@@ -188,6 +197,40 @@ def parse_day(raw: str) -> date | None:
     return None
 
 
+#: On ne cherche pas l'en-tete au-dela: passe cette limite, c'est que le
+#: fichier n'en a pas.
+MAX_PREAMBLE_LINES = 25
+
+
+def _looks_like_header(cells: list[str]) -> bool:
+    """Vrai si cette ligne ressemble a l'en-tete du tableau.
+
+    Critere: une colonne de date reconnue, et au moins une colonne
+    d'indicateur connue. Un titre de rapport n'a ni l'une ni l'autre.
+    """
+    folded = [_fold(cell) for cell in cells]
+    has_date = any(cell in DATE_ALIASES for cell in folded)
+    has_metric = any(
+        cell in aliases for cell in folded for aliases in COLUMN_ALIASES.values()
+    )
+    return has_date and has_metric
+
+
+def _skip_preamble(text: str, delimiter: str) -> tuple[str, int]:
+    """Retire les lignes de titre precedant le tableau.
+
+    Retourne le texte reduit et le nombre de lignes ecartees. Si aucune ligne
+    ne ressemble a un en-tete, on rend le texte inchange: l'erreur qui suivra
+    sera plus parlante qu'une troncature arbitraire.
+    """
+    lines = text.splitlines(keepends=True)
+    for index, line in enumerate(lines[:MAX_PREAMBLE_LINES]):
+        cells = next(csv.reader([line.rstrip("\r\n")], delimiter=delimiter), [])
+        if _looks_like_header(cells):
+            return "".join(lines[index:]), index
+    return text, 0
+
+
 def _sniff(sample: str) -> str:
     """Devine le separateur. Le point-virgule domine les exports Excel francais."""
     try:
@@ -238,6 +281,13 @@ def import_csv(
         )
 
     delimiter = _sniff(text[:4096])
+    # Les rapports de caisse commencent souvent par un titre, une plage de
+    # dates et une ligne vide avant le vrai tableau. On cherche donc la ligne
+    # d'en-tete plutot que de supposer qu'elle est la premiere.
+    text, preamble = _skip_preamble(text, delimiter)
+    if preamble:
+        report.preamble_lines = preamble
+
     reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
     if not reader.fieldnames:
         raise ImportError_(
@@ -296,7 +346,10 @@ def import_csv(
 
     facts: list[Fact] = []
     days: list[str] = []
-    for line, row in enumerate(reader, start=2):  # ligne 1 = en-tete
+    # Les numeros signales doivent designer la ligne du FICHIER, pas celle du
+    # tableau: sinon l'utilisateur cherche au mauvais endroit dans son export.
+    first_data_line = report.preamble_lines + 2
+    for line, row in enumerate(reader, start=first_data_line):
         day = parse_day(str(row.get(date_column) or ""))
         if day is None:
             report.rows_failed += 1

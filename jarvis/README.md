@@ -382,8 +382,16 @@ data/business/PORTAIL/mrr.csv
 ```
 
 `jarvis setup` cree ces dossiers pour toi. Si ta caisse sait deposer un export
-a heure fixe dans un dossier — beaucoup le font deja pour la comptabilite —
-pointe-la la et tes chiffres arrivent seuls, sans que tu touches a rien.
+a heure fixe dans un dossier — **Maitre'D, Veloce et Lightspeed le font tous
+via leurs rapports programmes**, beaucoup l'utilisent deja pour la
+comptabilite — pointe-la la et tes chiffres arrivent seuls, sans que tu
+touches a rien.
+
+Les rapports de caisse commencent souvent par un titre, une plage de dates et
+une ligne vide avant le vrai tableau : JARVIS cherche la ligne d'en-tete au
+lieu de supposer qu'elle est la premiere. Et les numeros de ligne qu'il
+signale designent la ligne **de ton fichier**, titre compris — pour que tu
+regardes au bon endroit.
 
 Un fichier deja importe ne l'est pas deux fois : l'empreinte du **contenu** est
 retenue, pas le nom. Une caisse qui reecrit `ventes.csv` chaque nuit est donc
@@ -401,8 +409,8 @@ la carte concernee.
 ```
 
 Le fichier a besoin d'une colonne **Date** et d'au moins une colonne reconnue
-(`Ventes`, `Couverts`, `Masse salariale`, `Reservations`, `Cout des aliments`,
-`MRR`, `Occupation`, `Loyers percus`...). Le format quebecois est gere tel
+(`Ventes`, `Couverts`, `Masse salariale`, `Pourboires`, `Reservations`,
+`Cout des aliments`, `MRR`, `Occupation`, `Loyers percus`...). Le format quebecois est gere tel
 quel : point-virgule, `1 234,56`, `JJ/MM/AAAA`.
 
 Ce que tu verras a l'ecran, et pourquoi :

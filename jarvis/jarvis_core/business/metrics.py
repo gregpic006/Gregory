@@ -61,6 +61,7 @@ METRICS: dict[str, MetricDefinition] = {
         MetricDefinition("reservations", "Reservations", "unite", Aggregation.SUM, RESTAURANT),
         MetricDefinition("labour_cost", "Masse salariale", "CAD", Aggregation.SUM, RESTAURANT),
         MetricDefinition("food_cost", "Cout des aliments", "CAD", Aggregation.SUM, RESTAURANT),
+        MetricDefinition("tips", "Pourboires", "CAD", Aggregation.SUM, RESTAURANT),
         # --- SaaS ---
         MetricDefinition("mrr", "Revenus recurrents", "CAD", Aggregation.LAST, SAAS),
         MetricDefinition("doors", "Portes", "unite", Aggregation.LAST, SAAS),
