@@ -96,6 +96,8 @@ class Settings(BaseSettings):
 
     # --- Securite ------------------------------------------------------------
     encryption_key: str = Field(default="", alias="JARVIS_ENCRYPTION_KEY")
+    #: Obligatoire des que JARVIS ecoute ailleurs que sur 127.0.0.1.
+    access_token: str = Field(default="", alias="JARVIS_ACCESS_TOKEN")
     auto_approve_max_level: int = Field(default=1, alias="JARVIS_AUTO_APPROVE_MAX_LEVEL")
     auto_send_email: bool = Field(default=False, alias="JARVIS_AUTO_SEND_EMAIL")
 

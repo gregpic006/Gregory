@@ -17,6 +17,7 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 - [Documents](#indexer-tes-documents)
 - [Donnees business](#brancher-tes-chiffres-daffaires)
 - [Briefing et surveillance](#briefing-du-matin-et-surveillance)
+- [Acces depuis le telephone](#acceder-a-jarvis-depuis-ton-telephone)
 - [Architecture en bref](#architecture-en-bref)
 - [Installation (Windows)](#installation-windows)
 - [Installation (Linux / macOS)](#installation-linux--macos)
@@ -61,7 +62,8 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 | Surveillance proactive (reunion imminente, rappel echu, donnees arretees) | oui |
 | Notifications Windows | oui, via le navigateur |
 | Demarrage avec Windows | oui |
-| Wake word (« Dis JARVIS ») | **non — voir plus bas** |
+| Wake word (« Dis JARVIS ») | oui, dans Edge ou Chrome |
+| Acces depuis le telephone | oui, avec jeton obligatoire |
 
 JARVIS ne simule aucune de ces integrations. Si Gmail n'est pas connecte, il
 repond « Gmail n'est pas encore connecte ».
@@ -144,6 +146,7 @@ jarvis/
 │  ├─ scheduler.py         taches quotidiennes et periodiques
 │  ├─ proactive.py         observateurs et alertes, avec deduplication
 │  ├─ briefing.py          briefing du matin, a partir des seules sources reelles
+│  ├─ security/access.py   jeton d'acces, obligatoire des qu'on sort de la machine
 │  ├─ documents/           extraction, decoupage, index lexical + vecteurs
 │  ├─ memory/              session (court terme) et magasin persistant
 │  ├─ tools/               registre, validation de schema, outils integres
@@ -439,6 +442,49 @@ automatique ne recompile pas l'interface.
 
 ---
 
+### Acceder a JARVIS depuis ton telephone
+
+```powershell
+.\.venv\Scripts\python.exe -m jarvis_core.cli remote --enable
+```
+
+Un **code QR** s'affiche dans le terminal. Scanne-le avec l'appareil photo de
+ton telephone — connecte au meme Wi-Fi — et JARVIS s'ouvre. Le lien contient
+le jeton : une seule fois suffit, l'appareil s'en souvient ensuite.
+
+Pour refermer l'acces :
+
+```powershell
+.\.venv\Scripts\python.exe -m jarvis_core.cli remote --disable
+```
+
+**La securite n'est pas optionnelle ici.** Des que JARVIS ecoute ailleurs que
+sur ta machine, un jeton devient obligatoire et **il refuse de demarrer sans**.
+Sans cela, n'importe qui sur le Wi-Fi du restaurant pourrait lire tes
+courriels, ton agenda et tes chiffres d'affaires.
+
+Le jeton est verifie sur **toutes** les routes de donnees et sur la connexion
+temps reel. Il n'apparait jamais dans la barre d'adresse apres le premier
+chargement — il serait sinon enregistre dans l'historique et dans les signets.
+
+Garde le lien prive. Si tu penses l'avoir partage par erreur, regenere-le :
+efface `JARVIS_ACCESS_TOKEN` dans `.env` et relance `remote --enable`.
+
+### Dire « JARVIS » pour parler
+
+Onglet **Reglages**, carte **Mot d'eveil**. Coche, autorise le micro, et
+JARVIS ecoute ton appel.
+
+Fonctionne dans **Edge** et **Chrome** sous Windows — la reconnaissance du mot
+est faite par le navigateur, rien n'est installe ni envoye tant que tu n'as
+pas dit son nom.
+
+L'ecoute passive se coupe pendant que tu parles a JARVIS et pendant qu'il
+repond : un seul usage du micro a la fois, pour ne pas casser le
+push-to-talk. Desactive par defaut.
+
+---
+
 ## Lancer
 
 **Une seule commande.** Elle recompile l'interface si elle a change, puis
@@ -511,7 +557,9 @@ La suite couvre en particulier les situations dangereuses :
   jamais comme un total de semaine ;
 - un indicateur sans source → **`non connecte`**, jamais un zero ;
 - une source non branchee → **aucune alerte**, jamais « tu n'as rien » ;
-- la meme alerte deux fois → **une seule notification**.
+- la meme alerte deux fois → **une seule notification** ;
+- une ecoute reseau sans jeton → **refus de demarrer**, jamais une ouverture
+  silencieuse.
 
 ---
 
@@ -605,7 +653,8 @@ sensible n'est pas recopie integralement.
 | **M3** | Documents : PDF/DOCX/MD/TXT, index lexical + vecteurs, Drive, citations | fait |
 | **M4** | Entreprises : multi-organisation, import CSV, KPI, couverture et fraicheur | fait |
 | **M5** | Briefing automatique, surveillance proactive, notifications, demarrage Windows | fait |
-| **M5b** | Wake word et empaquetage Tauri | a venir |
+| **M5b** | Wake word (navigateur), acces depuis le telephone | fait |
+| **M6** | Empaquetage Tauri (.exe), acces hors du reseau local | a venir |
 | **M6** | Mobile, acces distant, objets connectes | a venir |
 
 Chaque jalon produit quelque chose de testable.

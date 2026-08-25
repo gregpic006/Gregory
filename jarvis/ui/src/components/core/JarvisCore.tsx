@@ -46,6 +46,24 @@ interface Particle {
 
 const PARTICLE_COUNT = 190;
 const TICKS = 72;
+/** Duree de la sequence d'allumage, en secondes. */
+const BOOT_SECONDS = 1.15;
+/** Barres du spectre audio autour du noyau. */
+const SPECTRUM_BARS = 64;
+
+/** Arcs brisés: rayon, part du cercle couverte, vitesse et sens de rotation.
+ *
+ * C'est ce qui donne l'impression d'un instrument plutot que d'un logo: des
+ * elements independants qui tournent a des vitesses differentes, comme les
+ * bagues d'un gyroscope.
+ */
+const ARCS: { radius: number; span: number; speed: number; width: number; alpha: number }[] = [
+  { radius: 1.06, span: 0.22, speed: -0.35, width: 2.2, alpha: 0.55 },
+  { radius: 1.06, span: 0.12, speed: -0.35, width: 2.2, alpha: 0.35 },
+  { radius: 1.14, span: 0.42, speed: 0.22, width: 1.2, alpha: 0.3 },
+  { radius: 1.14, span: 0.09, speed: 0.22, width: 1.2, alpha: 0.5 },
+  { radius: 0.6, span: 0.3, speed: 0.55, width: 1.6, alpha: 0.4 },
+];
 
 function makeParticles(): Particle[] {
   return Array.from({ length: PARTICLE_COUNT }, () => ({
@@ -88,13 +106,16 @@ export function JarvisCore({ state, levelRef, size = 340 }: Props) {
 
     const particles = makeParticles();
     const center = size / 2;
-    const outer = size * 0.42;
+    // 0.32 et non 0.42: la couronne du spectre monte jusqu'a 1.4 fois le rayon,
+    // et l'ellipse etire encore de 12 % en hauteur. Au-dela, elle serait rognee.
+    const outer = size * 0.32;
 
     // Parametres lisses: ils poursuivent le profil de l'etat courant.
     const current: Profile = { ...PROFILES.idle };
     let rotation = 0;
     let sweepAngle = 0;
     let smoothLevel = 0;
+    let boot = 0;
     let raf = 0;
     let last = performance.now();
 
@@ -136,11 +157,19 @@ export function JarvisCore({ state, levelRef, size = 340 }: Props) {
 
       const intensity = Math.min(1, current.glow + level * 0.45);
 
-      drawHalo(ctx, outer, intensity);
-      drawParticles(ctx, particles, outer * 0.78, t, dt, current.energy, intensity, level);
-      drawCore(ctx, outer * 0.17, intensity, level);
-      drawRings(ctx, outer, rotation, intensity, level);
+      // La sequence d'allumage se joue une seule fois, au montage: les anneaux
+      // se referment vers le centre au lieu d'apparaitre d'un coup.
+      boot = Math.min(1, boot + dt / BOOT_SECONDS);
+      const eased = 1 - Math.pow(1 - boot, 3);
+
+      drawHalo(ctx, outer, intensity * eased);
+      drawParticles(ctx, particles, outer * 0.78, t, dt, current.energy, intensity * eased, level);
+      drawCore(ctx, outer * 0.17, intensity * eased, level);
+      drawArcs(ctx, outer, rotation, intensity * eased, eased);
+      drawRings(ctx, outer, rotation, intensity * eased, level);
+      drawSpectrum(ctx, outer, t, level, current.energy, intensity * eased);
       if (current.sweep > 0.02) drawSweep(ctx, outer, sweepAngle, current.sweep * intensity);
+      if (boot < 1) drawBootRing(ctx, outer, boot);
 
       ctx.restore();
       raf = requestAnimationFrame(draw);
@@ -158,6 +187,83 @@ export function JarvisCore({ state, levelRef, size = 340 }: Props) {
       aria-hidden="true"
     />
   );
+}
+
+/** Arcs brisés en rotation libre autour du noyau.
+ *
+ * Chaque arc tourne a sa propre vitesse, dans son propre sens. L'oeil ne peut
+ * pas les suivre tous a la fois: c'est ce qui fait « machine en marche »
+ * plutot qu'« image animee ».
+ */
+function drawArcs(
+  ctx: CanvasRenderingContext2D,
+  outer: number,
+  rotation: number,
+  intensity: number,
+  boot: number,
+): void {
+  ctx.save();
+  ctx.lineCap = "round";
+  for (const [index, arc] of ARCS.entries()) {
+    const start = rotation * arc.speed * 6 + index * 1.7;
+    const r = outer * arc.radius * (0.86 + boot * 0.14);
+    ctx.strokeStyle = `rgba(125, 211, 252, ${arc.alpha * intensity})`;
+    ctx.lineWidth = arc.width;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r, r * 1.12, 0, start, start + arc.span * Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Couronne de barres reagissant a la voix.
+ *
+ * Au repos elle ondule a peine; en ecoute elle suit le micro reel. C'est le
+ * signal le plus direct que JARVIS entend quelque chose.
+ */
+function drawSpectrum(
+  ctx: CanvasRenderingContext2D,
+  outer: number,
+  t: number,
+  level: number,
+  energy: number,
+  intensity: number,
+): void {
+  if (intensity <= 0.02) return;
+  const base = outer * 1.2;
+  ctx.save();
+  ctx.lineCap = "round";
+  for (let i = 0; i < SPECTRUM_BARS; i += 1) {
+    const angle = (i / SPECTRUM_BARS) * Math.PI * 2;
+    // Deux sinusoides de periodes differentes: le motif ne se repete pas
+    // visiblement d'un tour a l'autre.
+    const wave = Math.sin(t * 2.1 + i * 0.55) * 0.5 + Math.sin(t * 3.7 + i * 0.21) * 0.5;
+    const amplitude = 0.02 + energy * 0.015 + level * 0.16 * (0.55 + wave * 0.45);
+    const length = outer * amplitude;
+    const alpha = (0.14 + level * 0.5 + Math.abs(wave) * 0.12) * intensity;
+    ctx.strokeStyle = `rgba(150, 220, 255, ${alpha})`;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(angle) * base, Math.sin(angle) * base * 1.12);
+    ctx.lineTo(
+      Math.cos(angle) * (base + length),
+      Math.sin(angle) * (base + length) * 1.12,
+    );
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Onde d'allumage: un anneau qui se resserre vers le noyau au demarrage. */
+function drawBootRing(ctx: CanvasRenderingContext2D, outer: number, boot: number): void {
+  const r = outer * (2.1 - boot * 1.05);
+  ctx.save();
+  ctx.strokeStyle = `rgba(186, 240, 255, ${(1 - boot) * 0.55})`;
+  ctx.lineWidth = 2 - boot;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, r, r * 1.12, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 /** Halo exterieur: la presence de JARVIS dans la piece. */

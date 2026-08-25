@@ -10,11 +10,13 @@ import {
   type SettingsResponse,
 } from "../lib/api";
 import type { SpeechPlayer } from "../lib/audio";
+import type { WakeWordState } from "../lib/useWakeWord";
 import type { SystemInfo } from "../lib/types";
 
 interface Props {
   system: SystemInfo | null;
   player: SpeechPlayer;
+  wake: WakeWordState;
 }
 
 /** Reglages.
@@ -24,7 +26,7 @@ interface Props {
  * fonctionnalite. Les cles d'API, elles, n'apparaissent jamais ici — ni en
  * lecture ni en ecriture.
  */
-export function SettingsView({ system, player }: Props) {
+export function SettingsView({ system, player, wake }: Props) {
   const [voices, setVoices] = useState<{ name: string; lang: string; natural: boolean }[]>([]);
   const [selected, setSelected] = useState("");
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -120,6 +122,47 @@ export function SettingsView({ system, player }: Props) {
               pas modifiables ici: une capacite qui agit seule sur ta machine ne doit
               pas s'activer d'un clic.
             </p>
+          </div>
+        </Card>
+
+        <Card title="Mot d'eveil" icon={<IconMic size={14} />}>
+          <div className="stack">
+            {!wake.supported ? (
+              <p className="card-empty">
+                Ton navigateur ne sait pas ecouter en continu. Ouvre JARVIS dans{" "}
+                <b>Microsoft Edge</b> ou <b>Chrome</b> pour utiliser le mot d'eveil.
+              </p>
+            ) : !system?.providers.stt_available ? (
+              <p className="card-empty">
+                La reconnaissance vocale du serveur n'est pas configuree
+                (JARVIS_STT_PROVIDER): le mot d'eveil n'aurait rien pour transcrire.
+              </p>
+            ) : (
+              <>
+                <label className="switch-row">
+                  <input type="checkbox" checked={wake.enabled} onChange={wake.toggle} />
+                  <span className="switch-text">
+                    <span className="switch-label">
+                      Dire « JARVIS » pour parler
+                      {wake.enabled && wake.awake && (
+                        <span className="switch-tag accent">a l'ecoute</span>
+                      )}
+                    </span>
+                    <span className="switch-desc">
+                      Le micro reste ouvert en permanence pour reconnaitre ton appel.
+                      L'ecoute se coupe pendant que JARVIS parle et pendant que tu lui
+                      parles: un seul usage du micro a la fois.
+                    </span>
+                  </span>
+                </label>
+                {wake.error && <p className="card-empty">{wake.error}</p>}
+                <p className="card-empty">
+                  Le navigateur demandera l'acces au micro. Tout reste sur ta machine:
+                  la reconnaissance du mot est faite par Windows, rien n'est envoye
+                  tant que tu n'as pas dit « JARVIS ».
+                </p>
+              </>
+            )}
           </div>
         </Card>
 

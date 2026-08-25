@@ -19,6 +19,9 @@ dependencies = [
     # recherche par mots exacts doit fonctionner sans installation optionnelle.
     "pypdf>=5.0",
     "python-docx>=1.1",
+    # Code QR affiche dans le terminal pour l'acces depuis le telephone:
+    # taper une URL avec un jeton de 32 caracteres est une source d'erreurs.
+    "qrcode>=7.4",
 ]
 
 [project.optional-dependencies]

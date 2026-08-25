@@ -866,7 +866,79 @@ utilisateur.
 
 ---
 
-## 17. Ce que JARVIS ne fait pas encore
+## 17. Acces distant et mot d'eveil (M5b)
+
+### La frontiere qui change tout
+
+Tant que JARVIS ecoute sur `127.0.0.1`, seule la machine locale peut lui
+parler. Aucune authentification n'est necessaire, et en exiger une n'ajouterait
+qu'une friction.
+
+Des que l'ecoute s'ouvre au reseau, la situation change du tout au tout:
+n'importe qui sur le meme Wi-Fi — celui d'un restaurant, par exemple —
+pourrait lire les courriels, l'agenda et les chiffres d'affaires. Le jeton
+devient alors **obligatoire**.
+
+**Le serveur refuse de demarrer** si `JARVIS_HOST` sort de la boucle locale
+sans jeton defini. Mieux vaut une application qui ne se lance pas qu'une
+application ouverte a tout le monde sans que personne ne s'en apercoive.
+
+### Trois details qui comptent
+
+**La comparaison est a temps constant** (`hmac.compare_digest`). Un `==`
+s'arrete au premier caractere different, ce qui laisse mesurer la duree des
+reponses pour deviner le jeton caractere par caractere.
+
+**Le WebSocket est verifie separement.** Le middleware HTTP ne le voit pas,
+et c'est pourtant le canal qui porte la conversation entiere. Il est refuse
+avant meme d'etre accepte (code 1008).
+
+**Le jeton disparait de la barre d'adresse.** Le premier acces depuis un
+telephone passe forcement par l'URL — on ne peut pas taper un en-tete HTTP
+dans un navigateur. Mais l'interface le range immediatement dans le stockage
+local et nettoie l'URL, sinon il finirait dans l'historique, dans un signet ou
+dans une capture d'ecran partagee.
+
+Cote client, `fetch` est **enveloppe une fois** plutot que modifie a chaque
+appel: un seul point d'appel oublie produirait, sur un telephone, une page a
+moitie vide sans explication. Le jeton n'est ajoute qu'aux requetes de meme
+origine.
+
+Ce qui reste public: `/api/health` (ne revele rien, sert aux verifications de
+demarrage) et l'interface elle-meme, qui doit pouvoir se charger. Ce sont les
+donnees qui sont protegees, pas la page.
+
+### Mot d'eveil
+
+La reconnaissance continue du navigateur (`SpeechRecognition`, disponible dans
+Edge et Chrome) plutot qu'un modele local: rien a telecharger, rien a
+installer, et la detection reste sur la machine — aucun son n'est envoye tant
+que le mot n'est pas reconnu.
+
+Le vrai risque n'est pas la detection, c'est le **conflit de micro**: deux
+consommateurs qui reclament le peripherique en meme temps, et c'est la
+commande vocale existante qui casse. Trois regles l'evitent:
+
+1. l'ecoute passive s'arrete **avant** que l'enregistrement ne demarre, et ne
+   reprend qu'une fois le tour termine;
+2. elle est coupee pendant que JARVIS parle — sinon il se reveillerait
+   lui-meme en entendant son nom dans sa propre reponse;
+3. elle est **desactivee par defaut**: tant que l'utilisateur ne l'active pas,
+   ce module ne touche pas au micro et le push-to-talk garde exactement le
+   comportement qu'il a toujours eu.
+
+Le mot d'eveil declenche le meme chemin que le bouton micro. Une seule voie
+d'entree vocale, donc un seul comportement a garantir.
+
+### Responsive
+
+L'acces depuis un telephone n'a de sens que si l'interface y est utilisable.
+Sous 820 px, la barre laterale devient un tiroir qui recouvre la vue le temps
+de choisir: fixe, elle mangerait la moitie d'un ecran de 414 px.
+
+---
+
+## 18. Ce que JARVIS ne fait pas encore
 
 Enonce explicitement pour eviter toute illusion :
 
@@ -875,9 +947,8 @@ Enonce explicitement pour eviter toute illusion :
   Drive, exporte en CSV ;
 - pas de connecteur direct vers une caisse ou Stripe: les chiffres entrent
   par import CSV (les connecteurs ecriront les memes faits) ;
-- **pas de wake word**: la detection de « JARVIS » en ecoute continue entre en
-  concurrence avec le micro du push-to-talk. Le conflit ne peut se regler
-  qu'en le testant sur du vrai materiel audio ;
+- **pas d'acces hors du reseau local**: JARVIS reste joignable depuis le meme
+  Wi-Fi, pas depuis Internet. L'exposer demanderait un tunnel et du TLS ;
 - pas d'empaquetage Tauri: le binaire ne peut etre ni compile ni verifie
   ailleurs que sous Windows ;
 - pas de controle de l'ordinateur ;

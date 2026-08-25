@@ -35,6 +35,12 @@ from jarvis_core.errors import JarvisError, SpeechError
 from jarvis_core.logging_setup import setup_logging
 from jarvis_core.orchestrator.orchestrator import build_history_preview
 from jarvis_core.runtime import JarvisRuntime, build_runtime
+from jarvis_core.security.access import (
+    PUBLIC_PATHS,
+    extract_token,
+    requires_token,
+    token_matches,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +123,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description="API interne de l'assistant personnel JARVIS.",
         lifespan=lifespan,
     )
+
+    # --- Controle d'acces reseau -------------------------------------------
+    # Sur 127.0.0.1 ce middleware ne fait rien. Des que l'ecoute s'ouvre au
+    # reseau, chaque requete doit porter le jeton: sans cela, toute personne
+    # sur le meme Wi-Fi lirait les courriels et les chiffres d'affaires.
+    if requires_token(settings.host):
+
+        @app.middleware("http")
+        async def enforce_token(request: Request, call_next: Any) -> Response:
+            path = request.url.path
+            if path in PUBLIC_PATHS or not path.startswith("/api"):
+                # L'interface elle-meme doit se charger pour offrir le champ
+                # de saisie; ce sont les donnees qui sont protegees.
+                return await call_next(request)
+            received = extract_token(request.headers, request.query_params)
+            if not token_matches(settings.access_token, received):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Jeton d'acces manquant ou invalide."},
+                )
+            return await call_next(request)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -233,6 +261,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket) -> None:
+        # Le middleware HTTP ne voit pas les WebSocket: c'est pourtant le canal
+        # qui porte la conversation entiere. Il se verifie donc ici.
+        if requires_token(settings.host):
+            received = extract_token(websocket.headers, websocket.query_params)
+            if not token_matches(settings.access_token, received):
+                # 1008 = violation de politique. On refuse avant d'accepter.
+                await websocket.close(code=1008, reason="jeton invalide")
+                return
         await websocket_endpoint(websocket, websocket.app.state.runtime)
 
     # -- interface ------------------------------------------------------------

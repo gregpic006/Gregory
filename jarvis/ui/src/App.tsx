@@ -7,6 +7,7 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { AlertBell, AlertPanel } from "./components/AlertPanel";
 import { TopBar } from "./components/layout/TopBar";
 import { useAlerts } from "./lib/useAlerts";
+import { useWakeWord } from "./lib/useWakeWord";
 import { useJarvis } from "./lib/useJarvis";
 import type { ViewId } from "./lib/types";
 import { BusinessesView } from "./views/BusinessesView";
@@ -37,10 +38,23 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  // Tiroir de navigation sur telephone: la barre laterale fixe mangerait
+  // la moitie d'un ecran de 414 px.
+  const [menuOpen, setMenuOpen] = useState(false);
   const alerts = useAlerts();
+  // Le mot d'eveil declenche exactement le meme chemin que le bouton micro:
+  // une seule voie d'entree vocale, donc un seul comportement a garantir.
+  const wake = useWakeWord({
+    state: jarvis.state,
+    micAvailable: jarvis.micAvailable,
+    onWake: () => void jarvis.startRecording(),
+  });
   const [paletteOpen, setPaletteOpen] = useState(false);
 
-  const navigate = useCallback((next: ViewId) => setView(next), []);
+  const navigate = useCallback((next: ViewId) => {
+    setView(next);
+    setMenuOpen(false);
+  }, []);
 
   const ask = useCallback(
     (question: string) => {
@@ -114,7 +128,15 @@ export default function App() {
   };
 
   return (
-    <div className="app" data-collapsed={collapsed} data-fullscreen={fullscreen}>
+    <div
+      className="app"
+      data-collapsed={collapsed}
+      data-fullscreen={fullscreen}
+      data-menu={menuOpen}
+    >
+      {menuOpen && (
+        <div className="menu-scrim" onClick={() => setMenuOpen(false)} aria-hidden="true" />
+      )}
       <Sidebar
         view={view}
         onNavigate={navigate}
@@ -130,6 +152,7 @@ export default function App() {
           onToggleFullscreen={() => setFullscreen((value) => !value)}
           onOpenSearch={() => setPaletteOpen(true)}
           voiceLabel={voiceLabel}
+          onToggleMenu={() => setMenuOpen((value) => !value)}
           alertSlot={
             <div className="alert-anchor">
               <AlertBell count={alerts.unseen} onClick={() => setAlertsOpen((v) => !v)} />
@@ -184,7 +207,7 @@ export default function App() {
             <IntegrationsView system={jarvis.system} onChanged={jarvis.refreshSystem} />
           )}
           {view === "settings" && (
-            <SettingsView system={jarvis.system} player={jarvis.player} />
+            <SettingsView system={jarvis.system} player={jarvis.player} wake={wake} />
           )}
         </div>
 

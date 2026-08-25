@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { clockTime, longDate } from "../../lib/format";
 import type { SystemInfo } from "../../lib/types";
-import { IconCollapse, IconExpand, IconSearch } from "./icons";
+import { IconCollapse, IconExpand, IconMenu, IconSearch } from "./icons";
 
 interface Props {
   system: SystemInfo | null;
@@ -10,12 +10,13 @@ interface Props {
   onToggleFullscreen: () => void;
   onOpenSearch: () => void;
   voiceLabel: string;
+  onToggleMenu?: () => void;
   alertSlot?: ReactNode;
 }
 
 /** Barre superieure: la date, l'etat du systeme, l'acces a la recherche. */
 export function TopBar({
-  system, fullscreen, onToggleFullscreen, onOpenSearch, voiceLabel, alertSlot,
+  system, fullscreen, onToggleFullscreen, onOpenSearch, voiceLabel, onToggleMenu, alertSlot,
 }: Props) {
   const [now, setNow] = useState(() => new Date());
 
@@ -29,6 +30,10 @@ export function TopBar({
 
   return (
     <header className="topbar">
+      {/* Visible seulement sur petit ecran, ou la barre laterale est un tiroir. */}
+      <button className="icon-btn menu-btn" onClick={onToggleMenu} title="Menu">
+        <IconMenu size={18} />
+      </button>
       <span className="topbar-clock">
         {longDate(now)} — <b>{clockTime(now)}</b>
       </span>

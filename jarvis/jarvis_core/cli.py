@@ -25,6 +25,19 @@ from jarvis_core.security.crypto import SecretBox
 def _cmd_serve(settings: Settings) -> int:
     import uvicorn
 
+    from jarvis_core.security.access import requires_token, validate_configuration
+
+    # Refus de demarrer plutot que de s'ouvrir au reseau sans authentification.
+    try:
+        validate_configuration(host=settings.host, token=settings.access_token)
+    except ConfigurationError as exc:
+        print(f"[ECHEC] {exc.user_message}")
+        return 1
+
+    if requires_token(settings.host):
+        print(f"Acces reseau actif sur {settings.host}:{settings.port} — jeton exige.")
+        print("Adresse a ouvrir sur ton telephone: jarvis remote")
+
     uvicorn.run(
         "jarvis_core.api.app:create_app",
         factory=True,
@@ -523,6 +536,89 @@ def _cmd_setup(settings: Settings, quiet: bool = False) -> int:
     return 0
 
 
+def _cmd_remote(settings: Settings, enable: bool, disable: bool) -> int:
+    """Active, desactive ou affiche l'acces depuis le telephone."""
+    import socket
+
+    from jarvis_core.config import get_settings
+    from jarvis_core.config_sync import set_values
+    from jarvis_core.security.access import generate_token, requires_token
+    from jarvis_core.setup_assistant import find_project_root
+
+    root = find_project_root()
+    env_path = root / ".env"
+    if not env_path.is_file():
+        print("[ECHEC] Fichier .env introuvable. Lance d'abord: jarvis setup")
+        return 1
+
+    if disable:
+        set_values(env_path, {"JARVIS_HOST": "127.0.0.1"})
+        print("Acces a distance desactive. JARVIS n'ecoute plus que sur cette machine.")
+        print("Le jeton est conserve dans .env pour la prochaine fois.")
+        print("\nRedemarre JARVIS pour appliquer.")
+        return 0
+
+    if enable:
+        values = {"JARVIS_HOST": "0.0.0.0"}
+        token = settings.access_token.strip()
+        if not token:
+            token = generate_token()
+            values["JARVIS_ACCESS_TOKEN"] = token
+        set_values(env_path, values)
+        get_settings.cache_clear()
+        settings = get_settings()
+        print("Acces a distance active.\n")
+    elif not requires_token(settings.host):
+        print("L'acces a distance est desactive: JARVIS n'ecoute que sur cette machine.")
+        print("Pour l'activer: jarvis remote --enable")
+        return 0
+
+    token = settings.access_token.strip()
+    if not token:
+        print("[ECHEC] Aucun jeton defini. Lance: jarvis remote --enable")
+        return 1
+
+    # Adresse locale reelle: on ouvre une socket vers l'exterieur sans rien
+    # envoyer, uniquement pour savoir quelle interface le systeme choisirait.
+    address = "127.0.0.1"
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("8.8.8.8", 80))
+        address = probe.getsockname()[0]
+    except OSError:
+        pass
+    finally:
+        probe.close()
+
+    url = f"http://{address}:{settings.port}/?token={token}"
+    print("Sur ton telephone, connecte au meme Wi-Fi, ouvre :\n")
+    print(f"    {url}\n")
+    print("Le lien contient le jeton: ouvre-le une fois, l'appareil s'en souvient.")
+    print("Garde ce lien prive — il donne acces a tes courriels et a tes chiffres.")
+    print("\nPour couper l'acces : jarvis remote --disable")
+
+    if not _print_qr(url):
+        print("\n(Astuce: envoie-toi ce lien par courriel pour l'ouvrir sur le telephone.)")
+    return 0
+
+
+def _print_qr(url: str) -> bool:
+    """Affiche un QR code dans le terminal si la librairie est disponible."""
+    try:
+        import qrcode
+    except ImportError:
+        return False
+    try:
+        code = qrcode.QRCode(border=1)
+        code.add_data(url)
+        code.make(fit=True)
+        print()
+        code.print_ascii(invert=True)
+    except Exception:  # noqa: BLE001 - l'affichage du QR n'est jamais critique
+        return False
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jarvis", description="Assistant personnel JARVIS")
     sub = parser.add_subparsers(dest="command")
@@ -547,6 +643,9 @@ def main(argv: list[str] | None = None) -> int:
     imp.add_argument("--replace", action="store_true", help="remplace les imports CSV precedents")
     sub.add_parser("check-documents", help="verifie l'index et le mode de recherche")
     sub.add_parser("check-business", help="etat des donnees business")
+    remote = sub.add_parser("remote", help="acces depuis le telephone")
+    remote.add_argument("--enable", action="store_true", help="ouvrir l'acces reseau")
+    remote.add_argument("--disable", action="store_true", help="refermer l'acces")
     sub.add_parser("keygen", help="genere une cle de chiffrement")
 
     args = parser.parse_args(argv)
@@ -572,6 +671,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(_cmd_sync_drive(settings, args.force))
     if args.command == "import-business":
         return _cmd_import_business(settings, args.path, args.org, args.replace)
+    if args.command == "remote":
+        return _cmd_remote(settings, args.enable, args.disable)
     if args.command == "check-business":
         return _cmd_check_business(settings)
     if args.command == "check-documents":

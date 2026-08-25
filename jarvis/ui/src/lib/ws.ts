@@ -4,6 +4,8 @@
  * pas obliger a recharger l'application.
  */
 
+import { withToken } from "./session";
+
 import type { ServerEvent } from "./types";
 
 type Listener = (event: ServerEvent) => void;
@@ -21,7 +23,9 @@ export class JarvisSocket {
     this.closedByUser = false;
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const suffix = this.sessionId ? `?session_id=${encodeURIComponent(this.sessionId)}` : "";
-    this.socket = new WebSocket(`${protocol}://${window.location.host}/ws${suffix}`);
+    // Un WebSocket ne peut pas porter d'en-tete: le jeton passe par l'URL.
+    const url = withToken(`${protocol}://${window.location.host}/ws${suffix}`);
+    this.socket = new WebSocket(url);
 
     this.socket.onopen = () => {
       this.retry = 0;

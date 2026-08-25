@@ -67,6 +67,9 @@ export const IconChevron = ({ size = 17 }: IconProps) => (
 export const IconAlert = ({ size = 17 }: IconProps) => (
   <svg {...base(size)}><path d="M12 3.5 2.5 20h19zM12 10v4M12 17h.01" /></svg>
 );
+export const IconMenu = ({ size = 17 }: IconProps) => (
+  <svg {...base(size)}><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+);
 export const IconDocument = ({ size = 17 }: IconProps) => (
   <svg {...base(size)}>
     <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
