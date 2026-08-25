@@ -16,6 +16,7 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 - [L'interface](#linterface)
 - [Documents](#indexer-tes-documents)
 - [Donnees business](#brancher-tes-chiffres-daffaires)
+- [Briefing et surveillance](#briefing-du-matin-et-surveillance)
 - [Architecture en bref](#architecture-en-bref)
 - [Installation (Windows)](#installation-windows)
 - [Installation (Linux / macOS)](#installation-linux--macos)
@@ -56,7 +57,11 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 | Google Drive : indexer un dossier | oui (consentement supplementaire requis) |
 | Donnees d'entreprise (ventes, couverts, masse salariale) | oui, par import CSV |
 | Comparaison de periodes, ratio masse salariale | oui |
-| Wake word, briefing quotidien, controle de l'ordinateur | **non — M5** |
+| Briefing quotidien automatique | oui |
+| Surveillance proactive (reunion imminente, rappel echu, donnees arretees) | oui |
+| Notifications Windows | oui, via le navigateur |
+| Demarrage avec Windows | oui |
+| Wake word (« Dis JARVIS ») | **non — voir plus bas** |
 
 JARVIS ne simule aucune de ces integrations. Si Gmail n'est pas connecte, il
 repond « Gmail n'est pas encore connecte ».
@@ -136,6 +141,9 @@ jarvis/
 │  ├─ llm/                 abstraction fournisseur, routage, tarification
 │  ├─ voice/               stt/ et tts/, une classe par fournisseur
 │  ├─ business/            indicateurs, faits dates et sources, import CSV
+│  ├─ scheduler.py         taches quotidiennes et periodiques
+│  ├─ proactive.py         observateurs et alertes, avec deduplication
+│  ├─ briefing.py          briefing du matin, a partir des seules sources reelles
 │  ├─ documents/           extraction, decoupage, index lexical + vecteurs
 │  ├─ memory/              session (court terme) et magasin persistant
 │  ├─ tools/               registre, validation de schema, outils integres
@@ -377,6 +385,60 @@ pas additionne.
 
 ---
 
+### Briefing du matin et surveillance
+
+JARVIS prepare un briefing chaque matin a l'heure que tu choisis, et te
+previent quand quelque chose merite ton attention.
+
+```
+JARVIS_BRIEFING_TIME=07:00
+JARVIS_FEATURE_PROACTIVE=true
+JARVIS_WATCH_INTERVAL_MINUTES=5
+```
+
+**Ce qu'il surveille** — uniquement des faits qu'il constate :
+
+- une reunion qui commence dans moins de 15 minutes (si Calendar est branche) ;
+- un rappel dont l'echeance est passee ;
+- une entreprise dont les donnees se sont **arretees** depuis plus de 10 jours.
+
+Une entreprise qui n'a jamais eu de donnees ne declenche rien : ce n'est pas
+une nouvelle, c'est l'etat normal. Et une source non branchee ne produit
+aucune alerte — JARVIS ne dit jamais « tu n'as aucune reunion » quand il n'a
+tout simplement pas regarde.
+
+**La meme alerte n'arrive qu'une fois.** La surveillance tourne toutes les
+cinq minutes ; sans deduplication elle deviendrait du harcelement.
+
+**Notifications Windows** : clique sur la cloche en haut a droite, puis
+« Activer les notifications ». La permission n'est demandee qu'a ce moment-la,
+jamais au chargement de la page.
+
+Le briefing s'affiche sur le **Tableau de bord**, avec la liste des sources
+reellement consultees. Il est ecrit a partir de ces seuls faits : une source
+absente est mentionnee comme absente, jamais remplacee par une supposition.
+Sans cle Claude il existe quand meme, simplement compose mecaniquement — mieux
+vaut une liste seche et vraie qu'un paragraphe elegant et faux.
+
+### Demarrer avec Windows
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\autostart.ps1
+```
+
+JARVIS demarre alors a chaque ouverture de session. Rien n'est installe hors
+de ton compte : pas de service systeme, pas de droits administrateur.
+
+```powershell
+.\scripts\autostart.ps1 -Status    # ou en est-on
+.\scripts\autostart.ps1 -Remove    # tout retirer
+```
+
+Apres un `git pull`, lance `.\scripts\start.ps1` une fois : le demarrage
+automatique ne recompile pas l'interface.
+
+---
+
 ## Lancer
 
 **Une seule commande.** Elle recompile l'interface si elle a change, puis
@@ -447,7 +509,9 @@ La suite couvre en particulier les situations dangereuses :
   jamais presentee comme une comprehension du sens ;
 - un total business sur 4 jours d'une semaine → **annonce comme partiel**,
   jamais comme un total de semaine ;
-- un indicateur sans source → **`non connecte`**, jamais un zero.
+- un indicateur sans source → **`non connecte`**, jamais un zero ;
+- une source non branchee → **aucune alerte**, jamais « tu n'as rien » ;
+- la meme alerte deux fois → **une seule notification**.
 
 ---
 
@@ -540,7 +604,8 @@ sensible n'est pas recopie integralement.
 | **M2** | Google : Gmail, Calendar, Contacts (OAuth + PKCE, jetons chiffres) | fait |
 | **M3** | Documents : PDF/DOCX/MD/TXT, index lexical + vecteurs, Drive, citations | fait |
 | **M4** | Entreprises : multi-organisation, import CSV, KPI, couverture et fraicheur | fait |
-| **M5** | Wake word, service en arriere-plan, briefing quotidien, notifications, Tauri | a venir |
+| **M5** | Briefing automatique, surveillance proactive, notifications, demarrage Windows | fait |
+| **M5b** | Wake word et empaquetage Tauri | a venir |
 | **M6** | Mobile, acces distant, objets connectes | a venir |
 
 Chaque jalon produit quelque chose de testable.

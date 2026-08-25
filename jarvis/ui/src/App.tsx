@@ -4,7 +4,9 @@ import { CommandBar } from "./components/CommandBar";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmBar } from "./components/ConfirmBar";
 import { Sidebar } from "./components/layout/Sidebar";
+import { AlertBell, AlertPanel } from "./components/AlertPanel";
 import { TopBar } from "./components/layout/TopBar";
+import { useAlerts } from "./lib/useAlerts";
 import { useJarvis } from "./lib/useJarvis";
 import type { ViewId } from "./lib/types";
 import { BusinessesView } from "./views/BusinessesView";
@@ -34,6 +36,8 @@ export default function App() {
   const [view, setView] = useState<ViewId>("home");
   const [collapsed, setCollapsed] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const alerts = useAlerts();
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const navigate = useCallback((next: ViewId) => setView(next), []);
@@ -126,6 +130,14 @@ export default function App() {
           onToggleFullscreen={() => setFullscreen((value) => !value)}
           onOpenSearch={() => setPaletteOpen(true)}
           voiceLabel={voiceLabel}
+          alertSlot={
+            <div className="alert-anchor">
+              <AlertBell count={alerts.unseen} onClick={() => setAlertsOpen((v) => !v)} />
+              {alertsOpen && (
+                <AlertPanel state={alerts} onClose={() => setAlertsOpen(false)} />
+              )}
+            </div>
+          }
         />
 
         <div className="view">

@@ -11,6 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from jarvis_core.briefing import BriefingStore
 from jarvis_core.business.store import BusinessStore
 from jarvis_core.config import Settings, get_settings
 from jarvis_core.documents.embeddings import build_embedding_provider
@@ -23,6 +24,8 @@ from jarvis_core.observability.metrics import Metrics
 from jarvis_core.orchestrator.orchestrator import JarvisOrchestrator
 from jarvis_core.persistence.db import Database, build_database
 from jarvis_core.persistence.repositories import ReminderRepository, SqliteAuditSink
+from jarvis_core.proactive import AlertStore
+from jarvis_core.scheduler import Scheduler
 from jarvis_core.security.audit import AuditTrail, LoggingAuditSink
 from jarvis_core.security.crypto import SecretBox
 from jarvis_core.security.permissions import policy_from_settings
@@ -54,6 +57,9 @@ class JarvisRuntime:
     reminders: ReminderRepository
     documents: DocumentStore | None
     business: BusinessStore | None
+    alerts: AlertStore
+    briefings: BriefingStore
+    scheduler: Scheduler
     audit_sink: SqliteAuditSink
     stt: SpeechToTextProvider
     tts: TextToSpeechProvider
@@ -62,6 +68,7 @@ class JarvisRuntime:
     google: GoogleWorkspace
 
     async def aclose(self) -> None:
+        await self.scheduler.stop()
         await self.router.aclose()
         await self.stt.aclose()
         await self.tts.aclose()
@@ -143,6 +150,9 @@ def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
     reminders = ReminderRepository(db)
     documents = build_document_store(settings, db)
     business = BusinessStore(db) if settings.feature_business else None
+    alerts = AlertStore(db)
+    briefings = BriefingStore(db)
+    scheduler = Scheduler(settings.timezone)
     router = build_router(settings)
     secret_box = SecretBox(settings.encryption_key, allow_ephemeral=settings.is_dev)
     google = GoogleWorkspace(settings=settings, db=db, secret_box=secret_box)
@@ -171,6 +181,9 @@ def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
         reminders=reminders,
         documents=documents,
         business=business,
+        alerts=alerts,
+        briefings=briefings,
+        scheduler=scheduler,
         audit_sink=audit_sink,
         stt=build_stt(settings),
         tts=build_tts(settings),

@@ -224,3 +224,61 @@ export async function updateSettings(patch: {
   }
   return payload;
 }
+
+export interface JarvisAlert {
+  id: string;
+  kind: string;
+  severity: "info" | "attention";
+  title: string;
+  detail: string;
+  source: string;
+  created_at: string;
+  seen: boolean;
+}
+
+export interface ScheduledJob {
+  name: string;
+  schedule: string;
+  next_run: string;
+  last_run: string;
+  runs: number;
+  failures: number;
+  last_error: string;
+}
+
+export interface AlertsResponse {
+  /** Faux = surveillance eteinte. A distinguer d'une liste vide. */
+  enabled: boolean;
+  alerts: JarvisAlert[];
+  schedule: ScheduledJob[];
+}
+
+export function fetchAlerts(): Promise<AlertsResponse> {
+  return get("/api/alerts");
+}
+
+export async function dismissAlerts(): Promise<void> {
+  await fetch("/api/alerts", { method: "DELETE" });
+}
+
+export async function markAlertSeen(id: string): Promise<void> {
+  await fetch(`/api/alerts/${encodeURIComponent(id)}/seen`, { method: "POST" });
+}
+
+export interface Briefing {
+  day: string;
+  text: string;
+  sources: string[];
+  created_at: string;
+}
+
+export function fetchBriefing(): Promise<{ briefing: Briefing | null; scheduled_at: string }> {
+  return get("/api/briefing");
+}
+
+export async function generateBriefing(): Promise<Briefing> {
+  const response = await fetch("/api/briefing", { method: "POST" });
+  const payload = await response.json().catch(() => ({ detail: "" }));
+  if (!response.ok) throw new Error(payload.detail || "briefing impossible");
+  return payload.briefing;
+}

@@ -85,6 +85,15 @@ TOGGLES: tuple[Toggle, ...] = (
         description="Ventes, couverts, masse salariale importes par CSV.",
     ),
     Toggle(
+        key="JARVIS_FEATURE_PROACTIVE",
+        field="feature_proactive",
+        label="Surveillance proactive",
+        description=(
+            "Me prevenir d'une reunion imminente, d'un rappel echu ou de donnees "
+            "business qui se sont arretees."
+        ),
+    ),
+    Toggle(
         key="JARVIS_FEATURE_GMAIL",
         field="feature_gmail",
         label="Gmail",

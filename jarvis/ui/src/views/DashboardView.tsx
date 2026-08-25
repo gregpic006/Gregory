@@ -1,4 +1,7 @@
+import { useEffect, useState } from "react";
+
 import { Card, NotConnected } from "../components/Card";
+import { fetchBriefing, generateBriefing, type Briefing } from "../lib/api";
 import { IconAlert, IconBrain, IconBuilding, IconCalendar, IconCheck, IconMail } from "../components/layout/icons";
 import { greeting, longDate } from "../lib/format";
 import type { Overview, ViewId } from "../lib/types";
@@ -18,6 +21,31 @@ interface Props {
 export function DashboardView({ overview, onNavigate, onBriefing }: Props) {
   const panes = overview?.panes;
   const now = new Date();
+  const [briefing, setBriefing] = useState<Briefing | null>(null);
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [working, setWorking] = useState(false);
+
+  useEffect(() => {
+    fetchBriefing()
+      .then((payload) => {
+        setBriefing(payload.briefing);
+        setScheduledAt(payload.scheduled_at);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  // Le briefing ecrit est genere par le serveur a partir des seules sources
+  // qu'il a pu consulter; « le lire a voix haute » passe par la conversation.
+  const regenerate = async () => {
+    setWorking(true);
+    try {
+      setBriefing(await generateBriefing());
+    } catch {
+      /* le bouton reste disponible: rien n'est affiche de faux */
+    } finally {
+      setWorking(false);
+    }
+  };
 
   // Ce qui merite l'attention: deduit de donnees reelles, jamais invente.
   const alerts: string[] = [];
@@ -38,11 +66,34 @@ export function DashboardView({ overview, onNavigate, onBriefing }: Props) {
             <h1>{greeting(now.getHours(), overview?.user ?? "")}</h1>
             <p>{longDate(now)}</p>
           </div>
-          <button className="btn accent" onClick={onBriefing}>
-            Lancer le briefing
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn accent" onClick={onBriefing}>
+              Me le lire
+            </button>
+            <button className="btn" onClick={regenerate} disabled={working}>
+              {working ? "Redaction…" : briefing ? "Actualiser" : "Generer le briefing"}
+            </button>
+          </div>
         </div>
       </div>
+
+      {briefing && (
+        <div className="briefing">
+          <p>{briefing.text}</p>
+          <div className="briefing-foot">
+            <span className="briefing-sources">
+              {briefing.sources.length > 0
+                ? `sources: ${briefing.sources.join(", ")}`
+                : "aucune source branchee"}
+            </span>
+            <span style={{ flex: 1 }} />
+            <span className="muted" style={{ fontSize: 11.5 }}>
+              {briefing.day}
+              {scheduledAt ? ` · automatique a ${scheduledAt}` : ""}
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="grid">
         <Card

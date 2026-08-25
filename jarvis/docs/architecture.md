@@ -784,7 +784,89 @@ explicitement quand les deux periodes n'ont pas la meme couverture.
 
 ---
 
-## 16. Ce que JARVIS ne fait pas encore
+## 16. Briefing et surveillance proactive (M5)
+
+### Le planificateur
+
+Ecrit a la main plutot que d'ajouter une dependance: deux besoins seulement —
+« tous les jours a 7 h 15 » et « toutes les N minutes ».
+
+Deux garanties le structurent. **Une tache qui echoue n'arrete jamais le
+planificateur**: un briefing qui plante ne doit pas emporter la surveillance
+des rappels. Et **l'heure est celle de l'utilisateur**: un briefing « a 7 h »
+calcule en UTC arriverait a 3 h du matin a Quebec.
+
+Une heure illisible (`JARVIS_BRIEFING_TIME=sept heures`) **desactive** la tache
+avec un message, plutot que de la declencher a un moment arbitraire.
+
+### Ce qui autorise JARVIS a interrompre
+
+La surveillance proactive est la fonctionnalite la plus facile a rendre
+insupportable. Trois regles la gouvernent.
+
+**Ne jamais inventer une raison d'interrompre.** Un observateur dont la source
+n'est pas branchee ne produit rien. Pas « tu n'as aucune reunion » — rien du
+tout. Le silence est le comportement correct quand on ne sait pas.
+
+**Ne jamais repeter.** Chaque alerte porte une cle de deduplication stable,
+contrainte en unicite dans la base. La surveillance tourne toutes les cinq
+minutes; sans cela, la meme reunion alerterait douze fois par heure.
+
+**Ne signaler que ce sur quoi on peut agir.** Une organisation qui n'a jamais
+eu de donnees n'est pas une nouvelle, c'est l'etat normal. Une organisation
+dont les donnees se sont **arretees**, si — et sa cle de deduplication inclut
+le numero de semaine, pour re-signaler une fois par semaine plutot qu'une fois
+pour toutes.
+
+Les observateurs sont isoles les uns des autres: un observateur casse ne prive
+pas des alertes des autres.
+
+### Le briefing
+
+C'est l'endroit ou l'invention est la plus tentante et la plus dangereuse: le
+format appelle des phrases completes et rassurantes, et personne ne verifie a
+7 h du matin.
+
+D'ou la construction en deux temps:
+
+1. **Rassembler les faits disponibles**, chacun avec sa source, en notant
+   separement ce qui n'a pas pu etre consulte (`unavailable`).
+2. **Ne demander au modele que de les mettre en francais.** Le prompt systeme
+   interdit explicitement d'ajouter quoi que ce soit — pas un chiffre, pas un
+   nom, pas un rendez-vous absent de la liste.
+
+Sans cle Claude, le briefing existe quand meme: il est compose mecaniquement a
+partir des memes faits. Mieux vaut une liste seche et vraie qu'un paragraphe
+elegant et faux. C'est aussi ce qui se produit si l'appel au modele echoue: la
+version brute est conservee plutot qu'une absence de briefing.
+
+L'interface affiche la liste des sources reellement consultees sous le texte:
+le lecteur voit d'un coup d'oeil sur quoi le briefing repose.
+
+### Notifications
+
+La permission n'est demandee **qu'au moment ou l'utilisateur active les
+notifications**, jamais au chargement de la page: une demande surgie de nulle
+part se refuse par reflexe, et le refus est definitif dans le navigateur.
+
+Le serveur deduplique deja, mais un rechargement de page relit la meme liste
+d'alertes — le client tient donc sa propre trace de ce qui a deja sonne.
+
+Le transport est un **sondage** toutes les 60 secondes, pas une diffusion
+WebSocket. La surveillance serveur tourne de toute facon toutes les cinq
+minutes: un sondage d'une minute sur un preavis de reunion de quinze minutes
+est largement suffisant, et evite tout un cycle de vie de connexions a gerer.
+
+### Demarrage avec Windows
+
+`scripts/autostart.ps1` enregistre une tache du Planificateur plutot qu'un
+raccourci dans le dossier Demarrage: la tache se relance si le processus tombe
+et n'exige aucun droit administrateur. Rien n'est installe hors du compte
+utilisateur.
+
+---
+
+## 17. Ce que JARVIS ne fait pas encore
 
 Enonce explicitement pour eviter toute illusion :
 
@@ -793,9 +875,12 @@ Enonce explicitement pour eviter toute illusion :
   Drive, exporte en CSV ;
 - pas de connecteur direct vers une caisse ou Stripe: les chiffres entrent
   par import CSV (les connecteurs ecriront les memes faits) ;
-- pas de wake word, pas de service en arriere-plan, pas de notifications
-  proactives, pas de controle de l'ordinateur (M5) — le briefing existe, mais
-  sur demande seulement, jamais declenche tout seul ;
+- **pas de wake word**: la detection de « JARVIS » en ecoute continue entre en
+  concurrence avec le micro du push-to-talk. Le conflit ne peut se regler
+  qu'en le testant sur du vrai materiel audio ;
+- pas d'empaquetage Tauri: le binaire ne peut etre ni compile ni verifie
+  ailleurs que sous Windows ;
+- pas de controle de l'ordinateur ;
 - pas de recherche web ;
 - pas de graphe de connaissances — il sera evalue en M4, seulement s'il apporte
   une valeur reelle par rapport a la recherche semantique + metadonnees.

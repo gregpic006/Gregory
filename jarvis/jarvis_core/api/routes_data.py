@@ -394,3 +394,69 @@ async def reindex_documents(runtime: JarvisRuntime = Depends(get_runtime)) -> di
     except DocumentError as exc:
         raise HTTPException(status_code=400, detail=exc.user_message) from exc
     return {"report": report.as_dict(), "summary": report.summary(), "total": store.count()}
+
+
+# =============================================================================
+# Alertes et briefing (M5)
+# =============================================================================
+
+
+@router.get("/alerts")
+async def list_alerts(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    """Alertes actives. Vide veut dire « rien a signaler », pas « pas regarde ».
+
+    La distinction est portee par `enabled`: surveillance eteinte et absence
+    d'alerte ne se ressemblent pas.
+    """
+    return {
+        "enabled": runtime.settings.feature_proactive,
+        "alerts": runtime.alerts.active(),
+        "schedule": runtime.scheduler.status(),
+    }
+
+
+@router.post("/alerts/{alert_id}/seen")
+async def mark_alert_seen(
+    alert_id: str, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    if not runtime.alerts.mark_seen(alert_id):
+        raise HTTPException(status_code=404, detail="Alerte introuvable.")
+    return {"seen": alert_id}
+
+
+@router.delete("/alerts")
+async def dismiss_alerts(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    return {"dismissed": runtime.alerts.dismiss_all()}
+
+
+@router.post("/alerts/check")
+async def check_alerts_now(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    """Force un passage de surveillance, sans attendre la prochaine echeance."""
+    from jarvis_core.proactive import collect_alerts
+
+    if not runtime.settings.feature_proactive:
+        raise HTTPException(status_code=400, detail="La surveillance proactive est desactivee.")
+    runtime.alerts.purge_expired()
+    fresh = runtime.alerts.record(await collect_alerts(runtime))
+    return {"new": fresh, "alerts": runtime.alerts.active()}
+
+
+@router.get("/briefing")
+async def read_briefing(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    """Dernier briefing genere, s'il y en a un."""
+    latest = runtime.briefings.latest()
+    return {
+        "briefing": latest,
+        "scheduled_at": runtime.settings.briefing_time,
+    }
+
+
+@router.post("/briefing")
+async def make_briefing(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    """Genere le briefing maintenant."""
+    from jarvis_core.briefing import generate_briefing
+
+    try:
+        return {"briefing": await generate_briefing(runtime)}
+    except JarvisError as exc:
+        raise HTTPException(status_code=400, detail=exc.user_message) from exc

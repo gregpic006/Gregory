@@ -107,6 +107,12 @@ class Settings(BaseSettings):
         alias="JARVIS_EMBEDDING_MODEL",
     )
     embedding_cache_dir: str = Field(default="", alias="JARVIS_EMBEDDING_CACHE_DIR")
+    # --- Surveillance et briefing (M5) ---------------------------------------
+    #: Heure locale du briefing quotidien. Vide = pas de briefing automatique.
+    briefing_time: str = Field(default="07:00", alias="JARVIS_BRIEFING_TIME")
+    #: Frequence de la surveillance proactive, en minutes.
+    watch_interval_minutes: int = Field(default=5, alias="JARVIS_WATCH_INTERVAL_MINUTES")
+
     #: Dossier Drive a indexer. Vide = rien: on n'aspire jamais tout le Drive
     #: par defaut, meme quand la portee le permettrait.
     drive_folder: str = Field(default="JARVIS", alias="JARVIS_DRIVE_FOLDER")
@@ -119,6 +125,7 @@ class Settings(BaseSettings):
     feature_documents: bool = Field(default=False, alias="JARVIS_FEATURE_DOCUMENTS")
     feature_drive: bool = Field(default=False, alias="JARVIS_FEATURE_DRIVE")
     feature_business: bool = Field(default=False, alias="JARVIS_FEATURE_BUSINESS")
+    feature_proactive: bool = Field(default=True, alias="JARVIS_FEATURE_PROACTIVE")
     feature_persistent_memory: bool = Field(
         default=True, alias="JARVIS_FEATURE_PERSISTENT_MEMORY"
     )
@@ -176,6 +183,7 @@ class Settings(BaseSettings):
             "documents": self.feature_documents,
             "drive": self.feature_drive,
             "business": self.feature_business,
+            "proactive": self.feature_proactive,
             "persistent_memory": self.feature_persistent_memory,
             "computer_control": self.feature_computer_control,
             "autonomous_mode": self.feature_autonomous_mode,

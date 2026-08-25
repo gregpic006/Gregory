@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { clockTime, longDate } from "../../lib/format";
 import type { SystemInfo } from "../../lib/types";
@@ -10,11 +10,12 @@ interface Props {
   onToggleFullscreen: () => void;
   onOpenSearch: () => void;
   voiceLabel: string;
+  alertSlot?: ReactNode;
 }
 
 /** Barre superieure: la date, l'etat du systeme, l'acces a la recherche. */
 export function TopBar({
-  system, fullscreen, onToggleFullscreen, onOpenSearch, voiceLabel,
+  system, fullscreen, onToggleFullscreen, onOpenSearch, voiceLabel, alertSlot,
 }: Props) {
   const [now, setNow] = useState(() => new Date());
 
@@ -44,6 +45,7 @@ export function TopBar({
       )}
       <span className="chip" title="Voix de reponse">{voiceLabel}</span>
 
+      {alertSlot}
       <button className="icon-btn" onClick={onOpenSearch} title="Rechercher (Ctrl+K)">
         <IconSearch />
       </button>

@@ -73,11 +73,27 @@ class ReminderRepository:
         return [_row_to_reminder(row) for row in self.db.query(sql, (*params, limit))]
 
     def due_before(self, iso_timestamp: str) -> list[Reminder]:
+        """Rappels dont l'echeance est passee a l'instant donne.
+
+        La comparaison se fait sur des instants, pas sur des chaines. Un rappel
+        enregistre en UTC (« ...+00:00 ») et une heure locale de Quebec
+        (« ...-04:00 ») se comparent correctement ici, alors qu'un `due_at <= ?`
+        en SQL les classerait dans le desordre — un rappel echu passerait pour
+        a venir.
+        """
+        limit = _parse_instant(iso_timestamp)
+        if limit is None:
+            return []
         rows = self.db.query(
-            "SELECT * FROM reminders WHERE status = 'pending' AND due_at <= ? ORDER BY due_at",
-            (iso_timestamp,),
+            "SELECT * FROM reminders WHERE status = 'pending' ORDER BY due_at"
         )
-        return [_row_to_reminder(row) for row in rows]
+        due: list[Reminder] = []
+        for row in rows:
+            moment = _parse_instant(str(row["due_at"]))
+            # Une echeance illisible n'est pas « echue »: on ne devine pas.
+            if moment is not None and moment <= limit:
+                due.append(_row_to_reminder(row))
+        return due
 
     def complete(self, reminder_id: str) -> bool:
         row = self.db.query_one("SELECT id FROM reminders WHERE id = ?", (reminder_id,))
@@ -95,6 +111,18 @@ class ReminderRepository:
             return False
         self.db.execute("UPDATE reminders SET status = 'cancelled' WHERE id = ?", (reminder_id,))
         return True
+
+
+def _parse_instant(value: str) -> datetime | None:
+    """Lit un horodatage ISO en instant absolu, ou None s'il est illisible.
+
+    Une valeur sans fuseau est supposee UTC: c'est ce que ce depot ecrit.
+    """
+    try:
+        moment = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment
 
 
 def _row_to_reminder(row: Any) -> Reminder:

@@ -47,6 +47,46 @@ def get_runtime(request: Request) -> JarvisRuntime:
     return runtime
 
 
+def _register_jobs(runtime: JarvisRuntime) -> None:
+    """Declare les taches de fond a partir de la configuration.
+
+    Rien n'est planifie si la surveillance est desactivee: une fonctionnalite
+    eteinte ne doit consommer aucune ressource, ni produire d'alerte.
+    """
+    settings = runtime.settings
+
+    if settings.briefing_time.strip():
+
+        async def briefing_job() -> None:
+            from jarvis_core.briefing import generate_briefing
+
+            result = await generate_briefing(runtime)
+            logger.info("briefing du %s genere", result["day"])
+
+        if not runtime.scheduler.every_day_at(
+            settings.briefing_time, name="briefing", handler=briefing_job
+        ):
+            logger.warning(
+                "JARVIS_BRIEFING_TIME=%r illisible: le briefing quotidien est desactive. "
+                "Format attendu: HH:MM",
+                settings.briefing_time,
+            )
+
+    if settings.feature_proactive:
+
+        async def watch_job() -> None:
+            from jarvis_core.proactive import collect_alerts
+
+            runtime.alerts.purge_expired()
+            fresh = runtime.alerts.record(await collect_alerts(runtime))
+            if fresh:
+                logger.info("%s nouvelle(s) alerte(s)", len(fresh))
+
+        runtime.scheduler.every(
+            settings.watch_interval_minutes, name="surveillance", handler=watch_job
+        )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Construit l'application ASGI."""
     settings = settings or get_settings()
@@ -56,6 +96,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         runtime = build_runtime(settings)
         app.state.runtime = runtime
+        _register_jobs(runtime)
+        runtime.scheduler.start()
         logger.info(
             "%s pret — LLM=%s STT=%s TTS=%s env=%s",
             runtime.settings.jarvis_name,
