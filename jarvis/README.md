@@ -18,6 +18,7 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 - [Donnees business](#brancher-tes-chiffres-daffaires)
 - [Briefing et surveillance](#briefing-du-matin-et-surveillance)
 - [Acces depuis le telephone](#acceder-a-jarvis-depuis-ton-telephone)
+- [Mot d'eveil](#dire--salut-jarvis--pour-parler)
 - [Architecture en bref](#architecture-en-bref)
 - [Installation (Windows)](#installation-windows)
 - [Installation (Linux / macOS)](#installation-linux--macos)
@@ -62,7 +63,7 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 | Surveillance proactive (reunion imminente, rappel echu, donnees arretees) | oui |
 | Notifications Windows | oui, via le navigateur |
 | Demarrage avec Windows | oui |
-| Wake word (« Dis JARVIS ») | oui, dans Edge ou Chrome |
+| Wake word (« Salut JARVIS ») | oui, dans Edge ou Chrome |
 | Acces depuis le telephone | oui, avec jeton obligatoire |
 
 JARVIS ne simule aucune de ces integrations. Si Gmail n'est pas connecte, il
@@ -470,14 +471,18 @@ chargement — il serait sinon enregistre dans l'historique et dans les signets.
 Garde le lien prive. Si tu penses l'avoir partage par erreur, regenere-le :
 efface `JARVIS_ACCESS_TOKEN` dans `.env` et relance `remote --enable`.
 
-### Dire « JARVIS » pour parler
+### Dire « Salut JARVIS » pour parler
 
 Onglet **Reglages**, carte **Mot d'eveil**. Coche, autorise le micro, et
 JARVIS ecoute ton appel.
 
+**Les deux mots sont necessaires.** « JARVIS » seul revient trop souvent dans
+une conversation — en parlant de lui a quelqu'un, par exemple — et
+declencherait l'ecoute a contretemps.
+
 Fonctionne dans **Edge** et **Chrome** sous Windows — la reconnaissance du mot
 est faite par le navigateur, rien n'est installe ni envoye tant que tu n'as
-pas dit son nom.
+pas dit la phrase.
 
 L'ecoute passive se coupe pendant que tu parles a JARVIS et pendant qu'il
 repond : un seul usage du micro a la fois, pour ne pas casser le

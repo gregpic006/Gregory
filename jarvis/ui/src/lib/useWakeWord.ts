@@ -1,5 +1,9 @@
 /**
- * Mot d'eveil: « JARVIS » prononce a voix haute demarre l'ecoute.
+ * Mot d'eveil: « Salut JARVIS » prononce a voix haute demarre l'ecoute.
+ *
+ * Deux mots plutot qu'un: « jarvis » seul revient trop souvent dans une
+ * conversation normale — en parlant de l'assistant a quelqu'un, par exemple —
+ * et declencherait l'ecoute a contretemps.
  *
  * Utilise la reconnaissance vocale du navigateur (Edge et Chrome sous
  * Windows). Aucun modele a telecharger, aucun service a installer.
@@ -8,7 +12,7 @@
  * consommateurs qui reclament le peripherique en meme temps, et c'est la
  * commande vocale existante qui casse. Trois regles l'evitent.
  *
- * 1. **Un seul consommateur a la fois.** Des que le mot est reconnu, l'ecoute
+ * 1. **Un seul consommateur a la fois.** Des que la phrase est reconnue, l'ecoute
  *    passive s'arrete *avant* que l'enregistrement ne demarre. Elle ne
  *    reprend qu'une fois le tour termine.
  * 2. **Jamais pendant que JARVIS parle**, sinon il se reveillerait lui-meme en
@@ -23,8 +27,20 @@ import type { AssistantState } from "./types";
 
 const STORAGE_KEY = "jarvis.wakeword";
 
-/** Variantes acceptees: la reconnaissance transcrit rarement le nom exact. */
-const WAKE_PATTERNS = ["jarvis", "jarvice", "jarviss", "java is", "j'arrive is", "darvis"];
+/** Variantes du salut et du nom.
+ *
+ * La reconnaissance transcrit rarement « JARVIS » exactement: elle propose
+ * « jarvice », « darvis », parfois « java is ». On accepte donc un eventail,
+ * mais on exige **les deux mots** — « jarvis » seul revient trop souvent dans
+ * une conversation normale pour servir de declencheur.
+ */
+const GREETINGS = ["salut", "salu", "sallut", "salut,"];
+const NAMES = ["jarvis", "jarvice", "jarviss", "jarvi", "darvis", "charvis", "java is"];
+
+/** « salut » suivi du nom, avec au plus un mot parasite entre les deux. */
+const WAKE_PATTERN = new RegExp(
+  `\\b(?:${GREETINGS.join("|")})\\b(?:\\s+\\S+)?\\s+(?:${NAMES.join("|")})\\b`,
+);
 
 /** Etats pendant lesquels l'ecoute passive doit rester coupee. */
 const BUSY_STATES: AssistantState[] = ["listening", "transcribing", "speaking"];
@@ -51,9 +67,20 @@ function getRecognition(): RecognitionCtor | null {
   return scope.SpeechRecognition ?? scope.webkitSpeechRecognition ?? null;
 }
 
-function heard(transcript: string): boolean {
-  const text = transcript.toLowerCase();
-  return WAKE_PATTERNS.some((pattern) => text.includes(pattern));
+/** Normalise avant comparaison: la transcription arrive accentuee et ponctuee. */
+export function normalizeSpeech(transcript: string): string {
+  return transcript
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Vrai si « salut JARVIS » a ete prononce. */
+export function heard(transcript: string): boolean {
+  return WAKE_PATTERN.test(normalizeSpeech(transcript));
 }
 
 export interface WakeWordState {

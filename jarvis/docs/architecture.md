@@ -910,6 +910,15 @@ donnees qui sont protegees, pas la page.
 
 ### Mot d'eveil
 
+La phrase declencheuse est **« Salut JARVIS »**, en deux mots. Le nom seul
+revient trop souvent dans une conversation ordinaire — en parlant de
+l'assistant a quelqu'un — pour servir de declencheur fiable.
+
+La comparaison se fait sur une transcription normalisee (minuscules, sans
+accents ni ponctuation) et accepte les variantes que la reconnaissance
+propose reellement: « jarvice », « darvis », « java is ». Un seul mot
+parasite est tolere entre le salut et le nom, pas davantage.
+
 La reconnaissance continue du navigateur (`SpeechRecognition`, disponible dans
 Edge et Chrome) plutot qu'un modele local: rien a telecharger, rien a
 installer, et la detection reste sur la machine — aucun son n'est envoye tant

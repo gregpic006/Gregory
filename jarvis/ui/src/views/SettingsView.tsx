@@ -143,23 +143,24 @@ export function SettingsView({ system, player, wake }: Props) {
                   <input type="checkbox" checked={wake.enabled} onChange={wake.toggle} />
                   <span className="switch-text">
                     <span className="switch-label">
-                      Dire « JARVIS » pour parler
+                      Dire « Salut JARVIS » pour parler
                       {wake.enabled && wake.awake && (
                         <span className="switch-tag accent">a l'ecoute</span>
                       )}
                     </span>
                     <span className="switch-desc">
                       Le micro reste ouvert en permanence pour reconnaitre ton appel.
-                      L'ecoute se coupe pendant que JARVIS parle et pendant que tu lui
-                      parles: un seul usage du micro a la fois.
+                      Il faut les deux mots: « jarvis » seul reviendrait trop souvent
+                      dans une conversation. L'ecoute se coupe pendant que JARVIS parle
+                      et pendant que tu lui parles: un seul usage du micro a la fois.
                     </span>
                   </span>
                 </label>
                 {wake.error && <p className="card-empty">{wake.error}</p>}
                 <p className="card-empty">
                   Le navigateur demandera l'acces au micro. Tout reste sur ta machine:
-                  la reconnaissance du mot est faite par Windows, rien n'est envoye
-                  tant que tu n'as pas dit « JARVIS ».
+                  la reconnaissance de la phrase est faite par Windows, rien n'est
+                  envoye tant que tu n'as pas dit « Salut JARVIS ».
                 </p>
               </>
             )}
