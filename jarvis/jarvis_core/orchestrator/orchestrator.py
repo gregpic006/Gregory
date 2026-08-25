@@ -24,6 +24,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from jarvis_core.business.store import BusinessStore
 from jarvis_core.config import Settings
 from jarvis_core.documents.store import DocumentStore
 from jarvis_core.errors import (
@@ -126,6 +127,7 @@ class JarvisOrchestrator:
         memory_store: MemoryStore | None = None,
         reminders: ReminderRepository | None = None,
         documents: DocumentStore | None = None,
+        business: BusinessStore | None = None,
         google: object | None = None,
     ) -> None:
         self.settings = settings
@@ -136,6 +138,7 @@ class JarvisOrchestrator:
         self.memory_store = memory_store
         self.reminders = reminders
         self.documents = documents
+        self.business = business
         self.google = google
 
     # -- point d'entree ------------------------------------------------------
@@ -580,6 +583,7 @@ class JarvisOrchestrator:
             memory_store=self.memory_store,
             reminders=self.reminders,
             documents=self.documents,
+            business=self.business,
             google=self.google,  # type: ignore[arg-type]
             dry_run=self.settings.dry_run,
             organization=session.organization,

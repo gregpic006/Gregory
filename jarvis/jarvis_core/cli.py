@@ -410,6 +410,70 @@ def _cmd_check_documents(settings: Settings) -> int:
         runtime.db.close()
 
 
+def _cmd_import_business(settings: Settings, path: str, org: str, replace: bool) -> int:
+    """Importe un CSV de donnees business et rend compte ligne par ligne."""
+    from jarvis_core.business.csv_import import ImportError_, import_csv_file
+    from jarvis_core.business.store import BusinessStore
+    from jarvis_core.persistence.db import build_database
+
+    if not settings.feature_business:
+        print("[ECHEC] JARVIS_FEATURE_BUSINESS=false — les donnees business sont desactivees.")
+        return 1
+
+    db = build_database(settings.database_url)
+    db.migrate()
+    store = BusinessStore(db)
+
+    row = db.query_one(
+        "SELECT id, name, kind FROM organizations WHERE id = ? OR lower(name) = lower(?)",
+        (org, org),
+    )
+    if row is None:
+        known = db.query("SELECT id, name FROM organizations WHERE id != 'PERSONAL' ORDER BY name")
+        print(f"[ECHEC] Entreprise inconnue: {org}")
+        print("        Entreprises connues:")
+        for entry in known:
+            print(f"          {entry['id']:<20} {entry['name']}")
+        db.close()
+        return 1
+
+    org_id, name, kind = str(row["id"]), str(row["name"]), str(row["kind"])
+    if replace:
+        removed = store.clear(org_id=org_id, source="csv")
+        print(f"-> {removed} fait(s) precedents effaces pour {name}")
+
+    try:
+        report = import_csv_file(store, path, org_id=org_id, kind=kind)
+    except ImportError_ as exc:
+        print(f"[ECHEC] {exc.user_message}")
+        db.close()
+        return 1
+
+    print(f"Entreprise: {name}")
+    print(f"  {report.summary()}")
+    if report.ignored_columns:
+        print(f"  colonnes ignorees: {', '.join(report.ignored_columns)}")
+    for line, reason in report.errors:
+        print(f"  [refusee]  ligne {line} — {reason}")
+
+    print(f"\n{report.facts} valeur(s) enregistree(s).")
+    db.close()
+    return 1 if report.rows_failed and not report.rows_ok else 0
+
+
+def _cmd_check_business(settings: Settings) -> int:
+    """Diagnostic des donnees business."""
+    from jarvis_core.diagnostics import check_business, render
+    from jarvis_core.runtime import build_runtime
+
+    runtime = build_runtime(settings)
+    try:
+        print("Etat des donnees business\n")
+        return 0 if render(check_business(runtime)) else 1
+    finally:
+        runtime.db.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jarvis", description="Assistant personnel JARVIS")
     sub = parser.add_subparsers(dest="command")
@@ -424,7 +488,12 @@ def main(argv: list[str] | None = None) -> int:
     index.add_argument("--force", action="store_true", help="reindexe meme si inchange")
     drive = sub.add_parser("sync-drive", help="indexe le dossier Google Drive configure")
     drive.add_argument("--force", action="store_true", help="reindexe meme si inchange")
+    imp = sub.add_parser("import-business", help="importe un CSV de donnees business")
+    imp.add_argument("path", help="fichier CSV a importer")
+    imp.add_argument("--org", required=True, help="entreprise (id ou nom)")
+    imp.add_argument("--replace", action="store_true", help="remplace les imports CSV precedents")
     sub.add_parser("check-documents", help="verifie l'index et le mode de recherche")
+    sub.add_parser("check-business", help="etat des donnees business")
     sub.add_parser("keygen", help="genere une cle de chiffrement")
 
     args = parser.parse_args(argv)
@@ -446,6 +515,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_index(settings, args.path, args.force)
     if args.command == "sync-drive":
         return asyncio.run(_cmd_sync_drive(settings, args.force))
+    if args.command == "import-business":
+        return _cmd_import_business(settings, args.path, args.org, args.replace)
+    if args.command == "check-business":
+        return _cmd_check_business(settings)
     if args.command == "check-documents":
         return _cmd_check_documents(settings)
     if args.command == "doctor":

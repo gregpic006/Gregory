@@ -118,6 +118,7 @@ class Settings(BaseSettings):
     feature_calendar: bool = Field(default=False, alias="JARVIS_FEATURE_CALENDAR")
     feature_documents: bool = Field(default=False, alias="JARVIS_FEATURE_DOCUMENTS")
     feature_drive: bool = Field(default=False, alias="JARVIS_FEATURE_DRIVE")
+    feature_business: bool = Field(default=False, alias="JARVIS_FEATURE_BUSINESS")
     feature_persistent_memory: bool = Field(
         default=True, alias="JARVIS_FEATURE_PERSISTENT_MEMORY"
     )
@@ -174,6 +175,7 @@ class Settings(BaseSettings):
             "calendar": self.feature_calendar,
             "documents": self.feature_documents,
             "drive": self.feature_drive,
+            "business": self.feature_business,
             "persistent_memory": self.feature_persistent_memory,
             "computer_control": self.feature_computer_control,
             "autonomous_mode": self.feature_autonomous_mode,

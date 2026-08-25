@@ -686,14 +686,113 @@ reste un contrat, pas un ordre.
 
 ---
 
-## 15. Ce que JARVIS ne fait pas encore
+## 15. Donnees business (M4)
+
+### La forme des donnees
+
+Un **fait** = un indicateur, une organisation, un jour, une source. Table
+plate, volontairement: cette forme rend impossible de stocker un chiffre sans
+dire d'ou il vient ni de quand il date.
+
+```
+business_facts (org_id, metric, day, value, unit, source, source_ref)
+UNIQUE (org_id, metric, day, source)
+```
+
+La contrainte d'unicite rend le reimport idempotent: recharger le meme export
+corrige les valeurs au lieu de les additionner en double. Deux sources
+differentes pour le meme jour coexistent (la caisse et Stripe peuvent tous
+deux rapporter un chiffre).
+
+### Le vocabulaire est ferme
+
+Les indicateurs sont une liste declaree (`jarvis_core/business/metrics.py`),
+pas une chaine libre. Si le modele pouvait inventer un nom d'indicateur, il
+pourrait aussi inventer sa valeur: « la marge nette de Bouvier » sortirait
+d'une requete vide, qu'un modele complaisant lirait comme un zero.
+
+Chaque indicateur declare **comment il s'agrege**, parce que la reponse
+depend de sa nature:
+
+| Agregation | Indicateurs | Pourquoi |
+|---|---|---|
+| Somme | ventes, couverts, masse salariale | Ils se cumulent |
+| Moyenne | occupation, attrition | Additionner un taux donnerait 300 % sur trois jours |
+| Derniere valeur | MRR, portes, logements | Ce sont des etats, pas des flux |
+
+### La couverture voyage avec le chiffre
+
+C'est la regle centrale du module. Aucune lecture ne renvoie une valeur nue:
+`MetricReading` porte toujours combien de jours ont ete demandes, combien sont
+reellement presents, la date de la derniere donnee et la source.
+
+Sans cela, « les ventes de la semaine: 42 000 $ » serait indistinguable d'un
+total calcule sur trois jours. Avec, JARVIS dit « 18 200 $ sur les 3 jours
+dont j'ai les donnees ». Le premier enonce est un mensonge par omission; le
+second est verifiable.
+
+Trois etats, jamais confondus:
+
+| Etat | Sens |
+|---|---|
+| `not_connected` | Aucune donnee — **jamais affiche comme zero** |
+| `connected` | Donnee reelle, avec sa couverture |
+| `stale` | Donnee reelle mais perimee, avec son age |
+
+Un vrai zero (« lundi ferme, zero vente ») est une donnee et reste
+`connected`: la distinction est portee par le statut, pas par la valeur.
+
+### Pourquoi le CSV en premier
+
+Tous les systemes de caisse savent exporter un CSV. Aucune entente
+d'integration a signer, aucune cle a obtenir, ca fonctionne le soir meme. Les
+connecteurs directs (POS, Stripe) viendront derriere la meme interface, en
+ecrivant les memes faits.
+
+L'import est ecrit pour des fichiers **quebecois reels**: separateur
+point-virgule (Excel francais), decimales a la virgule, espaces insecables
+dans les montants, dates en JJ/MM/AAAA (jamais lues comme MM/JJ), parentheses
+comptables pour les negatifs.
+
+**On ne devine jamais.** Une date ambigue, un montant illisible, une colonne
+inconnue: chaque ligne refusee est nommee avec son numero et sa raison, et
+chaque colonne ignoree est listee. Un import « reussi » ayant silencieusement
+saute la moitie des lignes produirait des totaux faux avec l'air d'etre
+complets — exactement le mode de defaillance que ce projet refuse.
+
+Un montant illisible devient `None`, jamais `0`: une case vide ne doit pas
+pouvoir passer pour une journee sans vente.
+
+### Ce que les outils disent au modele
+
+Le magasin peut etre irreprochable, si le resume passe au modele efface la
+nuance, JARVIS mentira quand meme. Les outils portent donc la couverture, la
+fraicheur et la source **dans leur texte**:
+
+```
+Grande Allee — 2026-08-18 au 2026-08-24 (7 jour(s) demandes) :
+- Ventes: 27 731.50 $ (seulement 4 jour(s) sur 7)
+- Reservations: aucune donnee (Aucune source branchee pour cet indicateur)
+- Masse salariale en % des ventes: 29.5 %
+
+Source(s): csv.
+```
+
+La comparaison de periodes refuse de s'executer si l'une des deux est vide —
+comparer a rien donnerait un ecart de +100 %, faux et alarmant — et signale
+explicitement quand les deux periodes n'ont pas la meme couverture.
+
+---
+
+## 16. Ce que JARVIS ne fait pas encore
 
 Enonce explicitement pour eviter toute illusion :
 
 - pas de Google Tasks ;
 - pas de lecture des feuilles de calcul locales (.xlsx) — Sheets passe par
   Drive, exporte en CSV ;
-- pas de donnees d'entreprise (M4) ;
+- pas de connecteur direct vers une caisse ou Stripe: les chiffres entrent
+  par import CSV (les connecteurs ecriront les memes faits) ;
 - pas de wake word, pas de service en arriere-plan, pas de notifications
   proactives, pas de controle de l'ordinateur (M5) — le briefing existe, mais
   sur demande seulement, jamais declenche tout seul ;

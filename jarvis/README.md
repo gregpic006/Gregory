@@ -15,6 +15,7 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 - [Ce qui fonctionne aujourd'hui](#ce-qui-fonctionne-aujourdhui)
 - [L'interface](#linterface)
 - [Documents](#indexer-tes-documents)
+- [Donnees business](#brancher-tes-chiffres-daffaires)
 - [Architecture en bref](#architecture-en-bref)
 - [Installation (Windows)](#installation-windows)
 - [Installation (Linux / macOS)](#installation-linux--macos)
@@ -53,7 +54,8 @@ paliers, et une regle qui prime sur tout le reste : **ne jamais inventer**.
 | Recherche dans les documents (mots exacts) | oui, hors ligne, sans telechargement |
 | Recherche par le sens | oui, quand le modele local est telecharge |
 | Google Drive : indexer un dossier | oui (consentement supplementaire requis) |
-| Donnees d'entreprise | **non — M4** |
+| Donnees d'entreprise (ventes, couverts, masse salariale) | oui, par import CSV |
+| Comparaison de periodes, ratio masse salariale | oui |
 | Wake word, briefing quotidien, controle de l'ordinateur | **non — M5** |
 
 JARVIS ne simule aucune de ces integrations. Si Gmail n'est pas connecte, il
@@ -74,7 +76,7 @@ cherche, il repond — et l'information utile l'entoure.
 | **Conversation** | Le fil complet, la transcription en direct, les sources citees |
 | **Calendrier / Courriels / Rappels** | Une source a la fois, en detail |
 | **Documents** | Ce qui est indexe, la recherche plein texte, et **quel mode** de recherche tourne |
-| **Entreprises** | Un contexte par organisation (Grande Allee, Maguire, Bouvier, Portail, Immobilier) |
+| **Entreprises** | Un contexte par organisation, ses chiffres reels et leur couverture |
 | **Memoire** | Ce que JARVIS retient, avec sa source — et un bouton pour l'oublier |
 | **Integrations** | Ce qui est branche, ce qui ne l'est pas, comment le brancher |
 
@@ -133,6 +135,7 @@ jarvis/
 │  ├─ cli.py               jarvis serve | chat | doctor | keygen
 │  ├─ llm/                 abstraction fournisseur, routage, tarification
 │  ├─ voice/               stt/ et tts/, une classe par fournisseur
+│  ├─ business/            indicateurs, faits dates et sources, import CSV
 │  ├─ documents/           extraction, decoupage, index lexical + vecteurs
 │  ├─ memory/              session (court terme) et magasin persistant
 │  ├─ tools/               registre, validation de schema, outils integres
@@ -328,6 +331,52 @@ consentement Google.
 
 ---
 
+### Brancher tes chiffres d'affaires
+
+Toutes les caisses savent exporter un CSV. C'est le chemin le plus court entre
+tes vraies donnees et JARVIS — aucune entente d'integration, aucune cle a
+obtenir.
+
+Active la fonctionnalite dans `.env` :
+
+```
+JARVIS_FEATURE_BUSINESS=true
+```
+
+Puis importe, soit par l'onglet **Entreprises** (bouton « Importer un CSV »),
+soit en ligne de commande :
+
+```powershell
+.\.venv\Scripts\python.exe -m jarvis_core.cli import-business ventes-aout.csv --org "Grande Allee"
+```
+
+Le fichier a besoin d'une colonne **Date** et d'au moins une colonne reconnue
+(`Ventes`, `Couverts`, `Masse salariale`, `Reservations`, `Cout des aliments`,
+`MRR`, `Occupation`, `Loyers percus`...). Le format quebecois est gere tel
+quel : point-virgule, `1 234,56`, `JJ/MM/AAAA`.
+
+Ce que tu verras a l'ecran, et pourquoi :
+
+- **Un total partiel est ecrit comme tel.** « 27 731,50 $ » avec en dessous
+  « 4 jours sur 7 ». Un total de 4 jours presente comme une semaine serait
+  faux tout en ayant l'air juste.
+- **Une donnee vieille est signalee en jaune**, avec son age.
+- **Un indicateur sans donnee affiche « non connecte »**, jamais zero. La
+  difference entre « aucune vente lundi » et « je ne sais pas » est celle sur
+  laquelle une decision se prend.
+- **Chaque ligne refusee est nommee** avec son numero et sa raison.
+
+Pour verifier l'etat de tes sources :
+
+```powershell
+.\.venv\Scripts\python.exe -m jarvis_core.cli check-business
+```
+
+Reimporter le meme fichier ne double rien : un jour deja connu est corrige,
+pas additionne.
+
+---
+
 ## Lancer
 
 **Une seule commande.** Elle recompile l'interface si elle a change, puis
@@ -395,7 +444,10 @@ La suite couvre en particulier les situations dangereuses :
 - une API Google qui repond 500 → **`erreur`**, jamais une liste vide ;
 - un document illisible → **nomme dans le rapport**, jamais saute en silence ;
 - une recherche sans modele semantique → **annoncee comme « mots exacts »**,
-  jamais presentee comme une comprehension du sens.
+  jamais presentee comme une comprehension du sens ;
+- un total business sur 4 jours d'une semaine → **annonce comme partiel**,
+  jamais comme un total de semaine ;
+- un indicateur sans source → **`non connecte`**, jamais un zero.
 
 ---
 
@@ -487,7 +539,7 @@ sensible n'est pas recopie integralement.
 | **M1** | Cerveau + outils + permissions + memoire + voix + interface | fait |
 | **M2** | Google : Gmail, Calendar, Contacts (OAuth + PKCE, jetons chiffres) | fait |
 | **M3** | Documents : PDF/DOCX/MD/TXT, index lexical + vecteurs, Drive, citations | fait |
-| **M4** | Entreprises : multi-organisation, POS, Stripe, KPI, PostgreSQL + pgvector | a venir |
+| **M4** | Entreprises : multi-organisation, import CSV, KPI, couverture et fraicheur | fait |
 | **M5** | Wake word, service en arriere-plan, briefing quotidien, notifications, Tauri | a venir |
 | **M6** | Mobile, acces distant, objets connectes | a venir |
 

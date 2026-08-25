@@ -437,6 +437,30 @@ button { cursor: pointer; background: none; border: none; }
   .home-side { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 }
 
+/* ------------------------------------------------------------ indicateurs */
+
+/* Un chiffre partiel ou perime porte sa nuance juste en dessous, en plus
+   petit: le lecteur voit la valeur et sa fiabilite d'un seul coup d'oeil. */
+.metric-row { display: flex; flex-direction: column; gap: 2px; }
+.metric-note {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: right;
+  letter-spacing: 0.01em;
+}
+.metric-note.warn { color: var(--warn); }
+
+/* Pied de carte: la mention de fraicheur cede la place au bouton plutot que
+   de le forcer a passer sur deux lignes. */
+.card-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.card-footer .btn { white-space: nowrap; margin-left: auto; }
+
 /* --------------------------------------------------------------- dashboard */
 
 .dash-head { padding: 22px 0 18px; max-width: 1560px; }

@@ -170,14 +170,40 @@ export interface Overview {
   };
 }
 
+/** Statut d'un indicateur business. `stale` = donnee reelle mais perimee. */
+export type MetricStatus = "connected" | "not_connected" | "stale";
+
 export interface BusinessMetric {
+  metric: string;
   label: string;
-  status: PaneStatus;
-  value: string | null;
+  unit: string;
+  value: number | null;
+  /** Valeur deja mise en forme par le serveur (« 27 731,50 $ »). */
+  display: string | null;
+  status: MetricStatus;
+  /** Vrai si la periode demandee est entierement couverte par des donnees. */
+  complete: boolean;
+  days_requested: number;
+  days_covered: number;
+  last_day: string;
+  sources: string[];
+  detail: string;
 }
 
 export interface BusinessOrg extends Organization {
   metrics: BusinessMetric[];
+  latest_day: string;
+}
+
+export interface BusinessImport {
+  id: string;
+  org_id: string;
+  source: string;
+  source_ref: string;
+  rows_ok: number;
+  rows_failed: number;
+  detail: string;
+  created_at: string;
 }
 
 export interface MemoryEntry {

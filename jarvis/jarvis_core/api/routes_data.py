@@ -31,16 +31,6 @@ CONNECTED = "connected"
 NOT_CONNECTED = "not_connected"
 ERROR = "error"
 
-#: Indicateurs attendus par type d'organisation. Ils structurent la page
-#: Business tant qu'aucune source n'est branchee.
-BUSINESS_METRICS: dict[str, list[str]] = {
-    "restaurant": ["Ventes du jour", "Masse salariale", "Reservations", "Alertes"],
-    "saas": ["Revenus recurrents", "Portes", "Clients", "Pipeline"],
-    "realestate": ["Immeubles", "Occupation", "Loyers percus", "Alertes"],
-    "personal": [],
-}
-
-
 def get_runtime(request: Request) -> JarvisRuntime:
     runtime: JarvisRuntime = request.app.state.runtime
     return runtime
@@ -146,37 +136,141 @@ def _documents_pane(runtime: JarvisRuntime) -> dict[str, Any]:
 
 
 @router.get("/businesses")
-async def businesses(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+async def businesses(
+    days: int = 7, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
     """Centre de commande business.
 
-    Chaque indicateur porte son statut. Tant qu'aucun systeme de caisse ou de
-    facturation n'est branche, ils valent tous `not_connected` — jamais un
-    chiffre plausible mais faux.
+    Chaque indicateur porte son statut ET sa couverture. Un total calcule sur
+    4 jours sur 7 est affiche comme tel: sans cette precision, il se lirait
+    comme un total de semaine, ce qui serait faux.
     """
+    from jarvis_core.business import metrics as vocabulary
+    from jarvis_core.business.store import day_range
+
     rows = runtime.db.query(
         "SELECT id, name, kind FROM organizations WHERE id != 'PERSONAL' ORDER BY name"
     )
-    organizations = []
-    for row in rows:
-        metrics = BUSINESS_METRICS.get(row["kind"], [])
-        organizations.append(
+    store = runtime.business
+
+    if store is None:
+        organizations = [
             {
-                "id": row["id"],
-                "name": row["name"],
-                "kind": row["kind"],
+                "id": str(row["id"]),
+                "name": str(row["name"]),
+                "kind": str(row["kind"]),
+                "latest_day": "",
                 "metrics": [
-                    {"label": label, "status": NOT_CONNECTED, "value": None}
-                    for label in metrics
+                    {
+                        "metric": definition.key,
+                        "label": definition.label,
+                        "unit": definition.unit,
+                        "value": None,
+                        "display": None,
+                        "status": NOT_CONNECTED,
+                        "complete": False,
+                        "detail": "",
+                        "days_requested": 0,
+                        "days_covered": 0,
+                        "last_day": "",
+                        "sources": [],
+                    }
+                    for definition in vocabulary.for_kind(str(row["kind"]))
                 ],
             }
+            for row in rows
+        ]
+        return {
+            "enabled": False,
+            "organizations": organizations,
+            "period": {"days": 0, "start": "", "end": ""},
+            "note": (
+                "Les donnees business sont desactivees (JARVIS_FEATURE_BUSINESS). "
+                "Aucune valeur n'est affichee."
+            ),
+        }
+
+    today = resolve_date_expression("aujourd'hui", timezone=runtime.settings.timezone).start.date()
+    window = max(1, min(days, 365))
+    start, end = day_range(window, end=today)
+
+    organizations = []
+    for row in rows:
+        org_id, kind = str(row["id"]), str(row["kind"])
+        readings = [
+            store.read(
+                org_id=org_id, metric=definition.key, start=start, end=end, today=today
+            )
+            for definition in vocabulary.for_kind(kind)
+        ]
+        organizations.append(
+            {
+                "id": org_id,
+                "name": str(row["name"]),
+                "kind": kind,
+                "latest_day": store.latest_day(org_id),
+                "metrics": [reading.as_dict() for reading in readings],
+            }
         )
+
     return {
+        "enabled": True,
         "organizations": organizations,
-        "note": (
-            "Les integrations business arrivent en M4 (caisses, Stripe, 7Shifts). "
-            "Aucune valeur n'est affichee tant qu'une source reelle n'est pas branchee."
-        ),
+        "period": {"days": window, "start": start.isoformat(), "end": end.isoformat()},
+        "imports": store.recent_imports(limit=5),
+        "note": "",
     }
+
+
+@router.post("/businesses/{org_id}/import")
+async def import_business_csv(
+    org_id: str, request: Request, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    """Importe un CSV de donnees quotidiennes pour une organisation."""
+    from jarvis_core.business.csv_import import ImportError_, import_csv
+
+    store = runtime.business
+    if store is None:
+        raise HTTPException(status_code=400, detail="Les donnees business sont desactivees.")
+    org = runtime.db.query_one(
+        "SELECT id, kind FROM organizations WHERE id = ?", (org_id,)
+    )
+    if org is None:
+        raise HTTPException(status_code=404, detail="Entreprise inconnue.")
+
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or isinstance(upload, str):
+        raise HTTPException(status_code=400, detail="Aucun fichier recu.")
+
+    raw = await upload.read()
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        content = raw.decode("cp1252", errors="replace")
+
+    try:
+        report = import_csv(
+            store,
+            content,
+            org_id=org_id,
+            kind=str(org["kind"]),
+            source_ref=upload.filename or "import.csv",
+        )
+    except ImportError_ as exc:
+        raise HTTPException(status_code=400, detail=exc.user_message) from exc
+    return {"report": report.as_dict()}
+
+
+@router.delete("/businesses/{org_id}/data")
+async def clear_business_data(
+    org_id: str, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    """Efface les donnees importees d'une organisation."""
+    store = runtime.business
+    if store is None:
+        raise HTTPException(status_code=400, detail="Les donnees business sont desactivees.")
+    return {"deleted": store.clear(org_id=org_id)}
 
 
 @router.get("/memory")

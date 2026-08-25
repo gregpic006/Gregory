@@ -1,8 +1,8 @@
 /** Client REST minimal de l'API JARVIS. */
 
 import type {
-  BusinessOrg, DocumentEntry, DocumentHit, GoogleStatus, MemoryEntry, Overview,
-  PaneStatus, SystemInfo,
+  BusinessImport, BusinessOrg, DocumentEntry, DocumentHit, GoogleStatus, MemoryEntry,
+  Overview, PaneStatus, SystemInfo,
 } from "./types";
 
 async function get<T>(path: string): Promise<T> {
@@ -77,8 +77,45 @@ export function fetchOverview(): Promise<Overview> {
   return get("/api/overview");
 }
 
-export function fetchBusinesses(): Promise<{ organizations: BusinessOrg[]; note: string }> {
-  return get("/api/businesses");
+export interface BusinessesResponse {
+  enabled: boolean;
+  organizations: BusinessOrg[];
+  period: { days: number; start: string; end: string };
+  imports?: BusinessImport[];
+  note: string;
+}
+
+export function fetchBusinesses(days = 7): Promise<BusinessesResponse> {
+  return get(`/api/businesses?days=${days}`);
+}
+
+export interface BusinessImportReport {
+  facts: number;
+  rows_ok: number;
+  rows_failed: number;
+  metrics: string[];
+  ignored_columns: string[];
+  errors: { line: number; reason: string }[];
+  first_day: string;
+  last_day: string;
+  summary: string;
+}
+
+export async function importBusinessCsv(
+  orgId: string,
+  file: File,
+): Promise<BusinessImportReport> {
+  const body = new FormData();
+  body.append("file", file);
+  const response = await fetch(`/api/businesses/${encodeURIComponent(orgId)}/import`, {
+    method: "POST",
+    body,
+  });
+  const payload = await response.json().catch(() => ({ detail: "" }));
+  if (!response.ok) {
+    throw new Error(payload.detail || `import refuse (${response.status})`);
+  }
+  return payload.report;
 }
 
 export interface MemoryResponse {

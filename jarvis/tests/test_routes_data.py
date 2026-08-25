@@ -296,3 +296,131 @@ def test_reindex_refused_when_the_feature_is_off(client: TestClient) -> None:
 
     assert response.status_code == 400
     assert "desactivee" in response.json()["detail"]
+
+
+# =============================================================================
+# Business (M4)
+# =============================================================================
+
+
+CSV_SAMPLE = (
+    "Date;Ventes;Couverts\n"
+    "18/08/2026;6 200,50;142\n"
+    "19/08/2026;5 810,25;131\n"
+    "oups;1 000,00;10\n"
+)
+
+
+@pytest.fixture()
+def biz_client(tmp_path: Any) -> Iterator[TestClient]:
+    settings = _settings(tmp_path, JARVIS_FEATURE_BUSINESS=True)
+    with TestClient(create_app(settings)) as test_client:
+        yield test_client
+
+
+def test_business_disabled_still_lists_the_expected_metrics(client: TestClient) -> None:
+    """La structure existe, les valeurs non: la page reste lisible sans mentir."""
+    payload = client.get("/api/businesses").json()
+
+    assert payload["enabled"] is False
+    assert "JARVIS_FEATURE_BUSINESS" in payload["note"]
+    grande = next(o for o in payload["organizations"] if o["id"] == "RESTAURANT_GA")
+    assert [m["label"] for m in grande["metrics"]][:2] == ["Ventes", "Couverts"]
+    assert all(m["value"] is None for m in grande["metrics"])
+    assert all(m["status"] == "not_connected" for m in grande["metrics"])
+
+
+def test_every_metric_starts_not_connected(biz_client: TestClient) -> None:
+    payload = biz_client.get("/api/businesses").json()
+
+    assert payload["enabled"] is True
+    for organization in payload["organizations"]:
+        assert organization["latest_day"] == ""
+        for metric in organization["metrics"]:
+            assert metric["status"] == "not_connected"
+            assert metric["value"] is None
+            assert metric["display"] is None
+
+
+def test_import_then_read_shows_real_values_with_coverage(biz_client: TestClient) -> None:
+    response = biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import",
+        files={"file": ("ventes.csv", CSV_SAMPLE, "text/csv")},
+    )
+
+    assert response.status_code == 200
+    report = response.json()["report"]
+    assert report["rows_ok"] == 2
+    assert report["rows_failed"] == 1
+
+    payload = biz_client.get("/api/businesses", params={"days": 400}).json()
+    grande = next(o for o in payload["organizations"] if o["id"] == "RESTAURANT_GA")
+    sales = next(m for m in grande["metrics"] if m["metric"] == "sales")
+
+    assert sales["value"] == 12010.75
+    assert sales["days_covered"] == 2
+    # La periode demandee depasse largement les donnees: la carte doit le dire.
+    assert sales["complete"] is False
+
+
+def test_import_report_names_the_rejected_line(biz_client: TestClient) -> None:
+    report = biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import",
+        files={"file": ("ventes.csv", CSV_SAMPLE, "text/csv")},
+    ).json()["report"]
+
+    assert [error["line"] for error in report["errors"]] == [4]
+    assert "date illisible" in report["errors"][0]["reason"]
+
+
+def test_importing_does_not_leak_into_another_organization(biz_client: TestClient) -> None:
+    biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import",
+        files={"file": ("ventes.csv", CSV_SAMPLE, "text/csv")},
+    )
+
+    payload = biz_client.get("/api/businesses", params={"days": 400}).json()
+    maguire = next(o for o in payload["organizations"] if o["id"] == "RESTAURANT_MAGUIRE")
+
+    assert all(m["status"] == "not_connected" for m in maguire["metrics"])
+
+
+def test_import_to_an_unknown_organization_is_a_404(biz_client: TestClient) -> None:
+    response = biz_client.post(
+        "/api/businesses/PAS_UNE_ENTREPRISE/import",
+        files={"file": ("ventes.csv", CSV_SAMPLE, "text/csv")},
+    )
+
+    assert response.status_code == 404
+
+
+def test_import_refused_when_the_feature_is_off(client: TestClient) -> None:
+    response = client.post(
+        "/api/businesses/RESTAURANT_GA/import",
+        files={"file": ("ventes.csv", CSV_SAMPLE, "text/csv")},
+    )
+
+    assert response.status_code == 400
+
+
+def test_unreadable_file_is_refused_with_a_reason(biz_client: TestClient) -> None:
+    response = biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import",
+        files={"file": ("meteo.csv", "Date;Meteo\n18/08/2026;pluie\n", "text/csv")},
+    )
+
+    assert response.status_code == 400
+    assert "Aucune colonne reconnue" in response.json()["detail"]
+
+
+def test_clearing_data_returns_the_metrics_to_not_connected(biz_client: TestClient) -> None:
+    biz_client.post(
+        "/api/businesses/RESTAURANT_GA/import",
+        files={"file": ("ventes.csv", CSV_SAMPLE, "text/csv")},
+    )
+
+    assert biz_client.delete("/api/businesses/RESTAURANT_GA/data").status_code == 200
+
+    payload = biz_client.get("/api/businesses", params={"days": 400}).json()
+    grande = next(o for o in payload["organizations"] if o["id"] == "RESTAURANT_GA")
+    assert all(m["status"] == "not_connected" for m in grande["metrics"])

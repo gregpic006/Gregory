@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover
+    from jarvis_core.business.store import BusinessStore
     from jarvis_core.config import Settings
     from jarvis_core.documents.store import DocumentStore
     from jarvis_core.integrations.google import GoogleWorkspace
@@ -95,6 +96,7 @@ class ToolContext:
     memory_store: MemoryStore | None = None
     reminders: ReminderRepository | None = None
     documents: DocumentStore | None = None
+    business: BusinessStore | None = None
     google: GoogleWorkspace | None = None
     dry_run: bool = True
     organization: str = "PERSONAL"

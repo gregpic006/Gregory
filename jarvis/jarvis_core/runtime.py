@@ -11,6 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from jarvis_core.business.store import BusinessStore
 from jarvis_core.config import Settings, get_settings
 from jarvis_core.documents.embeddings import build_embedding_provider
 from jarvis_core.documents.store import DocumentStore
@@ -52,6 +53,7 @@ class JarvisRuntime:
     memory_store: MemoryStore | None
     reminders: ReminderRepository
     documents: DocumentStore | None
+    business: BusinessStore | None
     audit_sink: SqliteAuditSink
     stt: SpeechToTextProvider
     tts: TextToSpeechProvider
@@ -140,6 +142,7 @@ def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
     memory_store = MemoryStore(db) if settings.feature_persistent_memory else None
     reminders = ReminderRepository(db)
     documents = build_document_store(settings, db)
+    business = BusinessStore(db) if settings.feature_business else None
     router = build_router(settings)
     secret_box = SecretBox(settings.encryption_key, allow_ephemeral=settings.is_dev)
     google = GoogleWorkspace(settings=settings, db=db, secret_box=secret_box)
@@ -153,6 +156,7 @@ def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
         memory_store=memory_store,
         reminders=reminders,
         documents=documents,
+        business=business,
         google=google,
     )
 
@@ -166,6 +170,7 @@ def build_runtime(settings: Settings | None = None) -> JarvisRuntime:
         memory_store=memory_store,
         reminders=reminders,
         documents=documents,
+        business=business,
         audit_sink=audit_sink,
         stt=build_stt(settings),
         tts=build_tts(settings),

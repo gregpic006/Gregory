@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import traceback
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 from jarvis_core.errors import JarvisError
@@ -430,6 +431,95 @@ def check_documents(runtime: Any) -> list[CheckResult]:
                     status=FAIL,
                     detail=str(exc)[:160],
                     hint="Reindexe: jarvis index --force",
+                )
+            )
+    return results
+
+
+def check_business(runtime: Any) -> list[CheckResult]:
+    """Etat des donnees business, organisation par organisation.
+
+    Repond a la seule question qui compte avant de faire confiance a un
+    chiffre: d'ou vient-il, et de quand date-t-il.
+    """
+    from jarvis_core.business import metrics as vocabulary
+
+    settings = runtime.settings
+    if not settings.feature_business:
+        return [
+            CheckResult(
+                name="Donnees business",
+                status=WARN,
+                detail="desactivees",
+                hint="Mets JARVIS_FEATURE_BUSINESS=true dans .env pour les activer.",
+            )
+        ]
+
+    store = runtime.business
+    if store is None:  # pragma: no cover - incoherence de configuration
+        return [
+            CheckResult(
+                name="Donnees business",
+                status=FAIL,
+                detail="magasin non initialise",
+                hint="Signale ce cas: le flag est actif mais le magasin est absent.",
+            )
+        ]
+
+    results: list[CheckResult] = []
+    rows = runtime.db.query(
+        "SELECT id, name, kind FROM organizations WHERE id != 'PERSONAL' ORDER BY name"
+    )
+    if not rows:
+        return [
+            CheckResult(
+                name="Donnees business",
+                status=FAIL,
+                detail="aucune organisation declaree",
+                hint="La migration 0003 devrait les creer. Relance jarvis serve.",
+            )
+        ]
+
+    today = resolve_date_expression("aujourd'hui", timezone=settings.timezone).start.date()
+    for row in rows:
+        org_id, name, kind = str(row["id"]), str(row["name"]), str(row["kind"])
+        connected = store.connected_metrics(org_id)
+        expected = [d.key for d in vocabulary.for_kind(kind)]
+        present = [k for k in expected if k in connected]
+
+        if not present:
+            results.append(
+                CheckResult(
+                    name=name,
+                    status=WARN,
+                    detail="aucune donnee",
+                    hint=f"Importe un CSV: jarvis import-business <fichier> --org {org_id}",
+                )
+            )
+            continue
+
+        latest = store.latest_day(org_id)
+        age = (today - date.fromisoformat(latest)).days if latest else 999
+        labels = ", ".join(vocabulary.METRICS[k].label for k in present)
+        missing = [vocabulary.METRICS[k].label for k in expected if k not in connected]
+
+        if age > 7:
+            results.append(
+                CheckResult(
+                    name=name,
+                    status=WARN,
+                    detail=f"{labels} — derniere donnee il y a {age} jours ({latest})",
+                    hint="Reimporte un export recent pour que les chiffres restent utiles.",
+                )
+            )
+        else:
+            detail = f"{labels} — a jour ({latest})"
+            results.append(
+                CheckResult(
+                    name=name,
+                    status=OK,
+                    detail=detail,
+                    hint=f"Sans donnee: {', '.join(missing)}" if missing else "",
                 )
             )
     return results
