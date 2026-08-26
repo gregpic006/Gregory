@@ -47,14 +47,23 @@ export default function App() {
   const wake = useWakeWord({
     state: jarvis.state,
     micAvailable: jarvis.micAvailable,
-    onWake: () => void jarvis.startRecording(),
+    onWake: () => {
+      // Le son du reveil avant le micro: c'est lui qui dit « je t'ecoute »,
+      // et il doit partir avant qu'on commence a enregistrer.
+      jarvis.sound.play("wake");
+      void jarvis.startRecording();
+    },
   });
   const [paletteOpen, setPaletteOpen] = useState(false);
 
-  const navigate = useCallback((next: ViewId) => {
-    setView(next);
-    setMenuOpen(false);
-  }, []);
+  const navigate = useCallback(
+    (next: ViewId) => {
+      jarvis.sound.play("tap");
+      setView(next);
+      setMenuOpen(false);
+    },
+    [jarvis.sound],
+  );
 
   const ask = useCallback(
     (question: string) => {
@@ -211,7 +220,8 @@ export default function App() {
             />
           )}
           {view === "settings" && (
-            <SettingsView system={jarvis.system} player={jarvis.player} wake={wake} />
+            <SettingsView system={jarvis.system} player={jarvis.player} wake={wake} sound={jarvis.sound}
+            />
           )}
         </div>
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchOverview, fetchSystem } from "./api";
 import { MicRecorder, SpeechPlayer } from "./audio";
+import { SoundKit } from "./sound";
 import type {
   AssistantState, ChatMessage, Citation, Overview, PendingAction, ServerEvent,
   SystemInfo, ToolActivity,
@@ -32,6 +33,7 @@ export function useJarvis() {
   const socket = useRef<JarvisSocket | null>(null);
   const recorder = useRef(new MicRecorder());
   const player = useRef(new SpeechPlayer());
+  const sound = useRef(new SoundKit());
   const streamingId = useRef<string | null>(null);
   const serverVoice = useRef(false);
   /** Niveau du micro, lu par le noyau a chaque image. */
@@ -80,6 +82,7 @@ export function useJarvis() {
     (event: ServerEvent) => {
       switch (event.type) {
         case "state":
+          sound.current.setMuted(event.state === "speaking");
           setState(event.state as AssistantState);
           setDetail((event.detail as string) ?? "");
           if (event.system) setSystem(event.system as SystemInfo);
@@ -132,6 +135,7 @@ export function useJarvis() {
           break;
 
         case "confirmation_required":
+          sound.current.play("alert");
           setPending(event.action as PendingAction);
           break;
 
@@ -150,6 +154,7 @@ export function useJarvis() {
             return [...current, { id: nextId(), role: "assistant", text, citations }];
           });
           streamingId.current = null;
+          sound.current.play("reply");
           if (!event.pending_confirmation) setPending(null);
           if (!serverVoice.current) {
             player.current.flushStreamedText(text, system?.language ?? "fr-CA");
@@ -165,6 +170,7 @@ export function useJarvis() {
           break;
 
         case "error":
+          sound.current.play("error");
           setError(event.message as string);
           streamingId.current = null;
           setMessages((current) => current.map((m) => ({ ...m, streaming: false })));
@@ -203,6 +209,7 @@ export function useJarvis() {
       setTranscript(text);
       setMessages((current) => [...current, { id: nextId(), role: "user", text }]);
       socket.current?.send({ type: "text", text });
+      sound.current.play("send");
       setState("understanding");
     },
     [bargeIn],
@@ -222,6 +229,10 @@ export function useJarvis() {
     try {
       await recorder.current.start();
       setRecording(true);
+      // `resume` ici et pas ailleurs: demarrer le micro est un geste de
+      // l'utilisateur, donc le seul moment ou le navigateur autorise l'audio.
+      void sound.current.resume();
+      sound.current.play("listen");
       setState("listening");
       // Le noyau lit ce niveau a chaque image: la boucle doit tourner tant
       // qu'on ecoute, et s'arreter ensuite.
@@ -231,6 +242,7 @@ export function useJarvis() {
       };
       levelRaf.current = requestAnimationFrame(follow);
     } catch {
+      sound.current.play("error");
       setError("Acces au micro refuse. Utilise le mode texte.");
     }
   }, [bargeIn, micAvailable, recording]);
@@ -270,6 +282,7 @@ export function useJarvis() {
   return {
     system, overview, messages, state, detail, transcript, activity, pending, error,
     recording, micAvailable, levelRef, lastTurn, player: player.current,
+    sound: sound.current,
     sendText, startRecording, stopRecording, decide, refreshSystem, refreshOverview,
     dismissError: () => setError(""),
   };

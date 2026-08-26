@@ -291,6 +291,20 @@ JARVIS muet.
 La reponse est synthetisee **phrase par phrase**: JARVIS commence a parler
 pendant que la suite s'ecrit encore.
 
+**Les sons de l'interface** — une pression quand tu cliques, un signal au
+reveil, un autre quand la reponse arrive. Tout est synthetise dans le
+navigateur: aucun fichier, aucun telechargement, et rien qui vienne d'une bande
+son existante. La case est dans **Reglages > Voix de reponse**.
+
+Ils se taisent completement pendant que JARVIS parle: un bip par-dessus la
+voix, c'est la voix qu'on perd. Pour les mesurer plutot que de les croire:
+
+```powershell
+cd ui
+npx vite --port 5199
+node scripts/probe-sound.mjs   # dans un second terminal
+```
+
 ### Connecter Gmail et Calendar
 
 Marche a suivre complete : **[docs/google-setup.md](docs/google-setup.md)**.

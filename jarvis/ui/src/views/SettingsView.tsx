@@ -17,6 +17,7 @@ import {
   type VoiceConfig,
 } from "../lib/api";
 import type { SpeechPlayer } from "../lib/audio";
+import type { SoundKit } from "../lib/sound";
 import type { WakeWordState } from "../lib/useWakeWord";
 import type { SystemInfo } from "../lib/types";
 
@@ -24,6 +25,7 @@ interface Props {
   system: SystemInfo | null;
   player: SpeechPlayer;
   wake: WakeWordState;
+  sound: SoundKit;
 }
 
 /** Reglages.
@@ -33,7 +35,7 @@ interface Props {
  * fonctionnalite. Les cles d'API, elles, n'apparaissent jamais ici — ni en
  * lecture ni en ecriture.
  */
-export function SettingsView({ system, player, wake }: Props) {
+export function SettingsView({ system, player, wake, sound }: Props) {
   const [voices, setVoices] = useState<{ name: string; lang: string; natural: boolean }[]>([]);
   const [selected, setSelected] = useState("");
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -51,6 +53,7 @@ export function SettingsView({ system, player, wake }: Props) {
   const [addressPick, setAddressPick] = useState("monsieur");
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceNote, setVoiceNote] = useState("");
+  const [soundOn, setSoundOn] = useState(() => sound.isEnabled());
 
   useEffect(() => {
     const refresh = () => {
@@ -357,6 +360,26 @@ export function SettingsView({ system, player, wake }: Props) {
                     ))}
                   </select>
                 </div>
+
+                <label className="switch-row">
+                  <input
+                    type="checkbox"
+                    checked={soundOn}
+                    onChange={(event) => {
+                      const on = event.target.checked;
+                      sound.setEnabled(on);
+                      setSoundOn(on);
+                      if (on) sound.play("tap");
+                    }}
+                  />
+                  <span className="switch-text">
+                    <span className="switch-label">Sons de l'interface</span>
+                    <span className="switch-desc">
+                      Une pression quand tu cliques, un signal au reveil, un autre
+                      quand la reponse arrive. Jamais pendant qu'il parle.
+                    </span>
+                  </span>
+                </label>
 
                 <label className="switch-row">
                   <input
