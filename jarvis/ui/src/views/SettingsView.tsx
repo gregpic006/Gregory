@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 
 import { Card } from "../components/Card";
-import { IconGear, IconMic } from "../components/layout/icons";
+import { IconGear, IconMic, IconRefresh } from "../components/layout/icons";
 import {
+  checkForUpdate,
   fetchMetrics,
   fetchSettings,
+  installUpdate,
   updateSettings,
   type MetricsSnapshot,
   type SettingsResponse,
+  type UpdateStatus,
 } from "../lib/api";
 import type { SpeechPlayer } from "../lib/audio";
 import type { WakeWordState } from "../lib/useWakeWord";
@@ -35,6 +38,9 @@ export function SettingsView({ system, player, wake }: Props) {
   const [pending, setPending] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateNote, setUpdateNote] = useState("");
 
   useEffect(() => {
     const refresh = () => {
@@ -56,7 +62,29 @@ export function SettingsView({ system, player, wake }: Props) {
       .catch(() => undefined);
     fetchMetrics().then(setMetrics).catch(() => undefined);
     fetchSettings().then(setConfig).catch(() => undefined);
+    checkForUpdate().then(setUpdate).catch(() => undefined);
   }, []);
+
+  const runUpdate = async () => {
+    setUpdating(true);
+    setUpdateNote("");
+    try {
+      const result = await installUpdate();
+      if (result.error) {
+        setUpdateNote(result.error);
+      } else if (result.restarted) {
+        // Le serveur redemarre: la page doit se recharger apres, pas avant.
+        setUpdateNote("Mise a jour installee. JARVIS redemarre…");
+        window.setTimeout(() => window.location.reload(), 6000);
+      } else {
+        setUpdateNote(result.detail);
+      }
+    } catch {
+      setUpdateNote("La mise a jour a echoue.");
+    } finally {
+      setUpdating(false);
+    }
+  };
 
   const toggle = async (key: string, enabled: boolean) => {
     setPending(key);
@@ -90,6 +118,49 @@ export function SettingsView({ system, player, wake }: Props) {
 
       {notice && <div className="banner info">{notice}</div>}
       {error && <div className="banner">{error}</div>}
+
+      {/* Hors de la grille des reglages: une mise a jour est une action,
+          pas une option, et elle occupe toute la largeur. */}
+      <div className="grid">
+        <Card
+          title="Mise a jour"
+          icon={<IconRefresh />}
+          count={update?.available ? "disponible" : ""}
+        >
+          <div className="stack">
+            {update === null ? (
+              <p className="card-empty">Verification…</p>
+            ) : update.error ? (
+              <p className="card-empty">{update.error}</p>
+            ) : update.blocked ? (
+              <p className="card-empty">{update.blocked}</p>
+            ) : update.available ? (
+              <>
+                <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6 }}>
+                  {update.behind} changement(s) disponible(s).
+                </p>
+                {update.changes.length > 0 && (
+                  <div className="stack" style={{ gap: 4 }}>
+                    {update.changes.slice(0, 5).map((line) => (
+                      <span className="card-empty" key={line}>
+                        · {line}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <button className="btn primary" onClick={runUpdate} disabled={updating}>
+                  {updating ? "Mise a jour…" : "Mettre a jour et redemarrer"}
+                </button>
+              </>
+            ) : (
+              <p className="card-empty">
+                JARVIS est a jour (version {update.current || "inconnue"}).
+              </p>
+            )}
+            {updateNote && <p className="card-empty">{updateNote}</p>}
+          </div>
+        </Card>
+      </div>
 
       <div className="grid">
         <Card title="Fonctionnalites" icon={<IconGear size={14} />}>

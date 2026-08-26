@@ -492,8 +492,31 @@ de ton compte : pas de service systeme, pas de droits administrateur.
 .\scripts\autostart.ps1 -Remove    # tout retirer
 ```
 
-Apres un `git pull`, lance `.\scripts\start.ps1` une fois : le demarrage
-automatique ne recompile pas l'interface.
+---
+
+### Mettre a jour JARVIS
+
+**Reglages > Mise a jour > Installer.** C'est tout.
+
+JARVIS regarde s'il existe une version plus recente, te montre ce qui a change,
+recupere le code, recompile l'interface et se relance seul. La page se recharge
+d'elle-meme au bout de quelques secondes. Aucune commande a taper.
+
+Trois refus volontaires, parce que ce bouton execute des commandes :
+
+- **Si tu as modifie des fichiers a la main**, la mise a jour est refusee plutot
+  que d'ecraser ton travail. Le message te le dit ; rien n'est perdu.
+- **Si l'historique a diverge**, elle s'arrete aussi : cette situation demande
+  un humain, pas une fusion automatique.
+- **Rien de ce que tu tapes n'entre dans une commande.** Les arguments sont des
+  constantes du code.
+
+Si l'interface ne se recompile pas, JARVIS le dit au lieu d'annoncer une
+reussite : le code serait a jour, l'interface non.
+
+Le bouton n'existe que si le dossier est un depot git. Le demarrage par
+`.\scripts\start.ps1` (ou `autostart.ps1`) sait relancer JARVIS apres une mise a
+jour ; si tu l'as lance autrement, relance-le une fois a la main.
 
 ---
 

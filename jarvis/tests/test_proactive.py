@@ -8,7 +8,7 @@ consultee.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -25,8 +25,18 @@ from jarvis_core.proactive import (
     watch_business,
     watch_reminders,
 )
+from jarvis_core.timeutils import now as now_in
 
 TIMEZONE = "America/Toronto"
+
+
+def _today() -> date:
+    """Date dans le fuseau de l'observateur.
+
+    Semer avec la date UTC decalerait les ages d'un jour le soir, quand
+    l'UTC a deja bascule mais pas Quebec.
+    """
+    return now_in(TIMEZONE).date()
 
 
 @dataclass
@@ -125,7 +135,7 @@ def test_business_that_went_quiet_is_an_alert(runtime: FakeRuntime) -> None:
     """Des donnees qui s'arretent, en revanche, meritent d'etre signalees."""
     store = BusinessStore(runtime.db)
     runtime.business = store
-    old_day = (datetime.now(UTC).date() - timedelta(days=20)).isoformat()
+    old_day = (_today() - timedelta(days=20)).isoformat()
     store.record([Fact("RESTAURANT_GA", "sales", old_day, 6000.0, source="csv")])
 
     alerts = watch_business(runtime)
@@ -138,8 +148,7 @@ def test_business_that_went_quiet_is_an_alert(runtime: FakeRuntime) -> None:
 def test_recent_business_data_is_not_an_alert(runtime: FakeRuntime) -> None:
     store = BusinessStore(runtime.db)
     runtime.business = store
-    today = datetime.now(UTC).date().isoformat()
-    store.record([Fact("RESTAURANT_GA", "sales", today, 6000.0, source="csv")])
+    store.record([Fact("RESTAURANT_GA", "sales", _today().isoformat(), 6000.0, source="csv")])
 
     assert watch_business(runtime) == []
 
@@ -191,7 +200,7 @@ async def test_collect_survives_a_broken_watcher(runtime: FakeRuntime) -> None:
     runtime.reminders = ExplodingReminders()
     store = BusinessStore(runtime.db)
     runtime.business = store
-    old_day = (datetime.now(UTC).date() - timedelta(days=30)).isoformat()
+    old_day = (_today() - timedelta(days=30)).isoformat()
     store.record([Fact("PORTAIL", "mrr", old_day, 42000.0, source="csv")])
 
     alerts = await collect_alerts(runtime)

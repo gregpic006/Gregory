@@ -22,7 +22,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from jarvis_core.config_sync import set_values
@@ -209,3 +209,53 @@ async def update_settings(
         "restart_needed": bool(changed),
         "reconnect_google": reconnect,
     }
+
+
+# --- mise a jour --------------------------------------------------------------
+
+
+@router.get("/update")
+async def check_for_update(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    """Y a-t-il une version plus recente ? Ne modifie rien."""
+    from jarvis_core.updater import check_update
+
+    return check_update(find_project_root()).as_dict()
+
+
+@router.post("/update")
+async def install_update(
+    background: BackgroundTasks, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    """Recupere la nouvelle version, recompile, puis redemarre.
+
+    Le redemarrage part en tache de fond: sans cela le processus mourrait
+    avant d'avoir repondu, et l'interface resterait sur un chargement infini
+    sans savoir si la mise a jour a reussi.
+    """
+    from jarvis_core.updater import apply_update
+
+    result = apply_update(find_project_root())
+    if result.updated and not result.error:
+        background.add_task(_restart_soon)
+        result.restarted = True
+    return result.as_dict()
+
+
+def _restart_soon() -> None:
+    """Quitte avec le code convenu, apres avoir laisse partir la reponse.
+
+    `start.ps1` relance alors le processus. Le delai laisse le temps au
+    navigateur de recevoir la reponse et d'afficher le message.
+    """
+    import os
+    import threading
+
+    from jarvis_core.updater import RESTART_EXIT_CODE
+
+    def stop() -> None:
+        logger.info("redemarrage apres mise a jour")
+        # `os._exit` plutot que sys.exit: on veut sortir du processus entier,
+        # sans laisser uvicorn intercepter et annuler l'arret.
+        os._exit(RESTART_EXIT_CODE)
+
+    threading.Timer(1.5, stop).start()

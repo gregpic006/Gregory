@@ -342,3 +342,32 @@ export async function archiveOrganization(id: string): Promise<void> {
     throw new Error(payload.detail || "retrait refuse");
   }
 }
+
+export interface UpdateStatus {
+  available: boolean;
+  behind: number;
+  clean: boolean;
+  current: string;
+  branch: string;
+  changes: string[];
+  error: string;
+  /** Raison pour laquelle la mise a jour est impossible, s'il y en a une. */
+  blocked: string;
+}
+
+export function checkForUpdate(): Promise<UpdateStatus> {
+  return get("/api/settings/update");
+}
+
+export interface UpdateResult {
+  updated: boolean;
+  restarted: boolean;
+  detail: string;
+  error: string;
+}
+
+export async function installUpdate(): Promise<UpdateResult> {
+  const response = await fetch("/api/settings/update", { method: "POST" });
+  if (!response.ok) throw new Error(`mise a jour refusee (${response.status})`);
+  return response.json();
+}

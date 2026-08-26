@@ -1013,7 +1013,87 @@ permissions reellement accordees.
 
 ---
 
-## 18. Ce que JARVIS ne fait pas encore
+## 18. Mise a jour depuis l'interface
+
+### Le probleme n'etait pas technique
+
+Le proprietaire de ce projet n'est pas developpeur. Chaque livraison lui
+demandait d'ouvrir un terminal, de taper `git pull`, puis de relancer un
+script. Deux commandes — mais deux commandes apres *chaque* changement, dans
+un outil qu'il n'utilise pour rien d'autre. C'est la source de frustration la
+plus constante de ce projet, et elle etait entierement de notre cote.
+
+`jarvis_core/updater.py` fait passer ces deux commandes de l'utilisateur a la
+machine: Reglages > Mise a jour > Installer.
+
+### Deux fonctions, une separation nette
+
+`check_update` ne modifie rien. Elle rapporte un `UpdateStatus`: version
+courante, branche, nombre de commits de retard, proprete de l'arbre, et la
+liste des changements a venir. C'est ce que l'interface affiche avant que
+l'utilisateur decide.
+
+`apply_update` execute: `git merge --ff-only @{upstream}`, puis `npm run
+build`. Elle **ne redemarre pas** — c'est a l'appelant de le faire, une fois
+la reponse HTTP partie. Un redemarrage a l'interieur de la fonction couperait
+la connexion avant que le navigateur sache si la mise a jour a reussi.
+
+### Trois garde-fous, parce que ce module execute des commandes
+
+**Aucune commande n'est composee a partir d'une saisie.** Les arguments sont
+des constantes du fichier, passes en liste a `subprocess.run` avec
+`shell=False`. Rien de ce que l'utilisateur tape n'entre dans une commande.
+
+**On ne met a jour qu'un depot propre.** Si `git status --porcelain` retourne
+quoi que ce soit, la mise a jour est refusee — pas reportee, refusee, avec le
+motif. Ecraser un travail qu'on ne comprend pas est pire que ne rien faire.
+`test_local_changes_block_the_update` verifie que le travail local survit.
+
+**Avance rapide seulement.** Pas de fusion, pas de rebase. Si l'historique a
+diverge, la situation demande un humain, et on le dit.
+
+### La racine du depot se cherche, ne se suppose pas
+
+La premiere version supposait que `jarvis/` etait la racine du depot. Selon la
+facon dont le projet a ete clone, c'est parfois un sous-dossier — et la mise a
+jour repondait alors « Ce dossier n'est pas un depot git » sur une copie
+parfaitement valide. `find_repo_root` remonte les parents jusqu'a trouver
+`.git`.
+
+L'interface, elle, se recompile depuis le dossier fourni, pas depuis la racine
+du depot: `ui/` vit sous `jarvis/`, pas forcement a la racine.
+
+### Le redemarrage passe par un code de sortie
+
+Un processus ne peut pas se remplacer proprement au milieu d'une requete. Il
+sort donc avec le code convenu **42**, et la boucle de `scripts/start.ps1` et
+`scripts/start.sh` le relance:
+
+```powershell
+while ($true) {
+  & $python -m jarvis_core.api.server
+  if ($LASTEXITCODE -ne 42) { break }
+}
+```
+
+`_restart_soon()` arme un `threading.Timer` de 1,5 s avant `os._exit(42)`: le
+navigateur recoit sa reponse, puis le processus tombe. La page se recharge
+d'elle-meme six secondes plus tard.
+
+Consequence assumee: lance autrement que par ces scripts, JARVIS s'arrete au
+lieu de redemarrer. C'est visible et reparable, contrairement a un processus
+qui se serait relance dans un etat incoherent.
+
+### Ce qui est dit quand ca echoue a moitie
+
+Si `git merge` reussit mais que `npm run build` echoue, le code est a jour et
+l'interface ne l'est pas. `apply_update` remonte alors l'erreur plutot que de
+declarer une reussite: annoncer « mis a jour » avec une interface d'hier serait
+exactement le genre de mensonge que le reste du projet s'interdit.
+
+---
+
+## 19. Ce que JARVIS ne fait pas encore
 
 Enonce explicitement pour eviter toute illusion :
 
