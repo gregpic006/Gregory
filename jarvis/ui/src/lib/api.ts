@@ -381,6 +381,8 @@ export interface VoiceChoice {
   gender: string;
   /** Generation recente: nettement plus naturelle. */
   modern: boolean;
+  /** Voix anglaise qui prononcera le francais avec son accent. */
+  british: boolean;
 }
 
 export interface DeliveryChoice {
@@ -401,6 +403,7 @@ export interface VoiceConfig {
   resolved: string;
   delivery: string;
   address: string;
+  accent: string;
   error: string;
 }
 
@@ -412,6 +415,7 @@ export interface VoiceChange {
   voice?: string;
   delivery?: string;
   address?: string;
+  accent?: string;
 }
 
 export async function saveVoice(change: VoiceChange): Promise<{ saved: boolean }> {

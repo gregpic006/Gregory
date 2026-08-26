@@ -7,6 +7,7 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { AlertBell, AlertPanel } from "./components/AlertPanel";
 import { TopBar } from "./components/layout/TopBar";
 import { useAlerts } from "./lib/useAlerts";
+import { Backdrop } from "./components/Backdrop";
 import { useWakeWord } from "./lib/useWakeWord";
 import { useJarvis } from "./lib/useJarvis";
 import type { ViewId } from "./lib/types";
@@ -143,6 +144,7 @@ export default function App() {
       data-fullscreen={fullscreen}
       data-menu={menuOpen}
     >
+      <Backdrop state={jarvis.state} />
       {menuOpen && (
         <div className="menu-scrim" onClick={() => setMenuOpen(false)} aria-hidden="true" />
       )}

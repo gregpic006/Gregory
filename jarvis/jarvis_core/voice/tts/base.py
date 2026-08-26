@@ -74,6 +74,7 @@ def build_tts(settings: Settings) -> TextToSpeechProvider:
             voice=settings.tts_edge_voice,
             rate=delivery.rate,
             pitch=delivery.pitch,
+            accent=settings.tts_accent,
         )
     if settings.tts_provider == "elevenlabs":
         from jarvis_core.voice.tts.elevenlabs_tts import ElevenLabsTTSProvider

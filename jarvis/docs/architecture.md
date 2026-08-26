@@ -1112,6 +1112,48 @@ mots, ralentis de 7 % et descendus de 12 Hz, sonnent poses. C'est pour cela que
 le moteur est passe cote serveur: le navigateur expose des voix, pas la
 prosodie.
 
+### L'accent avant le timbre
+
+La premiere version cherchait « une belle voix masculine quebecoise ». C'etait
+le mauvais objectif, et le proprietaire l'a dit en une phrase: *« c'est supposé
+être british comme un servant »*.
+
+JARVIS est un majordome anglais. Aucun reglage de debit ou de hauteur sur une
+voix quebecoise ne produira ce personnage.
+
+Le defaut etait structurel: `choose_voice` filtrait sur `Locale.startswith("fr")`,
+donc une voix britannique ne pouvait **jamais** gagner, quel que soit le
+barème. Les voix « Multilingual » de Microsoft gardent le timbre et l'accent de
+leur locale d'origine en parlant une autre langue — une voix `en-GB` qui dit du
+francais sonne comme un Anglais qui parle francais. Le filtre est donc devenu:
+
+    locale francaise  OU  voix multilingue
+
+Une voix `en-GB` **non** multilingue ne sait dire que de l'anglais; lui donner
+du francais produirait du charabia. C'est la seule regle dure du classement —
+tout le reste est une preference, celle-ci est un filtre.
+
+### Le genre domine le barème, volontairement
+
+Le classement donnait 100 points au genre et 200 a la locale exacte. Une voix
+feminine du bon accent passait donc devant une voix masculine. Pour un
+majordome, c'est le mauvais arbitrage — et un test l'a montre avant que
+quiconque l'entende.
+
+Le genre vaut maintenant 1000: hors d'atteinte de tout bonus d'accent. Les
+accents et la generation classent **a l'interieur** du genre.
+
+### Une voix epinglee ne doit pas rendre l'accent inoperant
+
+Un choix explicite de l'utilisateur gagne sur l'accent: c'est voulu. Mais
+demander un autre accent **sans nommer de voix** veut dire « choisis-en une qui
+correspond ». Sans relacher la voix epinglee, JARVIS gardait l'ancienne et le
+selecteur semblait casse. Trouve en exercant l'API reelle, pas en relisant le
+code.
+
+`set_accent` oublie aussi la voix deduite — sinon le changement n'aurait pris
+qu'au redemarrage suivant.
+
 ### Pourquoi edge-tts
 
 C'est le seul moteur de cette qualite qui ne demande **ni cle d'API ni compte**
@@ -1165,7 +1207,60 @@ memoire: sans le second, il faudrait redemarrer pour s'entendre.
 
 ---
 
-## 20. Ce que JARVIS ne fait pas encore
+## 20. Le son et le decor
+
+### Ce qui rend une piece vivante
+
+Dans la scene de l'atelier, ce qui donne l'impression que la machine est
+vivante n'est ni le timbre ni les hologrammes: c'est que **chaque geste
+repond**. L'interface n'avait aucun son. Un ecran silencieux, si beau soit-il,
+reste une page web.
+
+Sept signaux — pression, reveil, ecoute, envoi, reponse, alerte, erreur — tous
+synthetises a la volee avec l'API Web Audio. Aucun fichier, aucun
+telechargement, et rien qui vienne d'une bande son existante: les sons du film
+appartiennent a leur studio.
+
+### Des sons qu'on mesure au lieu de les croire
+
+C'est l'avantage decisif du son synthetise sur un fichier: le meme code rendu
+dans un `OfflineAudioContext` produit exactement le signal qui sortira des
+haut-parleurs. On peut donc **mesurer** duree, crete et hauteur.
+
+`ui/scripts/probe-sound.mjs` fait cette mesure et verifie quatre regles: joue
+quand actif, muet pendant que JARVIS parle, silencieux si desactive, reprend
+apres reactivation. Il sort en erreur si un son depasse 400 ms ou une crete de
+0.08 — « discret ou rien » devient une contrainte executable.
+
+### Le premier clic etait muet
+
+Les navigateurs refusent d'ouvrir un contexte audio avant un geste. `play`
+decouvrait l'absence de contexte, l'ouvrait, et laissait passer ce son-la —
+exactement celui qui apprend a l'utilisateur que l'interface repond.
+
+Le contexte s'arme maintenant au premier geste, quel qu'il soit, avec un
+ecouteur qui se retire ensuite. Trouve en pilotant un vrai navigateur; invisible
+a la lecture du code.
+
+### Un decor qui ne raconte rien
+
+Le fond holographique ne represente **aucune donnee**. C'est delibere: un decor
+qui imiterait des chiffres serait un mensonge visuel, exactement ce que le
+reste du projet s'interdit. Il suit l'etat de JARVIS — la piece s'eveille quand
+il travaille — et c'est la seule chose qu'il dit, parce qu'elle est vraie.
+
+La premiere version dessinait une grille en perspective, comme un sol qui
+fuit. Sur un tableau de bord, sa ligne d'horizon traversait les cartes comme
+une rayure. Une maille orthogonale, elle, se lit comme la structure d'un
+panneau holographique et ne rentre en conflit avec aucune mise en page.
+
+Trois contraintes: opacites sous 0.08 (si on la remarque en lisant, elle est
+ratee), arret complet quand l'onglet passe en arriere-plan, et grille fixe
+quand le systeme demande moins d'animations.
+
+---
+
+## 21. Ce que JARVIS ne fait pas encore
 
 Enonce explicitement pour eviter toute illusion :
 

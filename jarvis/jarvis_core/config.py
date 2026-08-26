@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     # Voix neuronales Microsoft: aucune cle, aucun compte. Voix vide = la
     # meilleure voix francaise disponible est choisie au premier usage.
     tts_edge_voice: str = Field(default="", alias="JARVIS_TTS_EDGE_VOICE")
+    #: Accent recherche quand la voix est choisie automatiquement:
+    #: "britannique" (celui du film) ou "quebecois".
+    tts_accent: str = Field(default="britannique", alias="JARVIS_TTS_ACCENT")
     #: Nom d'une tenue de voix (debit + hauteur). Voir voice/delivery.py.
     tts_delivery: str = Field(default="jarvis", alias="JARVIS_TTS_DELIVERY")
     #: Registre d'adresse: "monsieur" (celui des films) ou "familier".

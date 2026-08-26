@@ -16,9 +16,12 @@ from jarvis_core.config import Settings
 from jarvis_core.voice.delivery import DELIVERIES, JARVIS, get_delivery
 from jarvis_core.voice.tts.base import build_tts
 from jarvis_core.voice.tts.edge_tts_provider import (
+    BRITISH,
     PITCH_PATTERN,
+    QUEBEC,
     RATE_PATTERN,
     EdgeTTSProvider,
+    can_speak_french,
     choose_voice,
     rank_voice,
 )
@@ -31,23 +34,70 @@ CATALOGUE: list[dict[str, Any]] = [
     {"ShortName": "fr-CA-AntoineNeural", "Locale": "fr-CA", "Gender": "Male"},
     {"ShortName": "fr-CA-ThierryMultilingualNeural", "Locale": "fr-CA", "Gender": "Male"},
     {"ShortName": "en-US-AndrewNeural", "Locale": "en-US", "Gender": "Male"},
+    # Voix anglaises. Seules les « Multilingual » savent dire du francais.
+    {"ShortName": "en-GB-RyanNeural", "Locale": "en-GB", "Gender": "Male"},
+    {"ShortName": "en-GB-OllieMultilingualNeural", "Locale": "en-GB", "Gender": "Male"},
+    {"ShortName": "en-GB-AdaMultilingualNeural", "Locale": "en-GB", "Gender": "Female"},
 ]
 
 
-def test_a_male_quebec_voice_of_the_newer_generation_wins() -> None:
-    """L'ordre des criteres: masculin, puis recent, puis quebecois."""
-    assert choose_voice(CATALOGUE) == "fr-CA-ThierryMultilingualNeural"
+def test_the_default_voice_is_a_british_butler() -> None:
+    """C'est la correction la plus importante de ce module.
+
+    JARVIS est un majordome anglais. Une voix quebecoise, si posee soit-elle,
+    ne sera jamais ce personnage. Une voix `en-GB` multilingue prononce le
+    francais avec son accent d'origine: c'est exactement l'effet du film.
+    """
+    assert choose_voice(CATALOGUE) == "en-GB-OllieMultilingualNeural"
+
+
+def test_a_quebec_voice_still_wins_when_that_accent_is_asked_for() -> None:
+    """L'accent britannique est un defaut, pas une obligation."""
+    assert choose_voice(CATALOGUE, accent=QUEBEC) == "fr-CA-ThierryMultilingualNeural"
+
+
+def test_an_english_voice_that_cannot_speak_french_is_never_chosen() -> None:
+    """Une voix `en-GB` ordinaire ne dit que de l'anglais.
+
+    Lui donner du francais produirait du charabia. C'est la seule regle dure
+    du classement: tout le reste est une preference, celle-ci est un filtre.
+    """
+    only_english = [
+        {"ShortName": "en-GB-RyanNeural", "Locale": "en-GB", "Gender": "Male"},
+    ]
+    assert choose_voice(only_english) == ""
+    assert can_speak_french(only_english[0]) is False
+
+
+def test_a_male_english_voice_outranks_a_female_english_one() -> None:
+    """Le genre passe avant l'accent: c'est ce qu'on entend en premier."""
+    male = next(v for v in CATALOGUE if v["ShortName"] == "en-GB-OllieMultilingualNeural")
+    female = next(v for v in CATALOGUE if v["ShortName"] == "en-GB-AdaMultilingualNeural")
+    assert rank_voice(male, accent=BRITISH) > rank_voice(female, accent=BRITISH)
+
+
+def test_without_any_english_voice_the_choice_stays_french() -> None:
+    """Un catalogue sans voix anglaise ne doit pas laisser JARVIS muet."""
+    french_only = [v for v in CATALOGUE if str(v["Locale"]).startswith("fr")]
+    assert choose_voice(french_only) == "fr-CA-ThierryMultilingualNeural"
 
 
 def test_a_female_voice_never_outranks_a_male_one() -> None:
-    """Le genre pese plus que la generation: c'est ce qu'on entend d'abord."""
+    """Aucun bonus d'accent ne doit pouvoir renverser le genre.
+
+    Le classement a longtemps donne 200 points a la locale exacte contre 100
+    au genre: une voix feminine du bon accent passait alors devant une voix
+    masculine. Pour un majordome, c'est le mauvais arbitrage.
+    """
     modern_female = {
         "ShortName": "fr-CA-XMultilingualNeural",
         "Locale": "fr-CA",
         "Gender": "Female",
     }
     plain_male = {"ShortName": "fr-FR-YNeural", "Locale": "fr-FR", "Gender": "Male"}
-    assert rank_voice(plain_male) > rank_voice(modern_female)
+    # Vrai quel que soit l'accent demande: le genre domine les deux baremes.
+    for accent in (BRITISH, QUEBEC):
+        assert rank_voice(plain_male, accent=accent) > rank_voice(modern_female, accent=accent)
 
 
 def test_no_voice_name_is_hardcoded_anywhere() -> None:
@@ -70,8 +120,17 @@ def test_an_empty_catalogue_is_not_a_crash() -> None:
 
 
 def test_a_catalogue_without_french_falls_back_to_silence_not_english() -> None:
-    """Mieux vaut la voix du systeme qu'un JARVIS qui parle anglais."""
-    assert choose_voice([CATALOGUE[-1]]) == ""
+    """Mieux vaut la voix du systeme qu'un JARVIS qui baragouine.
+
+    Une voix anglaise non multilingue ne sait pas prononcer le francais: on
+    prefere rendre la main au navigateur plutot que produire du charabia.
+    """
+    english_only = [
+        v for v in CATALOGUE
+        if str(v["Locale"]).startswith("en") and "Multilingual" not in str(v["ShortName"])
+    ]
+    assert english_only, "le catalogue de test doit contenir ce cas"
+    assert choose_voice(english_only) == ""
 
 
 @pytest.mark.asyncio
@@ -121,7 +180,7 @@ async def test_the_resolved_voice_is_looked_up_once() -> None:
     first = await provider.resolve_voice()
     second = await provider.resolve_voice()
 
-    assert first == second == "fr-CA-ThierryMultilingualNeural"
+    assert first == second == "en-GB-OllieMultilingualNeural"
     assert calls == 1
 
 
@@ -281,7 +340,7 @@ async def test_the_delivery_is_actually_sent_to_the_engine(fake_engine: None) ->
 
     assert _FakeCommunicate.last["rate"] == JARVIS.rate
     assert _FakeCommunicate.last["pitch"] == JARVIS.pitch
-    assert _FakeCommunicate.last["voice"] == "fr-CA-ThierryMultilingualNeural"
+    assert _FakeCommunicate.last["voice"] == "en-GB-OllieMultilingualNeural"
 
 
 @pytest.mark.asyncio
@@ -345,3 +404,59 @@ def test_a_deliberate_engine_choice_is_never_overwritten(tmp_path: Any) -> None:
     _, env = _setup_in(tmp_path, "elevenlabs")
     assert "JARVIS_TTS_PROVIDER=elevenlabs" in env
     assert "edge" not in env
+
+
+@pytest.mark.asyncio
+async def test_changing_accent_forgets_the_voice_it_had_deduced() -> None:
+    """Sinon le reglage aurait l'air d'avoir pris sans rien changer."""
+    provider = EdgeTTSProvider(accent=BRITISH)
+
+    async def catalogue() -> list[dict[str, Any]]:
+        return CATALOGUE
+
+    provider.list_voices = catalogue  # type: ignore[method-assign]
+    assert await provider.resolve_voice() == "en-GB-OllieMultilingualNeural"
+
+    provider.set_accent(QUEBEC)
+    assert await provider.resolve_voice() == "fr-CA-ThierryMultilingualNeural"
+
+
+def test_changing_accent_releases_a_voice_pinned_under_the_old_one(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sinon le selecteur d'accent semble ne rien faire.
+
+    Une voix choisie explicitement gagne sur l'accent — c'est voulu. Mais
+    demander un autre accent sans nommer de voix veut dire « choisis-en une
+    qui correspond »: la voix epinglee doit alors etre relachee, sans quoi
+    JARVIS garde l'ancienne et l'utilisateur conclut que le reglage est casse.
+    """
+    from fastapi.testclient import TestClient
+
+    from jarvis_core.api.app import create_app
+    from jarvis_core.voice.tts import edge_tts_provider
+
+    class _Edge:
+        Communicate = _FakeCommunicate
+
+        @staticmethod
+        async def list_voices() -> list[dict[str, Any]]:
+            return CATALOGUE
+
+    monkeypatch.setattr(edge_tts_provider, "_edge_tts", lambda: _Edge)
+    monkeypatch.setenv("JARVIS_TTS_PROVIDER", "edge")
+    # `.env` est reecrit par la route: on l'isole dans un dossier temporaire.
+    (tmp_path / ".env").write_text("JARVIS_TTS_PROVIDER=edge\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "jarvis_core.api.routes_settings.find_project_root", lambda: tmp_path
+    )
+
+    with TestClient(create_app()) as client:
+        client.post("/api/settings/voice", json={"voice": "fr-CA-AntoineNeural"})
+        assert client.get("/api/settings/voice").json()["resolved"] == "fr-CA-AntoineNeural"
+
+        client.post("/api/settings/voice", json={"accent": "britannique"})
+        assert (
+            client.get("/api/settings/voice").json()["resolved"]
+            == "en-GB-OllieMultilingualNeural"
+        )

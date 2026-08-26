@@ -244,6 +244,7 @@ variables. Les essentielles :
 | `JARVIS_LLM_DAILY_BUDGET_USD` | `5.0` | Coupure nette au-dela. `0` = illimite. |
 | `JARVIS_STT_PROVIDER` | `null` | `openai`, `faster_whisper` (local) ou `null`. |
 | `JARVIS_TTS_PROVIDER` | `edge` | `edge` (gratuit, neuronal), `elevenlabs`, `openai`, `null`. |
+| `JARVIS_TTS_ACCENT` | `britannique` | `britannique` (le majordome) ou `quebecois`. |
 | `JARVIS_TTS_DELIVERY` | `jarvis` | Tenue de la voix: `jarvis`, `grave`, `vif`, `neutre`. |
 | `JARVIS_PERSONA_ADDRESS` | `monsieur` | `monsieur` (vouvoiement) ou `familier` (tutoiement). |
 | `JARVIS_TIMEZONE` | `America/Montreal` | Utilise pour tous les calculs de date. |
@@ -274,6 +275,16 @@ variables. Les essentielles :
 - `elevenlabs` — timbre le plus fin, reglable via `JARVIS_TTS_STABILITY` et
   `JARVIS_TTS_STYLE`. Payant.
 
+**L'accent d'abord.** JARVIS est un majordome anglais. Une voix quebecoise,
+si posee soit-elle, ne sera jamais ce personnage. Les voix « Multilingual » de
+Microsoft gardent le timbre et l'accent de leur langue d'origine en parlant
+une autre langue: une voix `en-GB` qui dit du francais **sonne comme un
+Anglais qui parle francais**. C'est exactement l'effet du film, et c'est le
+defaut (`JARVIS_TTS_ACCENT=britannique`; `quebecois` pour l'autre).
+
+Une voix anglaise **non** multilingue n'est jamais retenue: elle ne sait pas
+prononcer le francais.
+
 **Le timbre ne fait pas la voix.** Ce qui identifie JARVIS dans les films,
 c'est la tenue: un debit un peu en dessous du naturel, une hauteur basse,
 aucune emphase. `JARVIS_TTS_DELIVERY` regle ca — `jarvis` (defaut), `grave`,
@@ -290,6 +301,12 @@ JARVIS muet.
 
 La reponse est synthetisee **phrase par phrase**: JARVIS commence a parler
 pendant que la suite s'ecrit encore.
+
+**Le fond holographique** — une maille bleue tres faible, un balayage lent,
+une lueur qui s'eteint sur les bords. Il ne represente **aucune donnee**: un
+decor qui imiterait des chiffres serait un mensonge visuel. Il suit l'etat de
+JARVIS, et rien d'autre. Il respecte « animations reduites » du systeme et
+s'arrete quand l'onglet passe en arriere-plan.
 
 **Les sons de l'interface** — une pression quand tu cliques, un signal au
 reveil, un autre quand la reponse arrive. Tout est synthetise dans le

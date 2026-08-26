@@ -274,6 +274,8 @@ class VoiceChange(BaseModel):
     delivery: str = Field(default="", max_length=40)
     #: "monsieur" ou "familier". Le registre fait autant que le timbre.
     address: str = Field(default="", max_length=20)
+    #: "britannique" ou "quebecois". Recalcule la voix choisie automatiquement.
+    accent: str = Field(default="", max_length=20)
 
 
 @router.get("/voice")
@@ -292,6 +294,7 @@ async def read_voice(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str,
         "delivery": get_delivery(settings.tts_delivery).key,
         "voice": settings.tts_edge_voice,
         "address": settings.persona_address,
+        "accent": settings.tts_accent,
         "resolved": "",
         "voices": [],
         "error": "",
@@ -329,6 +332,7 @@ async def change_voice(
     faudrait relancer JARVIS pour s'entendre.
     """
     from jarvis_core.voice.delivery import get_delivery
+    from jarvis_core.voice.tts.edge_tts_provider import BRITISH, QUEBEC
 
     values: dict[str, str] = {}
     if change.voice:
@@ -340,6 +344,14 @@ async def change_voice(
     address = change.address.strip().lower()
     if address in {"monsieur", "familier"}:
         values["JARVIS_PERSONA_ADDRESS"] = address
+    accent = change.accent.strip().lower()
+    if accent in {BRITISH, QUEBEC}:
+        values["JARVIS_TTS_ACCENT"] = accent
+        if not change.voice:
+            # Changer d'accent sans nommer de voix veut dire « choisis-en une
+            # qui correspond ». Une voix epinglee au tour precedent gagnerait
+            # sinon sur l'accent, et le selecteur semblerait ne rien faire.
+            values["JARVIS_TTS_EDGE_VOICE"] = ""
     if not values:
         raise HTTPException(status_code=400, detail="Rien a changer.")
 
@@ -363,6 +375,14 @@ async def change_voice(
         # Le prompt systeme est reconstruit a chaque tour: changer le reglage
         # en memoire suffit pour que la phrase suivante en tienne compte.
         runtime.settings.persona_address = address
+    if accent in {BRITISH, QUEBEC}:
+        runtime.settings.tts_accent = accent
+        if not change.voice:
+            runtime.settings.tts_edge_voice = ""
+        if provider is not None and getattr(provider, "name", "") == "edge":
+            if not change.voice:
+                provider.configured_voice = ""
+            provider.set_accent(accent)
 
     return {"saved": True, "applied": applied}
 

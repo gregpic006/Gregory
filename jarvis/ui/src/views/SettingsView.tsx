@@ -51,6 +51,7 @@ export function SettingsView({ system, player, wake, sound }: Props) {
   const [voicePick, setVoicePick] = useState("");
   const [deliveryPick, setDeliveryPick] = useState("");
   const [addressPick, setAddressPick] = useState("monsieur");
+  const [accentPick, setAccentPick] = useState("britannique");
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceNote, setVoiceNote] = useState("");
   const [soundOn, setSoundOn] = useState(() => sound.isEnabled());
@@ -84,6 +85,7 @@ export function SettingsView({ system, player, wake, sound }: Props) {
         setVoicePick(config.voice || config.resolved);
         setDeliveryPick(config.delivery);
         setAddressPick(config.address === "familier" ? "familier" : "monsieur");
+        setAccentPick(config.accent || "britannique");
       })
       .catch(() => undefined);
   }, []);
@@ -107,7 +109,12 @@ export function SettingsView({ system, player, wake, sound }: Props) {
     setVoiceBusy(true);
     setVoiceNote("");
     try {
-      await saveVoice({ voice: voicePick, delivery: deliveryPick, address: addressPick });
+      await saveVoice({
+        voice: voicePick,
+        delivery: deliveryPick,
+        address: addressPick,
+        accent: accentPick,
+      });
       setVoiceNote("Voix enregistree. Elle vaut des la prochaine phrase.");
     } catch (cause) {
       setVoiceNote(cause instanceof Error ? cause.message : "Enregistrement impossible.");
@@ -329,6 +336,31 @@ export function SettingsView({ system, player, wake, sound }: Props) {
             ) : (
               <>
                 <div className="field">
+                  <label htmlFor="voice-accent">Accent</label>
+                  <select
+                    id="voice-accent"
+                    className="input"
+                    value={accentPick}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      setAccentPick(next);
+                      // La liste est classee selon l'accent: on remonte la
+                      // meilleure voix du nouvel accent, sinon le timbre
+                      // affiche resterait celui de l'ancien.
+                      const best = voiceConfig.voices.find((voice) =>
+                        next === "britannique" ? voice.british : voice.locale.startsWith("fr"),
+                      );
+                      if (best) setVoicePick(best.id);
+                    }}
+                  >
+                    <option value="britannique">
+                      Britannique — le majordome des films
+                    </option>
+                    <option value="quebecois">Quebecois</option>
+                  </select>
+                </div>
+
+                <div className="field">
                   <label htmlFor="voice-pick">Timbre</label>
                   <select
                     id="voice-pick"
@@ -338,7 +370,7 @@ export function SettingsView({ system, player, wake, sound }: Props) {
                   >
                     {voiceConfig.voices.map((voice) => (
                       <option key={voice.id} value={voice.id}>
-                        {voice.modern ? "★ " : ""}
+                        {voice.british ? "★ " : ""}
                         {voice.label} — {voice.gender === "Male" ? "homme" : "femme"}
                       </option>
                     ))}
