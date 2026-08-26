@@ -65,6 +65,16 @@ def split_sentences(text: str, *, max_chars: int = 240) -> list[str]:
 
 def build_tts(settings: Settings) -> TextToSpeechProvider:
     """Instancie le moteur declare en configuration."""
+    if settings.tts_provider == "edge":
+        from jarvis_core.voice.delivery import get_delivery
+        from jarvis_core.voice.tts.edge_tts_provider import EdgeTTSProvider
+
+        delivery = get_delivery(settings.tts_delivery)
+        return EdgeTTSProvider(
+            voice=settings.tts_edge_voice,
+            rate=delivery.rate,
+            pitch=delivery.pitch,
+        )
     if settings.tts_provider == "elevenlabs":
         from jarvis_core.voice.tts.elevenlabs_tts import ElevenLabsTTSProvider
 

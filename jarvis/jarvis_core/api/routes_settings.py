@@ -259,3 +259,155 @@ def _restart_soon() -> None:
         os._exit(RESTART_EXIT_CODE)
 
     threading.Timer(1.5, stop).start()
+
+
+# ------------------------------------------------------------------- la voix
+#
+# Choisir une voix se fait par l'oreille, pas par la documentation. Ces routes
+# existent pour qu'on puisse comparer et entendre, sans jamais ouvrir .env.
+
+
+class VoiceChange(BaseModel):
+    """Voix, tenue et registre demandes."""
+
+    voice: str = Field(default="", max_length=120)
+    delivery: str = Field(default="", max_length=40)
+    #: "monsieur" ou "familier". Le registre fait autant que le timbre.
+    address: str = Field(default="", max_length=20)
+
+
+@router.get("/voice")
+async def read_voice(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    """Voix disponibles, voix retenue, tenues proposees.
+
+    Le catalogue vient du service, jamais d'une liste ecrite ici: une liste
+    figee finirait par proposer des voix qui n'existent plus.
+    """
+    from jarvis_core.voice.delivery import DELIVERIES, get_delivery
+
+    settings = runtime.settings
+    payload: dict[str, Any] = {
+        "provider": settings.tts_provider,
+        "deliveries": [d.as_dict() for d in DELIVERIES],
+        "delivery": get_delivery(settings.tts_delivery).key,
+        "voice": settings.tts_edge_voice,
+        "address": settings.persona_address,
+        "resolved": "",
+        "voices": [],
+        "error": "",
+    }
+
+    provider = getattr(runtime, "tts", None)
+    if settings.tts_provider != "edge" or provider is None:
+        payload["error"] = (
+            "Le choix de la voix ne s'applique qu'au moteur neuronal (edge)."
+        )
+        return payload
+
+    try:
+        voices = await provider.french_voices()
+        payload["voices"] = [v.as_dict() for v in voices]
+        payload["resolved"] = await provider.resolve_voice()
+    except Exception as exc:  # noqa: BLE001 - une panne se dit, ne s'invente pas
+        logger.warning("catalogue de voix indisponible: %s", exc)
+
+    if not payload["voices"]:
+        payload["error"] = (
+            "Impossible de joindre le service de voix. Verifie ta connexion."
+        )
+    return payload
+
+
+@router.post("/voice")
+async def change_voice(
+    change: VoiceChange, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    """Enregistre le choix et l'applique immediatement.
+
+    Ecrit dans .env pour que le choix survive au redemarrage, et met a jour le
+    moteur en memoire pour qu'il vaille des la phrase suivante — sans quoi il
+    faudrait relancer JARVIS pour s'entendre.
+    """
+    from jarvis_core.voice.delivery import get_delivery
+
+    values: dict[str, str] = {}
+    if change.voice:
+        values["JARVIS_TTS_EDGE_VOICE"] = change.voice
+    delivery = None
+    if change.delivery:
+        delivery = get_delivery(change.delivery)
+        values["JARVIS_TTS_DELIVERY"] = delivery.key
+    address = change.address.strip().lower()
+    if address in {"monsieur", "familier"}:
+        values["JARVIS_PERSONA_ADDRESS"] = address
+    if not values:
+        raise HTTPException(status_code=400, detail="Rien a changer.")
+
+    set_values(find_project_root() / ".env", values)
+
+    provider = getattr(runtime, "tts", None)
+    applied = False
+    if provider is not None and getattr(provider, "name", "") == "edge":
+        if change.voice:
+            provider.configured_voice = change.voice
+        if delivery is not None:
+            provider.rate = delivery.rate
+            provider.pitch = delivery.pitch
+        applied = True
+
+    if change.voice:
+        runtime.settings.tts_edge_voice = change.voice
+    if delivery is not None:
+        runtime.settings.tts_delivery = delivery.key
+    if address in {"monsieur", "familier"}:
+        # Le prompt systeme est reconstruit a chaque tour: changer le reglage
+        # en memoire suffit pour que la phrase suivante en tienne compte.
+        runtime.settings.persona_address = address
+
+    return {"saved": True, "applied": applied}
+
+
+@router.post("/voice/test")
+async def test_voice(
+    change: VoiceChange, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    """Fait entendre une phrase avec les reglages demandes, sans les enregistrer.
+
+    Comparer avant de choisir: c'est la seule facon honnete de regler une voix.
+    """
+    import base64
+
+    from jarvis_core.voice.delivery import get_delivery
+
+    provider = getattr(runtime, "tts", None)
+    if provider is None or getattr(provider, "name", "") != "edge":
+        raise HTTPException(status_code=400, detail="Le moteur neuronal n'est pas actif.")
+
+    # Reglages d'essai poses le temps de la phrase, puis rendus tels quels:
+    # ecouter ne doit rien changer tant qu'on n'a pas choisi.
+    before = (provider.rate, provider.pitch)
+    if change.delivery:
+        delivery = get_delivery(change.delivery)
+        provider.rate, provider.pitch = delivery.rate, delivery.pitch
+    try:
+        audio = await provider.synthesize(SAMPLE_LINE, voice=change.voice or None)
+    finally:
+        provider.rate, provider.pitch = before
+
+    if audio is None:
+        raise HTTPException(
+            status_code=502,
+            detail="Le service de voix n'a rien renvoye. Verifie ta connexion.",
+        )
+    return {
+        "audio": base64.b64encode(audio.data).decode("ascii"),
+        "mime": audio.mime,
+    }
+
+
+#: Phrase d'essai. Assez longue pour juger le debit, assez courte pour la
+#: reecouter dix fois de suite sans s'agacer.
+SAMPLE_LINE = (
+    "Bonsoir Monsieur. Tous les systemes sont operationnels. "
+    "Je vous ecoute."
+)

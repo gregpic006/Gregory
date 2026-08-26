@@ -22,6 +22,10 @@ dependencies = [
     # Code QR affiche dans le terminal pour l'acces depuis le telephone:
     # taper une URL avec un jeton de 32 caracteres est une source d'erreurs.
     "qrcode>=7.4",
+    # Voix neuronales Microsoft. Obligatoire, pas optionnelle: c'est la voix
+    # par defaut, et personne ne doit avoir a installer quoi que ce soit pour
+    # entendre JARVIS correctement.
+    "edge-tts>=7.0",
 ]
 
 [project.optional-dependencies]

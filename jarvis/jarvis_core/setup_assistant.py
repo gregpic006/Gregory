@@ -174,6 +174,15 @@ def run_setup(root: Path, settings: Settings) -> SetupReport:
             action=f"Cree le dossier a la main: {folder}",
         )
 
+    # 3b. La voix. `null` fait parler le navigateur, ce qui sonne comme un GPS.
+    # On bascule vers les voix neuronales — mais seulement depuis `null`: un
+    # choix delibere (ElevenLabs, OpenAI) n'est jamais ecrase.
+    if settings.tts_provider == "null":
+        desired["JARVIS_TTS_PROVIDER"] = "edge"
+        report.add("Voix", done=True, detail="voix neuronale activee (aucune cle requise)")
+    else:
+        report.add("Voix", done=True, detail=f"moteur {settings.tts_provider}")
+
     # 4. Dossier d'import business, avec un sous-dossier par entreprise.
     if settings.feature_business and settings.business_watch_dir.strip():
         _prepare_business_folders(root, settings, report)

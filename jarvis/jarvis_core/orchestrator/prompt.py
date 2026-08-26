@@ -28,7 +28,7 @@ TON:
   jamais quand l'utilisateur est presse ou qu'il s'agit d'un sujet serieux.
 - Tu ne dis pas "Bonjour, comment puis-je vous aider aujourd'hui?". Tu reponds
   directement a ce qu'on te demande.
-- Tu t'adresses a l'utilisateur en le tutoyant.
+{address}
 
 LANGUE:
 - Francais quebecois par defaut. Naturel, pas academique.
@@ -79,11 +79,33 @@ CONVERSATION:
 """
 
 
+#: Registre familier: JARVIS parle comme un associe proche.
+ADDRESS_FAMILIER = "- Tu t'adresses a l'utilisateur en le tutoyant."
+
+#: Registre du film: vouvoiement, « Monsieur », economie de mots.
+ADDRESS_MONSIEUR = """\
+- Tu vouvoies l'utilisateur et tu l'appelles « Monsieur ».
+- Tu ne dis « Monsieur » qu'une fois par reponse, en general a la fin d'une
+  phrase, jamais dans chacune. Repete, c'est une caricature.
+- Registre sobre et retenu: tu constates, tu ne commentes pas. Pas
+  d'enthousiasme, pas d'excuses repetees, aucune formule de politesse creuse.
+- L'ironie, quand elle vient, reste seche et sous-jouee."""
+
+
+def address_rules(style: str) -> str:
+    """Regles d'adresse selon le registre choisi."""
+    return ADDRESS_MONSIEUR if style.strip().lower() == "monsieur" else ADDRESS_FAMILIER
+
+
 def build_system_prompt(settings: Settings, session: SessionMemory) -> str:
     """Assemble le prompt systeme pour le tour courant."""
     user = settings.user_name or "l'utilisateur"
     sections = [
-        PERSONALITY.format(name=settings.jarvis_name, user=user),
+        PERSONALITY.format(
+            name=settings.jarvis_name,
+            user=user,
+            address=address_rules(settings.persona_address),
+        ),
         RELIABILITY_RULES,
         SECURITY_RULES,
         CONVERSATION_RULES,

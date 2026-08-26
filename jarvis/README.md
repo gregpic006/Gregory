@@ -243,7 +243,9 @@ variables. Les essentielles :
 | `JARVIS_LLM_MODEL_FAST` | `claude-haiku-4-5` | Petit modele pour les tours triviaux. |
 | `JARVIS_LLM_DAILY_BUDGET_USD` | `5.0` | Coupure nette au-dela. `0` = illimite. |
 | `JARVIS_STT_PROVIDER` | `null` | `openai`, `faster_whisper` (local) ou `null`. |
-| `JARVIS_TTS_PROVIDER` | `null` | `elevenlabs`, `openai` ou `null` (voix du systeme). |
+| `JARVIS_TTS_PROVIDER` | `edge` | `edge` (gratuit, neuronal), `elevenlabs`, `openai`, `null`. |
+| `JARVIS_TTS_DELIVERY` | `jarvis` | Tenue de la voix: `jarvis`, `grave`, `vif`, `neutre`. |
+| `JARVIS_PERSONA_ADDRESS` | `monsieur` | `monsieur` (vouvoiement) ou `familier` (tutoiement). |
 | `JARVIS_TIMEZONE` | `America/Montreal` | Utilise pour tous les calculs de date. |
 | `JARVIS_DRY_RUN` | `true` | Simule les actions externes. **Passe a `false` seulement quand tu es pret.** |
 | `JARVIS_AUTO_APPROVE_MAX_LEVEL` | `1` | Palier maximum sans confirmation. Plafonne a 2 : les paliers 3 et 4 exigent toujours un accord. |
@@ -263,13 +265,28 @@ variables. Les essentielles :
 
 **Voix (TTS)** — guide complet : **[docs/voice-setup.md](docs/voice-setup.md)**
 
-- `null` (defaut) — le navigateur lit avec la voix du systeme. Gratuit. JARVIS
-  choisit automatiquement la meilleure voix francaise installee, en
-  privilegiant les voix « Natural » de Windows.
+- `edge` (defaut) — les voix neuronales de Microsoft. **Gratuit, sans cle ni
+  compte.** C'est le seul moteur de cette qualite qui ne demande rien, et il
+  permet de regler le debit et la hauteur — ce que le navigateur ne fait pas.
+- `null` — le navigateur lit avec la voix du systeme. Repli automatique quand
+  le service neuronal n'est pas joignable.
 - `openai` — `gpt-4o-mini-tts`, voix `onyx` (masculine, posee). ~1 $/mois.
-- `elevenlabs` — le timbre le plus proche du JARVIS des films: masculin,
-  britannique, pose. Latence la plus basse. Timbre reglable via
-  `JARVIS_TTS_STABILITY` et `JARVIS_TTS_STYLE`.
+- `elevenlabs` — timbre le plus fin, reglable via `JARVIS_TTS_STABILITY` et
+  `JARVIS_TTS_STYLE`. Payant.
+
+**Le timbre ne fait pas la voix.** Ce qui identifie JARVIS dans les films,
+c'est la tenue: un debit un peu en dessous du naturel, une hauteur basse,
+aucune emphase. `JARVIS_TTS_DELIVERY` regle ca — `jarvis` (defaut), `grave`,
+`vif` ou `neutre` — et **Reglages > Voix de reponse** laisse comparer a
+l'oreille avant de choisir.
+
+**Le registre non plus.** `JARVIS_PERSONA_ADDRESS=monsieur` (defaut) fait
+vouvoyer et dire « Monsieur », comme dans les films. `familier` revient au
+tutoiement. La case est dans la meme carte des Reglages.
+
+Aucun nom de voix n'est ecrit en dur: le catalogue est demande au service et
+filtre par attributs. Une voix qui disparait du catalogue ne rend donc jamais
+JARVIS muet.
 
 La reponse est synthetisee **phrase par phrase**: JARVIS commence a parler
 pendant que la suite s'ecrit encore.

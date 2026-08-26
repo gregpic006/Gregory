@@ -1093,7 +1093,79 @@ exactement le genre de mensonge que le reste du projet s'interdit.
 
 ---
 
-## 19. Ce que JARVIS ne fait pas encore
+## 19. La voix
+
+### Ce qui fait la voix de JARVIS
+
+Le timbre est la partie la plus visible et la moins determinante. Ce qui
+identifie JARVIS dans les films tient a trois choses, dans cet ordre
+d'importance decroissant:
+
+1. **La tenue** — un debit legerement sous le naturel, une hauteur basse,
+   aucune emphase. Il ne vend rien et ne s'excite jamais.
+2. **Le registre** — le vouvoiement et le « Monsieur ». Un assistant qui
+   tutoie n'est pas le meme personnage, quel que soit son timbre.
+3. **Le timbre** — masculin, grave. Necessaire, tres loin d'etre suffisant.
+
+Une voix neuronale reglee a plat sonne comme une annonce d'aeroport. Les memes
+mots, ralentis de 7 % et descendus de 12 Hz, sonnent poses. C'est pour cela que
+le moteur est passe cote serveur: le navigateur expose des voix, pas la
+prosodie.
+
+### Pourquoi edge-tts
+
+C'est le seul moteur de cette qualite qui ne demande **ni cle d'API ni compte**
+— les memes voix neuronales que Microsoft Edge, pilotees depuis le serveur.
+ElevenLabs sonne mieux mais se paie; la voix du navigateur est gratuite mais ne
+se regle pas. Pour un utilisateur qui ne doit rien avoir a configurer, ce
+compromis est le bon, et il reste le defaut jusqu'a preuve du contraire par
+l'oreille.
+
+### Aucun nom de voix n'est ecrit en dur
+
+Le catalogue de Microsoft change. Un `fr-CA-XNeural` code en dur qui disparait
+rendrait JARVIS muet, et le message d'erreur ne dirait rien d'utile.
+
+`choose_voice` filtre donc par **attributs** — genre, generation, locale — et
+retient le mieux classe. Un test le prouve sur un catalogue ne contenant aucun
+nom reel: la selection fonctionne quand meme. Le genre pese plus que la
+generation, parce que c'est ce qu'on entend en premier.
+
+### Une panne reseau n'est pas une panne de voix
+
+`synthesize` retourne `None` des que quoi que ce soit echoue — catalogue
+injoignable, delai depasse, flux vide. Le client interprete `None` comme
+« parle avec la voix du systeme ». On perd en qualite, jamais la parole.
+
+La resolution de la voix est **dans le meme `try` que la synthese**. Elle etait
+en dehors dans la premiere version: une panne au moment de demander le
+catalogue serait remontee dans le tour de parole au lieu de degrader. Un test
+l'a trouve.
+
+L'interface dit alors ce qui se passe — « Impossible de joindre le service de
+voix » — et ressort le choix de la voix du systeme, qui est ce qu'on entendra
+reellement. Un repli silencieux serait un mensonge par omission.
+
+### La bascule se fait toute seule
+
+`jarvis setup` fait passer `JARVIS_TTS_PROVIDER` de `null` a `edge`. Personne
+ne devrait avoir a editer un fichier pour etre bien entendu.
+
+Mais **seulement depuis `null`**: quelqu'un qui paie pour ElevenLabs ne doit
+pas le perdre au demarrage suivant. Deux tests tiennent les deux moities.
+
+### Choisir se fait par l'oreille
+
+`POST /api/settings/voice/test` synthetise une phrase avec des reglages
+d'essai, sans les enregistrer, et les restaure dans un `finally`. Ecouter ne
+doit rien changer tant qu'on n'a pas choisi.
+
+`POST /api/settings/voice` ecrit dans `.env` **et** met a jour le moteur en
+memoire: sans le second, il faudrait redemarrer pour s'entendre.
+
+---
+
+## 20. Ce que JARVIS ne fait pas encore
 
 Enonce explicitement pour eviter toute illusion :
 

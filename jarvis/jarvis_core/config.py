@@ -17,7 +17,7 @@ from jarvis_core.errors import ConfigurationError
 
 LLMProviderName = Literal["anthropic", "mock"]
 STTProviderName = Literal["openai", "faster_whisper", "null"]
-TTSProviderName = Literal["elevenlabs", "openai", "null"]
+TTSProviderName = Literal["edge", "elevenlabs", "openai", "null"]
 
 
 class Settings(BaseSettings):
@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     tts_speaker_boost: bool = Field(default=True, alias="JARVIS_TTS_SPEAKER_BOOST")
     tts_openai_model: str = Field(default="gpt-4o-mini-tts", alias="JARVIS_TTS_OPENAI_MODEL")
     tts_openai_voice: str = Field(default="onyx", alias="JARVIS_TTS_OPENAI_VOICE")
+    # Voix neuronales Microsoft: aucune cle, aucun compte. Voix vide = la
+    # meilleure voix francaise disponible est choisie au premier usage.
+    tts_edge_voice: str = Field(default="", alias="JARVIS_TTS_EDGE_VOICE")
+    #: Nom d'une tenue de voix (debit + hauteur). Voir voice/delivery.py.
+    tts_delivery: str = Field(default="jarvis", alias="JARVIS_TTS_DELIVERY")
+    #: Registre d'adresse: "monsieur" (celui des films) ou "familier".
+    persona_address: str = Field(default="monsieur", alias="JARVIS_PERSONA_ADDRESS")
 
     # --- Google Workspace ----------------------------------------------------
     google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")

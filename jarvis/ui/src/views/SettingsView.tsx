@@ -7,10 +7,14 @@ import {
   fetchMetrics,
   fetchSettings,
   installUpdate,
+  readVoiceConfig,
+  saveVoice,
+  testVoice,
   updateSettings,
   type MetricsSnapshot,
   type SettingsResponse,
   type UpdateStatus,
+  type VoiceConfig,
 } from "../lib/api";
 import type { SpeechPlayer } from "../lib/audio";
 import type { WakeWordState } from "../lib/useWakeWord";
@@ -41,6 +45,12 @@ export function SettingsView({ system, player, wake }: Props) {
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateNote, setUpdateNote] = useState("");
+  const [voiceConfig, setVoiceConfig] = useState<VoiceConfig | null>(null);
+  const [voicePick, setVoicePick] = useState("");
+  const [deliveryPick, setDeliveryPick] = useState("");
+  const [addressPick, setAddressPick] = useState("monsieur");
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [voiceNote, setVoiceNote] = useState("");
 
   useEffect(() => {
     const refresh = () => {
@@ -63,7 +73,45 @@ export function SettingsView({ system, player, wake }: Props) {
     fetchMetrics().then(setMetrics).catch(() => undefined);
     fetchSettings().then(setConfig).catch(() => undefined);
     checkForUpdate().then(setUpdate).catch(() => undefined);
+    readVoiceConfig()
+      .then((config) => {
+        setVoiceConfig(config);
+        // La voix affichee est celle reellement utilisee, pas le reglage brut:
+        // « automatique » ne dit pas ce qu'on entend.
+        setVoicePick(config.voice || config.resolved);
+        setDeliveryPick(config.delivery);
+        setAddressPick(config.address === "familier" ? "familier" : "monsieur");
+      })
+      .catch(() => undefined);
   }, []);
+
+  /** Fait entendre la voix choisie sans rien enregistrer. */
+  const hearVoice = async () => {
+    setVoiceBusy(true);
+    setVoiceNote("");
+    try {
+      const sample = await testVoice({ voice: voicePick, delivery: deliveryPick });
+      const audio = new Audio(`data:${sample.mime};base64,${sample.audio}`);
+      await audio.play();
+    } catch (cause) {
+      setVoiceNote(cause instanceof Error ? cause.message : "Essai impossible.");
+    } finally {
+      setVoiceBusy(false);
+    }
+  };
+
+  const keepVoice = async () => {
+    setVoiceBusy(true);
+    setVoiceNote("");
+    try {
+      await saveVoice({ voice: voicePick, delivery: deliveryPick, address: addressPick });
+      setVoiceNote("Voix enregistree. Elle vaut des la prochaine phrase.");
+    } catch (cause) {
+      setVoiceNote(cause instanceof Error ? cause.message : "Enregistrement impossible.");
+    } finally {
+      setVoiceBusy(false);
+    }
+  };
 
   const runUpdate = async () => {
     setUpdating(true);
@@ -240,42 +288,103 @@ export function SettingsView({ system, player, wake }: Props) {
 
         <Card title="Voix de reponse" icon={<IconMic size={14} />}>
           <div className="stack">
-            {system?.providers.tts_available ? (
-              <p className="card-empty">
-                Moteur serveur actif: <b>{system.providers.tts}</b>. Le timbre se regle
-                dans .env (JARVIS_TTS_STABILITY, JARVIS_TTS_STYLE).
-              </p>
+            {voiceConfig === null ? (
+              <p className="card-empty">Chargement des voix…</p>
+            ) : voiceConfig.provider !== "edge" || voiceConfig.error ? (
+              <>
+                <p className="card-empty">
+                  {voiceConfig.error
+                    ? voiceConfig.error + " JARVIS parle avec la voix du systeme."
+                    : `Moteur serveur actif: ${voiceConfig.provider}. Le timbre se regle dans .env.`}
+                </p>
+                {voices.length > 0 && (
+                  <>
+                    <select
+                      className="input"
+                      value={selected}
+                      onChange={(event) => {
+                        setSelected(event.target.value);
+                        player.setVoice(event.target.value);
+                      }}
+                    >
+                      {voices.map((voice) => (
+                        <option key={voice.name} value={voice.name}>
+                          {voice.natural ? "★ " : ""}
+                          {voice.name.replace("Microsoft ", "")} — {voice.lang}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="btn small"
+                      onClick={() => player.preview(selected, system?.language ?? "fr-CA")}
+                    >
+                      Ecouter
+                    </button>
+                  </>
+                )}
+              </>
             ) : (
               <>
-                <select
-                  className="input"
-                  value={selected}
-                  onChange={(event) => {
-                    setSelected(event.target.value);
-                    player.setVoice(event.target.value);
-                  }}
-                >
-                  {voices.map((voice) => (
-                    <option key={voice.name} value={voice.name}>
-                      {voice.natural ? "★ " : ""}
-                      {voice.name.replace("Microsoft ", "")} — {voice.lang}
-                    </option>
-                  ))}
-                </select>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    className="btn small"
-                    onClick={() => player.preview(selected, system?.language ?? "fr-CA")}
+                <div className="field">
+                  <label htmlFor="voice-pick">Timbre</label>
+                  <select
+                    id="voice-pick"
+                    className="input"
+                    value={voicePick}
+                    onChange={(event) => setVoicePick(event.target.value)}
                   >
-                    Ecouter
+                    {voiceConfig.voices.map((voice) => (
+                      <option key={voice.id} value={voice.id}>
+                        {voice.modern ? "★ " : ""}
+                        {voice.label} — {voice.gender === "Male" ? "homme" : "femme"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label htmlFor="voice-delivery">Tenue</label>
+                  <select
+                    id="voice-delivery"
+                    className="input"
+                    value={deliveryPick}
+                    onChange={(event) => setDeliveryPick(event.target.value)}
+                  >
+                    {voiceConfig.deliveries.map((item) => (
+                      <option key={item.key} value={item.key}>
+                        {item.label} — {item.description}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <label className="switch-row">
+                  <input
+                    type="checkbox"
+                    checked={addressPick === "monsieur"}
+                    onChange={(event) =>
+                      setAddressPick(event.target.checked ? "monsieur" : "familier")
+                    }
+                  />
+                  <span className="switch-text">
+                    <span className="switch-label">Vouvoiement et « Monsieur »</span>
+                    <span className="switch-desc">
+                      Le registre des films. Decoche pour qu'il te tutoie.
+                    </span>
+                  </span>
+                </label>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn small" onClick={hearVoice} disabled={voiceBusy}>
+                    {voiceBusy ? "…" : "Ecouter"}
+                  </button>
+                  <button className="btn primary small" onClick={keepVoice} disabled={voiceBusy}>
+                    Garder cette voix
                   </button>
                 </div>
-                {voices.every((voice) => !voice.natural) && (
-                  <p className="card-empty">
-                    Aucune voix naturelle detectee. Ouvre JARVIS dans <b>Microsoft Edge</b>:
-                    il expose des voix nettement meilleures, sans rien installer.
-                  </p>
-                )}
+
+                {voiceNote && <p className="card-empty">{voiceNote}</p>}
+                {voiceConfig.error && <p className="card-empty">{voiceConfig.error}</p>}
               </>
             )}
           </div>

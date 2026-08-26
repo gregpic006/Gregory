@@ -371,3 +371,69 @@ export async function installUpdate(): Promise<UpdateResult> {
   if (!response.ok) throw new Error(`mise a jour refusee (${response.status})`);
   return response.json();
 }
+
+// ------------------------------------------------------------------ la voix
+
+export interface VoiceChoice {
+  id: string;
+  label: string;
+  locale: string;
+  gender: string;
+  /** Generation recente: nettement plus naturelle. */
+  modern: boolean;
+}
+
+export interface DeliveryChoice {
+  key: string;
+  label: string;
+  description: string;
+  rate: string;
+  pitch: string;
+}
+
+export interface VoiceConfig {
+  provider: string;
+  voices: VoiceChoice[];
+  deliveries: DeliveryChoice[];
+  /** Voix choisie explicitement, ou chaine vide si c'est automatique. */
+  voice: string;
+  /** Voix reellement utilisee, y compris quand le choix est automatique. */
+  resolved: string;
+  delivery: string;
+  address: string;
+  error: string;
+}
+
+export function readVoiceConfig(): Promise<VoiceConfig> {
+  return get("/api/settings/voice");
+}
+
+export interface VoiceChange {
+  voice?: string;
+  delivery?: string;
+  address?: string;
+}
+
+export async function saveVoice(change: VoiceChange): Promise<{ saved: boolean }> {
+  const response = await fetch("/api/settings/voice", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(change),
+  });
+  if (!response.ok) throw new Error(`choix refuse (${response.status})`);
+  return response.json();
+}
+
+/** Fait entendre une phrase sans rien enregistrer: comparer avant de choisir. */
+export async function testVoice(change: VoiceChange): Promise<{ audio: string; mime: string }> {
+  const response = await fetch("/api/settings/voice/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(change),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw new Error(detail?.detail ?? `essai impossible (${response.status})`);
+  }
+  return response.json();
+}
