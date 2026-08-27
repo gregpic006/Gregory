@@ -26,7 +26,7 @@ jobs:
           pg_dump "$DATABASE_URL" --no-owner --no-privileges --format=custom --file=portail-backup.dump
 
       - name: Téléverser comme artefact (conservé 30 jours)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: portail-backup-${{ github.run_id }}
           path: portail-backup.dump
