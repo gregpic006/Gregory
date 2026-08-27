@@ -1154,6 +1154,41 @@ code.
 `set_accent` oublie aussi la voix deduite — sinon le changement n'aurait pris
 qu'au redemarrage suivant.
 
+### `git pull` n'installe rien
+
+Le defaut le plus couteux de cette serie, et il n'etait pas dans la voix.
+
+La voix neuronale a ajoute une dependance a `pyproject.toml`. Le proprietaire
+a fait `git pull` puis `start.ps1` — et rien n'a installe le paquet:
+`setup.ps1` le fait, `start.ps1` ne le faisait pas. JARVIS a demarre avec
+`JARVIS_TTS_PROVIDER=edge` et sans `edge_tts`.
+
+Le resultat visible: la liste des voix vide, et le message **« Impossible de
+joindre le service de voix. Verifie ta connexion. »** — alors que sa connexion
+allait parfaitement. Un message faux est pire qu'une panne: il envoie chercher
+au mauvais endroit.
+
+Deux corrections, et la seconde compte autant que la premiere.
+
+**Installer.** `jarvis_core/deps.py` verifie a chaque demarrage que les
+paquets obligatoires sont importables et installe ce qui manque. La commande
+est une constante (`pip install -e .`, `shell=False`): aucun nom venant
+d'ailleurs n'y entre. L'updater fait la meme chose apres avoir recupere le
+code, avant de recompiler l'interface.
+
+Le succes de pip ne suffit pas: on **reverifie** que le module est devenu
+importable. pip peut sortir en succes sans avoir installe ce qu'on attendait,
+et annoncer « tout va bien » sur une fonctionnalite morte serait le meme
+mensonge sous une autre forme.
+
+**Dire lequel des deux.** Le message distingue desormais « service
+injoignable » de « paquet absent ». Deux tests tiennent les deux moities:
+l'un exige que le paquet manquant ne soit pas impute a la connexion, l'autre
+que la panne reseau le soit toujours.
+
+Un echec d'installation ne bloque pas le demarrage: JARVIS fonctionne sans la
+voix neuronale, moins bien. Il le signale, il ne s'arrete pas.
+
 ### Pourquoi edge-tts
 
 C'est le seul moteur de cette qualite qui ne demande **ni cle d'API ni compte**

@@ -23,6 +23,7 @@ from pathlib import Path
 
 from jarvis_core.config import Settings
 from jarvis_core.config_sync import set_values, sync_env
+from jarvis_core.deps import ensure_installed
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +174,27 @@ def run_setup(root: Path, settings: Settings) -> SetupReport:
             detail=str(exc),
             action=f"Cree le dossier a la main: {folder}",
         )
+
+    # 3a. Les paquets. Une mise a jour peut en ajouter; `git pull` ne les
+    # installe pas. Sans ce controle, la fonctionnalite est morte en silence.
+    absent, dependency_error = ensure_installed(root)
+    if dependency_error:
+        report.add(
+            "Dependances",
+            done=False,
+            detail=dependency_error,
+            action="Lance: .\\.venv\\Scripts\\python.exe -m pip install -e .",
+        )
+    elif absent:
+        report.add(
+            "Dependances",
+            done=True,
+            detail=f"{len(absent)} paquet(s) installe(s): "
+            + ", ".join(item.feature for item in absent),
+        )
+        report.restart_needed = True
+    else:
+        report.add("Dependances", done=True, detail="a jour")
 
     # 3b. La voix. `null` fait parler le navigateur, ce qui sonne comme un GPS.
     # On bascule vers les voix neuronales — mais seulement depuis `null`: un

@@ -295,6 +295,11 @@ l'oreille avant de choisir.
 vouvoyer et dire « Monsieur », comme dans les films. `familier` revient au
 tutoiement. La case est dans la meme carte des Reglages.
 
+**Si la liste des voix reste vide**, JARVIS dit laquelle des deux causes
+s'applique: service injoignable, ou paquet manquant. Le second cas se repare
+tout seul — une mise a jour peut ajouter une dependance, et le demarrage
+suivant l'installe. Aucune commande a taper.
+
 Aucun nom de voix n'est ecrit en dur: le catalogue est demande au service et
 filtre par attributs. Une voix qui disparait du catalogue ne rend donc jamais
 JARVIS muet.

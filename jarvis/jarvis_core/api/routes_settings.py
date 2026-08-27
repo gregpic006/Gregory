@@ -315,8 +315,18 @@ async def read_voice(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str,
         logger.warning("catalogue de voix indisponible: %s", exc)
 
     if not payload["voices"]:
+        # Deux causes tres differentes, et un seul message serait faux dans un
+        # cas sur deux. Envoyer quelqu'un verifier sa connexion alors qu'il
+        # manque un paquet, c'est lui faire perdre son temps.
+        from jarvis_core.deps import is_installed
+
         payload["error"] = (
             "Impossible de joindre le service de voix. Verifie ta connexion."
+            if is_installed("edge_tts")
+            else (
+                "Le paquet de la voix neuronale n'est pas installe. "
+                "Relance JARVIS: il l'installe tout seul au demarrage."
+            )
         )
     return payload
 

@@ -205,6 +205,18 @@ def apply_update(root: Path, *, build: bool = True) -> UpdateResult:
     result.updated = True
     result.detail = f"{status.behind} changement(s) recupere(s)."
 
+    # Une nouvelle version peut ajouter une dependance Python. Recuperer le
+    # code sans l'installer laisse une fonctionnalite morte, et le message
+    # d'erreur qui en decoule designe la mauvaise cause.
+    from jarvis_core.deps import ensure_installed
+
+    installed, dependency_error = ensure_installed(root)
+    if dependency_error:
+        result.error = dependency_error
+        return result
+    if installed:
+        result.detail += f" {len(installed)} paquet(s) installe(s)."
+
     if build:
         # L'interface vit dans jarvis/ui, qui n'est pas forcement la racine du
         # depot: on part du dossier fourni, pas du depot.
