@@ -19,6 +19,7 @@ from email.message import EmailMessage
 from email.utils import parseaddr, parsedate_to_datetime
 from typing import Any
 
+from jarvis_core.errors import IntegrationUnavailableError
 from jarvis_core.integrations.google.client import GoogleClient
 
 BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -28,6 +29,39 @@ HEADERS = ("From", "To", "Cc", "Subject", "Date", "Message-ID")
 
 SCOPE_READ = "https://www.googleapis.com/auth/gmail.readonly"
 SCOPE_WRITE = "https://www.googleapis.com/auth/gmail.compose"
+
+#: Un rapport de caisse pese quelques dizaines de kilo-octets. Au-dela de
+#: cette taille, ce n'est pas un rapport, et on refuse plutot que de charger.
+MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class GmailAttachment:
+    """Une piece jointe, decrite sans etre telechargee.
+
+    Le nom du fichier vient de l'expediteur: c'est du contenu non fiable. On
+    ne s'en sert que pour l'affichage et pour reconnaitre une extension,
+    jamais pour ecrire sur le disque a cet emplacement.
+    """
+
+    id: str
+    filename: str
+    mime: str
+    size: int
+
+    @property
+    def looks_tabular(self) -> bool:
+        """Vrai si cette piece jointe ressemble a un tableau importable."""
+        name = self.filename.lower()
+        return name.endswith((".csv", ".txt", ".tsv"))
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "filename": self.filename,
+            "mime": self.mime,
+            "size": self.size,
+        }
 
 
 @dataclass
@@ -111,6 +145,35 @@ def _extract_body(payload: dict[str, Any]) -> str:
     if plain:
         return "\n".join(plain).strip()
     return _strip_html("\n".join(html)) if html else ""
+
+
+def extract_attachments(payload: dict[str, Any]) -> list[GmailAttachment]:
+    """Parcourt les parties MIME et retient celles qui portent un fichier.
+
+    Une piece jointe se reconnait a son `attachmentId`: les parties de texte
+    portent leurs octets directement, les fichiers portent une reference a
+    telecharger separement.
+    """
+    found: list[GmailAttachment] = []
+
+    def walk(part: dict[str, Any]) -> None:
+        body = part.get("body") or {}
+        attachment_id = body.get("attachmentId")
+        filename = str(part.get("filename") or "")
+        if attachment_id and filename:
+            found.append(
+                GmailAttachment(
+                    id=str(attachment_id),
+                    filename=filename,
+                    mime=str(part.get("mimeType") or ""),
+                    size=int(body.get("size") or 0),
+                )
+            )
+        for child in part.get("parts") or []:
+            walk(child)
+
+    walk(payload)
+    return found
 
 
 def _headers_map(payload: dict[str, Any]) -> dict[str, str]:
@@ -201,6 +264,46 @@ class GmailService:
             "GET", f"{BASE}/messages/{message_id}", params={"format": "full"}
         )
         return _to_message(raw, with_body=True)
+
+    async def list_attachments(self, message_id: str) -> list[GmailAttachment]:
+        """Pieces jointes d'un courriel, sans en telecharger le contenu."""
+        self.client.require_scope(SCOPE_READ, "lire tes courriels")
+        raw = await self.client.request(
+            "GET", f"{BASE}/messages/{message_id}", params={"format": "full"}
+        )
+        return extract_attachments(raw.get("payload") or {})
+
+    async def download_attachment(
+        self, message_id: str, attachment_id: str, *, max_bytes: int = MAX_ATTACHMENT_BYTES
+    ) -> bytes:
+        """Telecharge une piece jointe.
+
+        Gmail rend le contenu en base64url dans du JSON, pas en binaire brut:
+        on passe donc par `request`, pas par `download`.
+
+        `max_bytes` refuse un fichier demesure. Un rapport de caisse pese
+        quelques dizaines de kilo-octets; un fichier de plusieurs dizaines de
+        megaoctets n'est pas un rapport, et le charger en memoire pour s'en
+        apercevoir serait une faute.
+        """
+        self.client.require_scope(SCOPE_READ, "lire tes courriels")
+        raw = await self.client.request(
+            "GET", f"{BASE}/messages/{message_id}/attachments/{attachment_id}"
+        )
+        declared = int(raw.get("size") or 0)
+        if max_bytes and declared > max_bytes:
+            raise IntegrationUnavailableError(
+                "Gmail", f"piece jointe trop volumineuse ({declared} octets)"
+            )
+        data = str(raw.get("data") or "")
+        if not data:
+            return b""
+        content = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+        if max_bytes and len(content) > max_bytes:
+            raise IntegrationUnavailableError(
+                "Gmail", f"piece jointe trop volumineuse ({len(content)} octets)"
+            )
+        return content
 
     async def get_thread(self, thread_id: str, *, limit: int = 20) -> list[GmailMessage]:
         """Rapatrie un fil complet, du plus ancien au plus recent."""

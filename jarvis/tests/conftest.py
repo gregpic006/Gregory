@@ -7,6 +7,7 @@ contenu externe, gestion d'erreur) sans dependre d'un appel reseau.
 
 from __future__ import annotations
 
+import os
 import uuid
 from collections.abc import Iterator
 from typing import Any
@@ -110,6 +111,25 @@ class ScriptedLLM(LLMProvider):
                 if isinstance(block, ToolResultBlock)
             )
         return "\n".join(parts)
+
+
+@pytest.fixture(autouse=True)
+def _ignore_local_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neutralise le `.env` du poste pendant les tests.
+
+    `Settings` lit `.env` par defaut. Un developpeur qui active une
+    fonctionnalite chez lui faisait alors echouer les tests qui verifient le
+    comportement « fonctionnalite desactivee » — et, plus grave, un `.env` qui
+    active tout ferait **passer** des tests qui devraient echouer.
+
+    Une suite dont le resultat depend de la configuration locale ne prouve
+    rien. On force donc un chemin inexistant, et on retire du process les
+    variables JARVIS_ heritees du shell.
+    """
+    # `model_config` est un dict (SettingsConfigDict), pas un objet.
+    monkeypatch.setitem(Settings.model_config, "env_file", "tests/.env-inexistant")
+    for name in [key for key in os.environ if key.startswith("JARVIS_")]:
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture()

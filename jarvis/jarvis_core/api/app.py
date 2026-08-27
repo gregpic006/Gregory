@@ -93,6 +93,20 @@ def _register_jobs(runtime: JarvisRuntime) -> None:
         # ressemble a du direct, assez rare pour ne rien couter.
         runtime.scheduler.every(2, name="import-business", handler=import_job)
 
+    if settings.feature_business and settings.feature_gmail:
+
+        async def mail_job() -> None:
+            from jarvis_core.business.mail_import import scan_mailbox
+
+            report = await scan_mailbox(runtime)
+            if report.changed:
+                logger.info("rapports par courriel: %s", report.summary())
+
+        # Toutes les 30 minutes. Un rapport de caisse arrive une fois par jour:
+        # verifier plus souvent ne le ferait pas arriver plus tot, et chaque
+        # passage coute un appel a Gmail.
+        runtime.scheduler.every(30, name="import-courriel", handler=mail_job)
+
     if settings.feature_proactive:
 
         async def watch_job() -> None:

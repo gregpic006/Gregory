@@ -327,6 +327,32 @@ npx vite --port 5199
 node scripts/probe-sound.mjs   # dans un second terminal
 ```
 
+### Connecter un logiciel de gestion (caisse, ventes, personnel)
+
+**Entreprises > Rapports par courriel.**
+
+La plupart des logiciels de gestion n'ont pas d'API ouverte. Maitre'D, par
+exemple, reserve ses integrations a une entente commerciale avec PayFacto, et
+tourne souvent sur un serveur dans le commerce — injoignable de l'exterieur.
+
+Mais presque tous savent **envoyer un rapport par courriel a heure fixe**. Ce
+rapport arrive dans une boite que JARVIS lit deja.
+
+1. Dans ton logiciel, programme l'envoi du rapport quotidien en **CSV** vers
+   ton adresse Gmail.
+2. Dans JARVIS, ajoute l'expediteur et choisis l'entreprise.
+3. C'est tout. JARVIS regarde toutes les 30 minutes.
+
+**Aucun mot de passe n'est demande, et il ne faut jamais en donner.** JARVIS ne
+se connecte pas a ton logiciel de gestion: il lit ce que ce logiciel t'envoie.
+Un identifiant confie a un tiers reste confie a un tiers.
+
+Un courriel deja importe ne l'est jamais deux fois — la caisse envoie le meme
+rapport chaque jour et la surveillance repasse chaque heure. Une piece jointe
+illisible est **signalee**, jamais devinee: pas de PDF interprete au jugé.
+
+---
+
 ### Connecter Gmail et Calendar
 
 Marche a suivre complete : **[docs/google-setup.md](docs/google-setup.md)**.

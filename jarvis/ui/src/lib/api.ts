@@ -441,3 +441,63 @@ export async function testVoice(change: VoiceChange): Promise<{ audio: string; m
   }
   return response.json();
 }
+
+// ------------------------------------ rapports business recus par courriel
+
+export interface MailRule {
+  id: string;
+  org_id: string;
+  sender: string;
+  subject: string;
+  label: string;
+  enabled: boolean;
+  last_run_at: string;
+}
+
+export interface MailRulesResponse {
+  rules: MailRule[];
+  /** Raison pour laquelle rien ne peut fonctionner, s'il y en a une. */
+  blocked: string;
+}
+
+export function fetchMailRules(): Promise<MailRulesResponse> {
+  return get("/api/business/mail-rules");
+}
+
+export async function addMailRule(rule: {
+  org_id: string;
+  sender: string;
+  subject?: string;
+  label?: string;
+}): Promise<void> {
+  const response = await fetch("/api/business/mail-rules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rule),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw new Error(detail?.detail ?? `ajout refuse (${response.status})`);
+  }
+}
+
+export async function removeMailRule(ruleId: string): Promise<void> {
+  const response = await fetch(`/api/business/mail-rules/${ruleId}`, { method: "DELETE" });
+  if (!response.ok) throw new Error(`suppression refusee (${response.status})`);
+}
+
+export interface MailScanReport {
+  imported: string[];
+  already_seen: number;
+  skipped: { name: string; reason: string }[];
+  failed: { name: string; reason: string }[];
+  rows: number;
+  error: string;
+  summary: string;
+}
+
+export async function scanMailNow(): Promise<MailScanReport> {
+  const response = await fetch("/api/business/mail-rules/scan", { method: "POST" });
+  if (!response.ok) throw new Error(`recherche impossible (${response.status})`);
+  return response.json();
+}

@@ -1295,7 +1295,71 @@ quand le systeme demande moins d'animations.
 
 ---
 
-## 21. Ce que JARVIS ne fait pas encore
+## 21. Connecter un logiciel qui n'a pas d'API
+
+### Le constat, verifie et non suppose
+
+La question posee etait: « peux-tu utiliser les acces de mon application pour
+la connecter a JARVIS ? »
+
+Recherche faite: **Maitre'D n'a pas d'API en libre-service.** Les integrations
+passent par une entente avec Posera/PayFacto, et le logiciel tourne souvent
+sur un serveur de back-office dans le commerce — donc derriere le reseau
+local, sans point d'entree hebergé. Trois voies existaient, une seule tient.
+
+**L'API officielle** demande une entente commerciale. C'est une conversation
+d'affaires, pas du code, et elle ne depend pas de nous.
+
+**Les identifiants de l'utilisateur** sont exclus. Ce n'est pas une limite
+technique: se connecter a la place de quelqu'un avec son mot de passe est
+exactement ce qu'un assistant ne doit jamais faire. Un identifiant confie a un
+tiers reste confie a un tiers.
+
+**Le rapport par courriel** fonctionne aujourd'hui, sans rien demander a
+personne.
+
+### Pourquoi le courriel est la bonne voie, pas un pis-aller
+
+Presque tous ces logiciels savent envoyer un rapport a heure fixe. Ce rapport
+arrive dans une boite a laquelle JARVIS a **deja** acces, en lecture seule,
+avec une autorisation que l'utilisateur a lui-meme accordee et peut retirer.
+
+Aucune entente, aucune cle, aucun secret nouveau. La surface d'attaque
+n'augmente pas d'un pouce: on lit un courriel de plus.
+
+### Ce qui rend l'import sur
+
+**Aucune deduction.** JARVIS ne fouille pas la boite pour trouver ce qui
+ressemble a un rapport. Sans regle nommant un expediteur, il ne lit rien — un
+test le verifie en s'assurant qu'aucune requete Gmail n'est meme emise.
+
+**Un courriel n'est importe qu'une fois.** La cle primaire est
+`(message_id, org_id)`: c'est la base qui l'impose, pas une verification qu'on
+pourrait oublier. La paire, et non le seul message, parce qu'un rapport envoye
+a deux entreprises reste legitime.
+
+**Un echec est reessayable.** Le courriel n'est retenu que si quelque chose en
+est reellement sorti. Le marquer des qu'on l'a vu ferait perdre pour toujours
+la journee ou Gmail a hoquete — un test tient cette distinction.
+
+**Le contenu est une donnee, jamais une instruction.** Les pieces jointes
+passent par le meme lecteur CSV que les fichiers deposes a la main, avec les
+memes refus. Une piece jointe non tabulaire est signalee, pas interpretee: on
+ne devine pas des chiffres dans un PDF.
+
+**Une piece jointe demesuree est refusee** avant d'etre chargee en memoire. Un
+rapport de caisse pese quelques dizaines de kilo-octets.
+
+### Ce que ca ne remplace pas
+
+Le courriel donne ce que le rapport contient, a la frequence ou il est envoye.
+Ce n'est pas du temps reel, et ce n'est pas l'integralite de la base du
+logiciel. C'est dit tel quel: la couverture voyage avec le chiffre, comme pour
+toute autre source.
+
+---
+
+## 22. Ce que JARVIS ne fait pas encore
 
 Enonce explicitement pour eviter toute illusion :
 

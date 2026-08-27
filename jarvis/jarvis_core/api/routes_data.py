@@ -622,3 +622,79 @@ async def restore_organization(
         raise HTTPException(status_code=404, detail="Entreprise inconnue.")
     runtime.db.execute("UPDATE organizations SET archived = 0 WHERE id = ?", (org_id,))
     return {"restored": org_id}
+
+
+# ------------------------------------------------- rapports recus par courriel
+#
+# La voie d'integration qui ne demande ni entente avec un fournisseur, ni cle
+# d'API, ni mot de passe: le logiciel de gestion envoie son rapport, JARVIS le
+# lit. Ces routes servent a designer les expediteurs de confiance.
+
+
+class MailRuleRequest(BaseModel):
+    """« Quand cet expediteur m'ecrit, importe-le dans cette entreprise. »"""
+
+    org_id: str = Field(min_length=1, max_length=60)
+    sender: str = Field(min_length=3, max_length=200)
+    subject: str = Field(default="", max_length=200)
+    label: str = Field(default="", max_length=80)
+
+
+@router.get("/business/mail-rules")
+async def list_mail_rules(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    """Regles existantes, et ce qui manque pour qu'elles fonctionnent."""
+    from jarvis_core.business.mail_import import MailRuleStore
+
+    google = getattr(runtime, "google", None)
+    connected = google is not None and bool(google.connected)
+    blocked = ""
+    if not runtime.settings.feature_business:
+        blocked = "Les donnees business sont desactivees."
+    elif not runtime.settings.feature_gmail:
+        blocked = "Gmail n'est pas active."
+    elif not connected:
+        blocked = "Gmail n'est pas connecte."
+
+    rules = MailRuleStore(runtime.db).list_rules()
+    return {"rules": [rule.as_dict() for rule in rules], "blocked": blocked}
+
+
+@router.post("/business/mail-rules")
+async def add_mail_rule(
+    request: MailRuleRequest, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    """Ajoute un expediteur de confiance."""
+    from jarvis_core.business.mail_import import MailRuleStore
+
+    known = runtime.db.query_one(
+        "SELECT id FROM organizations WHERE id = ? AND archived = 0", (request.org_id,)
+    )
+    if known is None:
+        raise HTTPException(status_code=404, detail="Cette entreprise n'existe pas.")
+
+    rule = MailRuleStore(runtime.db).add(
+        org_id=request.org_id,
+        sender=request.sender,
+        subject=request.subject,
+        label=request.label,
+    )
+    return {"rule": rule.as_dict()}
+
+
+@router.delete("/business/mail-rules/{rule_id}")
+async def remove_mail_rule(
+    rule_id: str, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    from jarvis_core.business.mail_import import MailRuleStore
+
+    if not MailRuleStore(runtime.db).remove(rule_id):
+        raise HTTPException(status_code=404, detail="Regle introuvable.")
+    return {"removed": True}
+
+
+@router.post("/business/mail-rules/scan")
+async def scan_mail_now(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    """Cherche les rapports maintenant, sans attendre le prochain passage."""
+    from jarvis_core.business.mail_import import scan_mailbox
+
+    return (await scan_mailbox(runtime)).as_dict()

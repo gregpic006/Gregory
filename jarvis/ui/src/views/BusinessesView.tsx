@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Card } from "../components/Card";
+import { MailRules } from "../components/MailRules";
 import { IconBuilding, IconRefresh } from "../components/layout/icons";
 import {
   archiveOrganization,
@@ -224,6 +225,8 @@ export function BusinessesView() {
           </div>
         </Card>
       )}
+
+      {data?.enabled && <MailRules organizations={data.organizations ?? []} />}
 
       {data && !data.enabled && <p className="section-note">{data.note}</p>}
       {error && <div className="banner">{error}</div>}
