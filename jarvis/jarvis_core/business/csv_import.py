@@ -172,6 +172,56 @@ def parse_amount(raw: str) -> float | None:
     return -value if negative else value
 
 
+#: Mois en clair, francais et anglais, sous leur forme repliee (sans accent).
+#:
+#: Un rapport de caisse ecrit souvent sa date en toutes lettres — « jeudi
+#: 27 aout 2026 » — et c'est parfois la **seule** date du fichier: le tableau
+#: qui suit ne porte que des libelles et des montants. Ne pas savoir la lire,
+#: c'est ne pas savoir dater le rapport.
+MONTHS: dict[str, int] = {
+    "janvier": 1, "january": 1, "jan": 1,
+    "fevrier": 2, "february": 2, "feb": 2, "fev": 2,
+    "mars": 3, "march": 3, "mar": 3,
+    "avril": 4, "april": 4, "avr": 4, "apr": 4,
+    "mai": 5, "may": 5,
+    "juin": 6, "june": 6, "jun": 6,
+    "juillet": 7, "july": 7, "juil": 7, "jul": 7,
+    "aout": 8, "august": 8, "aug": 8,
+    "septembre": 9, "september": 9, "sept": 9, "sep": 9,
+    "octobre": 10, "october": 10, "oct": 10,
+    "novembre": 11, "november": 11, "nov": 11,
+    "decembre": 12, "december": 12, "dec": 12,
+}
+
+#: « 27 aout 2026 » ou « August 27, 2026 ». Le jour de semaine et la
+#: ponctuation qui l'entourent sont ignores.
+_DAY_MONTH_YEAR = re.compile(r"\b(\d{1,2})\s+([a-z]{3,10})\.?\s+(\d{4})\b")
+_MONTH_DAY_YEAR = re.compile(r"\b([a-z]{3,10})\.?\s+(\d{1,2}),?\s+(\d{4})\b")
+
+
+def parse_written_day(raw: str) -> date | None:
+    """Lit une date ecrite en toutes lettres, ou None.
+
+    Tolerante par necessite: la chaine peut etre une ligne entiere de rapport
+    (« Sommaire quotidien jeudi 27 aout 2026 »), pas seulement une date.
+    """
+    text = _fold(raw)
+    for pattern, order in ((_DAY_MONTH_YEAR, "dmy"), (_MONTH_DAY_YEAR, "mdy")):
+        found = pattern.search(text)
+        if not found:
+            continue
+        first, second, year = found.groups()
+        day, month_name = (first, second) if order == "dmy" else (second, first)
+        month = MONTHS.get(month_name)
+        if month is None:
+            continue
+        try:
+            return date(int(year), month, int(day))
+        except ValueError:
+            continue
+    return None
+
+
 def parse_day(raw: str) -> date | None:
     """Lit une date, ou None si elle est ambigue ou invalide.
 
@@ -194,7 +244,9 @@ def parse_day(raw: str) -> date | None:
             return datetime.strptime(text, pattern).date()
         except ValueError:
             continue
-    return None
+    # En dernier: la date ecrite en toutes lettres. On repart de `raw`, car
+    # `text` a ete tronque au premier espace — ce qui coupe « 27 aout 2026 ».
+    return parse_written_day(raw)
 
 
 #: On ne cherche pas l'en-tete au-dela: passe cette limite, c'est que le
