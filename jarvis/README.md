@@ -383,6 +383,11 @@ passees ne sont pas rejouees.
 partage; JARVIS ne fait que lire un chemin. Si le lecteur reseau est
 deconnecte, la carte le dit au lieu d'afficher les chiffres d'hier.
 
+**CSV et Excel sont acceptes** (`.csv`, `.txt`, `.tsv`, `.xlsx`, `.xlsm`). Un
+back-office Windows exporte souvent en Excel, et refuser ce format obligerait
+a refaire chaque export. L'ancien format `.xls` (binaire) n'est pas lu: JARVIS
+le dit clairement au lieu d'echouer sans explication.
+
 Sinon, demande a ton installateur Maitre'D **un export CSV** — c'est le format que
 JARVIS lit. S'il t'envoie du .xlsx ou du .pdf, JARVIS te le dira en nommant le
 format recu plutot que de deviner des chiffres.
