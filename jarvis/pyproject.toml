@@ -26,6 +26,9 @@ dependencies = [
     # par defaut, et personne ne doit avoir a installer quoi que ce soit pour
     # entendre JARVIS correctement.
     "edge-tts>=7.0",
+    # Lecture des rapports Excel: un back-office Windows exporte en .xlsx par
+    # defaut, et refuser ce format obligerait a refaire chaque export.
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]

@@ -413,6 +413,26 @@ def import_csv_file(
             f"fichier absent: {file}",
             user_message=f"Je ne trouve pas le fichier {file.name}.",
         )
+
+    # Un classeur est converti en texte delimite, puis lu par le meme
+    # analyseur que les CSV: un second analyseur en parallele finirait par
+    # diverger du premier.
+    from jarvis_core.business.excel_import import (
+        ExcelUnavailable,
+        ExcelUnreadable,
+        excel_to_csv,
+        is_excel,
+    )
+
+    if is_excel(file.name):
+        try:
+            content = excel_to_csv(file)
+        except (ExcelUnavailable, ExcelUnreadable) as exc:
+            raise ImportError_(str(exc), user_message=str(exc)) from exc
+        return import_csv(
+            store, content, org_id=org_id, kind=kind, source_ref=file.name, source=source
+        )
+
     try:
         content = file.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError:

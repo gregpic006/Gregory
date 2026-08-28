@@ -50,7 +50,7 @@ SAMPLE_BYTES = 8192
 #: Au-dela, on arrete de proposer: une liste trop longue ne se lit pas.
 MAX_CANDIDATES = 12
 
-SUFFIXES = frozenset({".csv", ".txt", ".tsv"})
+SUFFIXES = frozenset({".csv", ".txt", ".tsv", ".xlsx", ".xlsm"})
 
 #: Dossiers qui n'ont jamais contenu un rapport de ventes.
 IGNORED = frozenset(
@@ -152,15 +152,18 @@ def _readable_header(path: Path) -> list[str] | None:
     Utilise exactement la logique de l'import: un dossier n'est propose que
     si JARVIS saurait vraiment en lire le contenu.
     """
-    import csv as csv_module
 
-    from jarvis_core.business.csv_import import (
-        COLUMN_ALIASES,
-        DATE_ALIASES,
-        _fold,
-        _looks_like_header,
-        _sniff,
-    )
+
+    from jarvis_core.business.excel_import import excel_to_csv, is_excel
+
+    if is_excel(path.name):
+        # Un classeur ne se reconnait pas sur ses premiers octets: on le
+        # convertit, en se limitant aux premieres lignes.
+        try:
+            text = excel_to_csv(path, max_rows=30)
+        except Exception:  # noqa: BLE001 - un classeur illisible n'est pas un candidat
+            return None
+        return _columns_of(text)
 
     try:
         with open(path, "rb") as handle:
@@ -178,6 +181,21 @@ def _readable_header(path: Path) -> list[str] | None:
             continue
     else:  # pragma: no cover - latin-1 accepte tout
         return None
+
+    return _columns_of(text)
+
+
+def _columns_of(text: str) -> list[str] | None:
+    """Colonnes reconnues dans ce texte delimite, ou None."""
+    import csv as csv_module
+
+    from jarvis_core.business.csv_import import (
+        COLUMN_ALIASES,
+        DATE_ALIASES,
+        _fold,
+        _looks_like_header,
+        _sniff,
+    )
 
     delimiter = _sniff(text[:2048])
     for line in text.splitlines()[:20]:

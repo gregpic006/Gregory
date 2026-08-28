@@ -50,7 +50,8 @@ logger = logging.getLogger(__name__)
 #: d'ecriture par la caisse.
 SETTLE_SECONDS = 10.0
 
-SUFFIXES = frozenset({".csv", ".txt"})
+#: `.xlsx` inclus: un back-office Windows exporte en Excel par defaut.
+SUFFIXES = frozenset({".csv", ".txt", ".tsv", ".xlsx", ".xlsm"})
 
 
 @dataclass

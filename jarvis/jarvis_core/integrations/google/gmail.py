@@ -53,7 +53,7 @@ class GmailAttachment:
     def looks_tabular(self) -> bool:
         """Vrai si cette piece jointe ressemble a un tableau importable."""
         name = self.filename.lower()
-        return name.endswith((".csv", ".txt", ".tsv"))
+        return name.endswith((".csv", ".txt", ".tsv", ".xlsx", ".xlsm"))
 
     def as_dict(self) -> dict[str, Any]:
         return {

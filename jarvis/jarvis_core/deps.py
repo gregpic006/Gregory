@@ -51,6 +51,7 @@ class Requirement:
 #: rien ne demarre et le probleme se voit tout seul.
 REQUIRED: tuple[Requirement, ...] = (
     Requirement(module="edge_tts", feature="la voix neuronale"),
+    Requirement(module="openpyxl", feature="la lecture des rapports Excel"),
 )
 
 
