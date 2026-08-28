@@ -353,7 +353,23 @@ fermeture (End of Day). Deux facons de les faire arriver jusqu'a JARVIS:
 voie** — meilleure que le courriel: rien a configurer chez le fournisseur, et
 les chiffres entrent des que la caisse ecrit son rapport.
 
-**Entreprises > Dossier de la caisse.** Colle le chemin du dossier
+**Entreprises > Dossier de la caisse > « Trouve-les pour moi ».**
+
+JARVIS cherche lui-meme sur la machine — tous les lecteurs, **y compris les
+lecteurs reseau** — les dossiers contenant des rapports qu'il sait lire. Il te
+montre le chemin, le nombre de fichiers, la date du plus recent et **les
+colonnes qu'il y lira**. Tu choisis l'entreprise, tu cliques « Brancher ».
+
+Le critere n'est pas un nom de dossier — « Rapports », « Reports »,
+« Sorties » changent d'une installation a l'autre — mais « JARVIS sait-il lire
+ce fichier ? », teste avec la meme fonction que l'import reel. Un dossier
+propose est donc importable par construction, et un carnet d'adresses en CSV
+n'est jamais propose.
+
+La recherche est bornee (duree, profondeur, nombre de dossiers), ignore les
+dossiers systeme, et **ne fait que lire**.
+
+Si tu connais deja le chemin, « + Chemin manuel » l'accepte directement
 (`\\SERVEUR-MD\Rapports` ou un lecteur reseau `Z:\Rapports`), choisis
 l'entreprise, et ajoute au besoin un motif (`ventes*.csv`) si la caisse depose
 plusieurs rapports au meme endroit.

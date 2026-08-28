@@ -1368,6 +1368,42 @@ rapports cohabitent. Le chemin peut etre un UNC — il est conserve tel quel,
 sans normalisation: `\\SERVEUR\Partage` est la forme que Windows donne a
 l'utilisateur, et la transformer casserait l'acces sans que personne comprenne.
 
+### Trouver le dossier a la place de l'utilisateur
+
+Quatre chemins d'import etaient construits et **aucun n'etait branche**. La
+raison n'etait pas technique: « colle le chemin du dossier » suppose qu'on
+sache ou son logiciel de caisse ecrit. Presque personne ne le sait, et
+personne n'a envie de fouiller un serveur pour le decouvrir.
+
+`discover()` cherche a sa place. Le critere de reconnaissance n'est **pas** un
+nom de dossier — « Rapports », « Reports », « Sorties » varient selon
+l'installation, la version et la langue. C'est « JARVIS sait-il lire ce
+fichier ? », teste avec `_looks_like_header`, exactement la fonction qu'utilise
+l'import reel.
+
+Consequence directe: un dossier propose est importable **par construction**, et
+un carnet d'adresses en CSV n'est jamais propose — il n'a pas de colonne de
+date doublee d'une colonne d'indicateur. La proposition ne peut pas mentir.
+
+L'ecran montre aussi les colonnes reconnues. L'utilisateur voit ce que JARVIS
+lira avant de brancher, au lieu de decouvrir apres coup qu'il s'est trompe de
+dossier.
+
+### Une recherche qui parcourt un disque doit etre bornee
+
+Duree, profondeur et nombre de dossiers sont plafonnes; les dossiers systeme
+et caches sont ignores; seuls quelques kilo-octets en tete de chaque fichier
+sont lus — un export d'un an est reconnu sans etre charge, ce qu'un test
+verifie au chronometre. Un dossier illisible se saute en silence: un partage
+deconnecte ne doit pas interrompre la recherche.
+
+La recherche tourne dans un fil separe. Parcourir un disque est bloquant, et
+figerait sinon toutes les autres requetes du serveur pendant vingt secondes.
+
+Sous Windows, la recherche part de **toutes les lettres de lecteur**, lecteurs
+reseau compris: le serveur de la caisse est presque toujours monte ainsi, et
+c'est precisement le cas interessant.
+
 ### La garantie qui compte: on ne touche a rien
 
 Ce dossier appartient a un logiciel de production. JARVIS le **lit**; il ne

@@ -4,9 +4,12 @@ import { Card } from "./Card";
 import { IconBuilding } from "./layout/icons";
 import {
   addFolderSource,
+  discoverFolders,
   fetchFolderSources,
   removeFolderSource,
   scanFoldersNow,
+  type DiscoveryReport,
+  type FolderCandidate,
   type FolderScanReport,
   type FolderSource,
 } from "../lib/api";
@@ -41,6 +44,8 @@ export function FolderSources({ organizations }: Props) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [report, setReport] = useState<FolderScanReport | null>(null);
+  const [found, setFound] = useState<DiscoveryReport | null>(null);
+  const [searching, setSearching] = useState(false);
 
   const refresh = useCallback(() => {
     fetchFolderSources()
@@ -85,6 +90,39 @@ export function FolderSources({ organizations }: Props) {
       refresh();
     } catch (cause) {
       setNote(cause instanceof Error ? cause.message : "Lecture impossible.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Cherche les dossiers de rapports au lieu de demander un chemin. */
+  const search = async () => {
+    setSearching(true);
+    setNote("");
+    setFound(null);
+    try {
+      setFound(await discoverFolders());
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : "Recherche impossible.");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  /** Branche un dossier propose, sans rien faire retaper. */
+  const accept = async (candidate: FolderCandidate) => {
+    setBusy(true);
+    try {
+      await addFolderSource({ org_id: orgId, path: candidate.path });
+      setFound((current) =>
+        current
+          ? { ...current, candidates: current.candidates.filter((c) => c.path !== candidate.path) }
+          : current,
+      );
+      setNote(`Dossier branche sur ${nameOf(orgId)}.`);
+      refresh();
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : "Ajout impossible.");
     } finally {
       setBusy(false);
     }
@@ -182,16 +220,74 @@ export function FolderSources({ organizations }: Props) {
         ) : (
           <div style={{ display: "flex", gap: 8 }}>
             <button
+              className="btn primary small"
+              onClick={search}
+              disabled={searching || organizations.length === 0}
+            >
+              {searching ? "Recherche en cours…" : "Trouve-les pour moi"}
+            </button>
+            <button
               className="btn small"
               onClick={() => setAdding(true)}
               disabled={organizations.length === 0}
             >
-              + Ajouter un dossier
+              + Chemin manuel
             </button>
             {sources !== null && sources.length > 0 && (
               <button className="btn small" onClick={scan} disabled={busy}>
                 {busy ? "Lecture…" : "Lire maintenant"}
               </button>
+            )}
+          </div>
+        )}
+
+        {found && (
+          <div className="stack" style={{ gap: 8 }}>
+            <p style={{ margin: 0, fontSize: 13 }}>{found.summary}</p>
+            {found.candidates.map((candidate) => (
+              <div
+                key={candidate.path}
+                className="stack"
+                style={{
+                  gap: 4,
+                  padding: "8px 10px",
+                  border: "1px solid var(--line)",
+                  borderRadius: "var(--radius-sm)",
+                }}
+              >
+                <b style={{ fontSize: 13, wordBreak: "break-all" }}>{candidate.path}</b>
+                <span className="card-empty">
+                  {candidate.files} fichier(s) · plus recent {candidate.newest || "?"} ·
+                  je lirai : {candidate.columns.join(", ")}
+                </span>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <select
+                    className="input"
+                    style={{ flex: 1, minWidth: 0 }}
+                    value={orgId}
+                    onChange={(event) => setOrgId(event.target.value)}
+                  >
+                    {organizations.map((org) => (
+                      <option key={org.id} value={org.id}>
+                        {org.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn primary small"
+                    onClick={() => accept(candidate)}
+                    disabled={busy}
+                  >
+                    Brancher
+                  </button>
+                </div>
+              </div>
+            ))}
+            {found.truncated && found.candidates.length === 0 && (
+              <p className="card-empty">
+                La recherche s'est arretee avant d'avoir tout vu. Utilise le chemin
+                manuel si tu le connais.
+              </p>
             )}
           </div>
         )}

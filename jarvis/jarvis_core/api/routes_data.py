@@ -790,3 +790,35 @@ async def scan_folders_now(runtime: JarvisRuntime = Depends(get_runtime)) -> dic
     if runtime.business is None:
         raise HTTPException(status_code=400, detail="Les donnees business sont desactivees.")
     return scan_sources(runtime.business).as_dict()
+
+
+@router.post("/business/folders/discover")
+async def discover_folders(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    """Cherche sur la machine les dossiers contenant des rapports lisibles.
+
+    Repond a la vraie raison pour laquelle rien n'est branche: l'utilisateur
+    ne sait pas quel chemin taper. La recherche est bornee en duree, en
+    profondeur et en nombre de dossiers, et ne fait que lire.
+
+    Elle tourne dans un fil separe: parcourir un disque est bloquant, et
+    figerait sinon toutes les autres requetes du serveur.
+    """
+    import anyio
+
+    from jarvis_core.business.discover import discover
+
+    if runtime.business is None:
+        raise HTTPException(status_code=400, detail="Les donnees business sont desactivees.")
+
+    report = await anyio.to_thread.run_sync(discover)
+    known = {
+        str(row["path"])
+        for row in runtime.db.query("SELECT path FROM business_folder_sources")
+    }
+    payload = report.as_dict()
+    # Un dossier deja branche ne doit pas etre propose a nouveau: l'utilisateur
+    # croirait avoir manque une etape.
+    payload["candidates"] = [
+        item for item in payload["candidates"] if item["path"] not in known
+    ]
+    return payload

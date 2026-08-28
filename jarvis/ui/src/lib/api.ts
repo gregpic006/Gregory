@@ -561,3 +561,27 @@ export async function scanFoldersNow(): Promise<FolderScanReport> {
   if (!response.ok) throw new Error(`lecture impossible (${response.status})`);
   return response.json();
 }
+
+export interface FolderCandidate {
+  path: string;
+  sample: string;
+  columns: string[];
+  files: number;
+  newest: string;
+}
+
+export interface DiscoveryReport {
+  candidates: FolderCandidate[];
+  roots: string[];
+  scanned: number;
+  truncated: boolean;
+  seconds: number;
+  summary: string;
+}
+
+/** Cherche les dossiers de rapports sur la machine. Lecture seule. */
+export async function discoverFolders(): Promise<DiscoveryReport> {
+  const response = await fetch("/api/business/folders/discover", { method: "POST" });
+  if (!response.ok) throw new Error(`recherche impossible (${response.status})`);
+  return response.json();
+}
