@@ -215,7 +215,10 @@ async def test_a_pdf_report_is_reported_not_guessed(runtime: FakeRuntime) -> Non
 
     report = await scan_mailbox(runtime)
     assert report.imported == []
-    assert report.skipped and "CSV" in report.skipped[0][1]
+    # Le motif doit nommer le format recu: « format non gere » laisserait
+    # l'utilisateur deviner ce qu'il doit demander a son fournisseur.
+    assert report.skipped and ".pdf" in report.skipped[0][1]
+    assert "CSV" in report.skipped[0][1]
 
 
 @pytest.mark.asyncio

@@ -331,9 +331,27 @@ node scripts/probe-sound.mjs   # dans un second terminal
 
 **Entreprises > Rapports par courriel.**
 
-La plupart des logiciels de gestion n'ont pas d'API ouverte. Maitre'D, par
-exemple, reserve ses integrations a une entente commerciale avec PayFacto, et
-tourne souvent sur un serveur dans le commerce — injoignable de l'exterieur.
+La plupart des logiciels de gestion n'ont pas d'API ouverte.
+
+**Cas Maitre'D / DataBoard.** DataBoard est l'application mobile de Posera
+(PayFacto) posee **par-dessus** Maitre'D: c'est une visionneuse, pas une source
+de donnees. Elle n'a ni API ni export, et elle ne fonctionne pas sans le
+Maitre'D qui est derriere. Les integrations Maitre'D passent par une entente
+commerciale avec Posera/PayFacto, et le back-office tourne souvent sur un
+serveur dans le commerce — injoignable de l'exterieur.
+
+Ce qu'il faut viser n'est donc pas DataBoard mais le **Report Center** du
+back-office Maitre'D, qui sait generer des rapports automatiquement a la
+fermeture (End of Day). Deux facons de les faire arriver jusqu'a JARVIS:
+
+- **par courriel** — le Report Center envoie le rapport, JARVIS le lit (ci-dessous);
+- **par dossier** — les rapports generes a la fermeture sont deposes dans un
+  dossier; s'il est accessible depuis ton PC, `JARVIS_BUSINESS_WATCH_DIR`
+  l'importe tout seul (voir « Dossier surveille »).
+
+Demande a ton installateur Maitre'D **un export CSV** — c'est le format que
+JARVIS lit. S'il t'envoie du .xlsx ou du .pdf, JARVIS te le dira en nommant le
+format recu plutot que de deviner des chiffres.
 
 Mais presque tous savent **envoyer un rapport par courriel a heure fixe**. Ce
 rapport arrive dans une boite que JARVIS lit deja.

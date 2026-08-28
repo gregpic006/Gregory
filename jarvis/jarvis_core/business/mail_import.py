@@ -219,6 +219,12 @@ class MailRuleStore:
             return bool(cur.rowcount)
 
 
+def _extension(filename: str) -> str:
+    """Extension lisible d'un nom de fichier, ou une mention explicite."""
+    _, _, suffix = filename.rpartition(".")
+    return f".{suffix.lower()}" if suffix and suffix != filename else "sans extension"
+
+
 def _decode(payload: bytes) -> str:
     """Decode une piece jointe. Les exports Windows sont souvent en cp1252."""
     for encoding in ("utf-8-sig", "cp1252", "latin-1"):
@@ -301,10 +307,15 @@ async def _run_rule(
 
         tabular = [item for item in attachments if item.looks_tabular]
         if not tabular:
+            # On nomme ce qu'on a reellement vu. « Format non gere » laisse
+            # l'utilisateur deviner ce qu'il doit changer chez son
+            # fournisseur; « recu en .xlsx » lui dit quoi demander.
+            seen = sorted({_extension(item.filename) for item in attachments})
+            what = ", ".join(seen) if seen else "aucune piece jointe"
             report.skipped.append(
                 (
                     getattr(message, "subject", "") or message_id,
-                    "aucune piece jointe tabulaire (CSV attendu)",
+                    f"recu en {what} — demande un export CSV a ton fournisseur",
                 )
             )
             continue
