@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Card } from "../components/Card";
+import { FolderSources } from "../components/FolderSources";
 import { MailRules } from "../components/MailRules";
 import { IconBuilding, IconRefresh } from "../components/layout/icons";
 import {
@@ -226,6 +227,7 @@ export function BusinessesView() {
         </Card>
       )}
 
+      {data?.enabled && <FolderSources organizations={data.organizations ?? []} />}
       {data?.enabled && <MailRules organizations={data.organizations ?? []} />}
 
       {data && !data.enabled && <p className="section-note">{data.note}</p>}

@@ -93,6 +93,21 @@ def _register_jobs(runtime: JarvisRuntime) -> None:
         # ressemble a du direct, assez rare pour ne rien couter.
         runtime.scheduler.every(2, name="import-business", handler=import_job)
 
+    if settings.feature_business:
+
+        async def folder_job() -> None:
+            from jarvis_core.business.watch_folder import scan_sources
+
+            if runtime.business is None:  # pragma: no cover - garde de coherence
+                return
+            report = scan_sources(runtime.business)
+            if report.changed:
+                logger.info("dossiers designes: %s", report.summary())
+
+        # Meme cadence que le dossier conventionnel: « depose le fichier »
+        # doit ressembler a du direct.
+        runtime.scheduler.every(2, name="import-dossiers", handler=folder_job)
+
     if settings.feature_business and settings.feature_gmail:
 
         async def mail_job() -> None:

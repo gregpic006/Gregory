@@ -501,3 +501,63 @@ export async function scanMailNow(): Promise<MailScanReport> {
   if (!response.ok) throw new Error(`recherche impossible (${response.status})`);
   return response.json();
 }
+
+// --------------------------------- dossiers designes (export d'une caisse)
+
+export interface FolderSource {
+  id: string;
+  org_id: string;
+  path: string;
+  pattern: string;
+  label: string;
+  enabled: boolean;
+  last_run_at: string;
+  last_error: string;
+}
+
+export interface FolderSourcesResponse {
+  sources: FolderSource[];
+  blocked: string;
+}
+
+export function fetchFolderSources(): Promise<FolderSourcesResponse> {
+  return get("/api/business/folders");
+}
+
+export async function addFolderSource(source: {
+  org_id: string;
+  path: string;
+  pattern?: string;
+  label?: string;
+}): Promise<{ reachable: boolean; warning: string }> {
+  const response = await fetch("/api/business/folders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(source),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw new Error(detail?.detail ?? `ajout refuse (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function removeFolderSource(sourceId: string): Promise<void> {
+  const response = await fetch(`/api/business/folders/${sourceId}`, { method: "DELETE" });
+  if (!response.ok) throw new Error(`suppression refusee (${response.status})`);
+}
+
+export interface FolderScanReport {
+  imported: string[];
+  unchanged: string[];
+  skipped: { name: string; reason: string }[];
+  failed: { name: string; reason: string }[];
+  rows: number;
+  summary: string;
+}
+
+export async function scanFoldersNow(): Promise<FolderScanReport> {
+  const response = await fetch("/api/business/folders/scan", { method: "POST" });
+  if (!response.ok) throw new Error(`lecture impossible (${response.status})`);
+  return response.json();
+}

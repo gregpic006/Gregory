@@ -698,3 +698,95 @@ async def scan_mail_now(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[s
     from jarvis_core.business.mail_import import scan_mailbox
 
     return (await scan_mailbox(runtime)).as_dict()
+
+
+# --------------------------------------------------- dossiers designes un a un
+#
+# Pointer directement le dossier d'export d'une caisse — y compris un partage
+# reseau sur le serveur de back-office. JARVIS y **lit** les fichiers; il n'en
+# deplace, renomme ni efface aucun.
+
+
+class FolderSourceRequest(BaseModel):
+    """« Tout ce qui arrive dans ce dossier appartient a cette entreprise. »"""
+
+    org_id: str = Field(min_length=1, max_length=60)
+    path: str = Field(min_length=2, max_length=400)
+    pattern: str = Field(default="", max_length=80)
+    label: str = Field(default="", max_length=80)
+
+
+@router.get("/business/folders")
+async def list_folder_sources(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    from jarvis_core.business.watch_folder import FolderSourceStore
+
+    blocked = (
+        "" if runtime.settings.feature_business else "Les donnees business sont desactivees."
+    )
+    sources = FolderSourceStore(runtime.db).list_sources()
+    return {"sources": [item.as_dict() for item in sources], "blocked": blocked}
+
+
+@router.post("/business/folders")
+async def add_folder_source(
+    request: FolderSourceRequest, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    """Ajoute un dossier, en verifiant tout de suite qu'il est lisible.
+
+    Accepter un chemin sans le regarder ferait decouvrir la faute de frappe
+    des heures plus tard, sous la forme d'un tableau de bord vide.
+    """
+    from pathlib import Path
+
+    from jarvis_core.business.watch_folder import FolderSourceStore
+
+    known = runtime.db.query_one(
+        "SELECT id FROM organizations WHERE id = ? AND archived = 0", (request.org_id,)
+    )
+    if known is None:
+        raise HTTPException(status_code=404, detail="Cette entreprise n'existe pas.")
+
+    try:
+        reachable = Path(request.path).expanduser().is_dir()
+    except OSError:
+        reachable = False
+
+    source = FolderSourceStore(runtime.db).add(
+        org_id=request.org_id,
+        path=request.path,
+        pattern=request.pattern,
+        label=request.label,
+    )
+    return {
+        "source": source.as_dict(),
+        # On enregistre quand meme: un partage peut etre momentanement
+        # deconnecte, et refuser obligerait a tout ressaisir plus tard.
+        "reachable": reachable,
+        "warning": (
+            ""
+            if reachable
+            else "Ce dossier n'est pas lisible pour l'instant. Verifie le chemin, "
+            "ou que le lecteur reseau est connecte."
+        ),
+    }
+
+
+@router.delete("/business/folders/{source_id}")
+async def remove_folder_source(
+    source_id: str, runtime: JarvisRuntime = Depends(get_runtime)
+) -> dict[str, Any]:
+    from jarvis_core.business.watch_folder import FolderSourceStore
+
+    if not FolderSourceStore(runtime.db).remove(source_id):
+        raise HTTPException(status_code=404, detail="Source introuvable.")
+    return {"removed": True}
+
+
+@router.post("/business/folders/scan")
+async def scan_folders_now(runtime: JarvisRuntime = Depends(get_runtime)) -> dict[str, Any]:
+    """Parcourt les dossiers maintenant, sans attendre le prochain passage."""
+    from jarvis_core.business.watch_folder import scan_sources
+
+    if runtime.business is None:
+        raise HTTPException(status_code=400, detail="Les donnees business sont desactivees.")
+    return scan_sources(runtime.business).as_dict()

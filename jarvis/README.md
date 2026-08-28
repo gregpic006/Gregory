@@ -349,7 +349,25 @@ fermeture (End of Day). Deux facons de les faire arriver jusqu'a JARVIS:
   dossier; s'il est accessible depuis ton PC, `JARVIS_BUSINESS_WATCH_DIR`
   l'importe tout seul (voir « Dossier surveille »).
 
-Demande a ton installateur Maitre'D **un export CSV** — c'est le format que
+**Si tu vois le serveur Maitre'D depuis ton ordinateur, c'est la meilleure
+voie** — meilleure que le courriel: rien a configurer chez le fournisseur, et
+les chiffres entrent des que la caisse ecrit son rapport.
+
+**Entreprises > Dossier de la caisse.** Colle le chemin du dossier
+(`\\SERVEUR-MD\Rapports` ou un lecteur reseau `Z:\Rapports`), choisis
+l'entreprise, et ajoute au besoin un motif (`ventes*.csv`) si la caisse depose
+plusieurs rapports au meme endroit.
+
+**JARVIS ne modifie rien dans ce dossier.** Il lit; il ne deplace, ne renomme
+et n'efface aucun fichier — un dossier de caisse est un dossier de production.
+Il ne descend pas non plus dans les sous-dossiers: les archives d'annees
+passees ne sont pas rejouees.
+
+**Aucun mot de passe n'est demande.** C'est Windows qui detient l'acces au
+partage; JARVIS ne fait que lire un chemin. Si le lecteur reseau est
+deconnecte, la carte le dit au lieu d'afficher les chiffres d'hier.
+
+Sinon, demande a ton installateur Maitre'D **un export CSV** — c'est le format que
 JARVIS lit. S'il t'envoie du .xlsx ou du .pdf, JARVIS te le dira en nommant le
 format recu plutot que de deviner des chiffres.
 

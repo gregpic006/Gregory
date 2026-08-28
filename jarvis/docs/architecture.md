@@ -1350,6 +1350,46 @@ ne devine pas des chiffres dans un PDF.
 **Une piece jointe demesuree est refusee** avant d'etre chargee en memoire. Un
 rapport de caisse pese quelques dizaines de kilo-octets.
 
+### Le dossier de la caisse, quand il est joignable
+
+Meilleure voie que le courriel des qu'elle existe: aucun fournisseur a
+solliciter, et les chiffres entrent des que la caisse ecrit son rapport.
+
+La convention initiale — `dossier/<ORG_ID>/fichier.csv` — supposait que
+l'utilisateur range les fichiers. Or la source la plus interessante est le
+dossier d'export de la caisse elle-meme, dont l'organisation ne nous appartient
+pas: Maitre'D ecrit `ventes_20260826.csv` a cote de `inventaire_*.csv` et d'un
+sous-dossier d'archives. Exiger un rangement, c'est rendre la fonctionnalite
+inutilisable la ou elle sert le plus.
+
+`scan_mapped_folder` accepte donc **n'importe quel dossier** pour une
+entreprise donnee, avec un motif optionnel (`ventes*.csv`) quand plusieurs
+rapports cohabitent. Le chemin peut etre un UNC — il est conserve tel quel,
+sans normalisation: `\\SERVEUR\Partage` est la forme que Windows donne a
+l'utilisateur, et la transformer casserait l'acces sans que personne comprenne.
+
+### La garantie qui compte: on ne touche a rien
+
+Ce dossier appartient a un logiciel de production. JARVIS le **lit**; il ne
+deplace, ne renomme et n'efface aucun fichier. Un test compare le contenu et
+la date de modification de chaque fichier avant et apres un passage — la
+faute serait invisible jusqu'au jour ou un rapport manquerait a quelqu'un
+d'autre.
+
+On ne descend pas dans les sous-dossiers non plus: une caisse archive souvent
+des annees d'historique a cote, et les rejouer serait long autant que faux.
+
+### Un partage deconnecte se voit
+
+`last_error` est retenu par source et remonte a l'interface. Sans cela, JARVIS
+afficherait les chiffres d'hier en laissant croire qu'ils sont d'aujourd'hui —
+exactement le mensonge que tout le projet s'interdit. Le chemin est aussi
+verifie **au moment de l'ajout**: une faute de frappe se decouvre la, pas des
+heures plus tard devant un tableau de bord vide.
+
+Et aucun mot de passe n'entre nulle part: c'est le systeme d'exploitation qui
+detient l'acces au partage. JARVIS lit un chemin.
+
 ### Ce que ca ne remplace pas
 
 Le courriel donne ce que le rapport contient, a la frequence ou il est envoye.
