@@ -167,6 +167,49 @@ class GoogleClient:
             )
         return content
 
+    async def upload(
+        self,
+        url: str,
+        content: bytes,
+        *,
+        content_type: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Depose un contenu binaire (creation de fichier Drive).
+
+        Distinct de `request`, qui envoie du JSON, et de `download`, qui lit.
+        Meme contrat que les deux pour le 401: un seul rafraichissement, un
+        seul reessai.
+        """
+        access_token = await self._access_token()
+        response = await self._send_bytes(url, access_token, content, content_type, params)
+        if response.status_code == 401:
+            access_token = await self._access_token(force_refresh=True)
+            response = await self._send_bytes(url, access_token, content, content_type, params)
+        return self._handle(response, url)
+
+    async def _send_bytes(
+        self,
+        url: str,
+        access_token: str,
+        content: bytes,
+        content_type: str,
+        params: dict[str, Any] | None,
+    ) -> httpx.Response:
+        try:
+            return await self._http.request(
+                "PATCH",
+                url,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": content_type,
+                },
+                params=params,
+                content=content,
+            )
+        except httpx.HTTPError as exc:
+            raise IntegrationUnavailableError("Google", str(exc)) from exc
+
     async def _send(
         self,
         method: str,

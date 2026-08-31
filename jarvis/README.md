@@ -410,6 +410,37 @@ illisible est **signalee**, jamais devinee: pas de PDF interprete au jugé.
 
 ---
 
+### Ce que JARVIS peut ecrire a la voix
+
+| Tu dis | Il fait |
+|---|---|
+| « Ajoute une note sur mon Drive: rappeler le fournisseur » | Cree un document Google Docs |
+| « Cree un dossier Baux 2026 sur le Drive » | Cree le dossier |
+| « Mets une reunion mardi 14 h avec Eliot » | Cree l'evenement au calendrier |
+| « Annule mon rendez-vous de jeudi » | Annule, apres confirmation |
+| « Ecris un courriel a X pour lui dire que... » | Redige, puis demande avant d'envoyer |
+| « Rappelle-moi de payer les taxes vendredi » | Cree un rappel |
+
+L'ecriture sur Drive s'active dans **Reglages > Ecrire sur Drive**, puis
+reconnecte Google — une nouvelle autorisation est demandee.
+
+La portee demandee est `drive.file`, **pas** `drive`: JARVIS ne peut toucher
+qu'aux fichiers qu'il a lui-meme crees. Dire « ajoute une note » n'ouvre jamais
+le droit de modifier ou supprimer le reste de ton Drive.
+
+---
+
+### Changer de compte Google
+
+Va dans **Integrations > Google > Reconnecter** et choisis le nouveau compte.
+Le jeton precedent est remplace.
+
+Deux consequences a connaitre: les documents deja indexes viennent de l'ancien
+Drive et resteront jusqu'a une reindexation, et les regles de rapports par
+courriel pointent vers la boite du nouveau compte.
+
+---
+
 ### Connecter Gmail et Calendar
 
 Marche a suivre complete : **[docs/google-setup.md](docs/google-setup.md)**.

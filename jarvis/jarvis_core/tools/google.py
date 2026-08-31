@@ -617,3 +617,122 @@ async def find_contact(ctx: ToolContext, *, name: str, limit: int = 5) -> ToolRe
         data={"contacts": [c.as_dict() for c in contacts]},
         display="list",
     )
+
+
+# =============================================================================
+# Drive
+# =============================================================================
+#
+# Ecrire sur le Drive a la voix. La portee demandee est `drive.file`: JARVIS ne
+# peut toucher qu'aux fichiers **qu'il a lui-meme crees**. Dire « ajoute une
+# note sur mon Drive » ne doit jamais ouvrir le droit de modifier ou supprimer
+# le reste.
+
+
+@registry.tool(
+    name="create_drive_note",
+    description=(
+        "Cree une note ou un document sur Google Drive. Utilise-le quand "
+        "l'utilisateur demande d'ajouter, d'ecrire ou de deposer quelque chose "
+        "sur son Drive. Le document est cree dans son Drive, modifiable ensuite."
+    ),
+    permission=PermissionLevel.LOW_WRITE,
+    feature_flag="drive_write",
+    schema={
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "maxLength": 200},
+            "content": {"type": "string", "maxLength": 50000},
+            "folder": {
+                "type": "string",
+                "description": "Nom du dossier de destination. Vide = racine du Drive.",
+                "maxLength": 200,
+            },
+        },
+        "required": ["title"],
+    },
+    tags=("drive",),
+)
+async def create_drive_note(
+    ctx: ToolContext, *, title: str, content: str = "", folder: str = ""
+) -> ToolResult:
+    google = _workspace(ctx)
+
+    if ctx.dry_run:
+        return ToolResult.success(
+            summary=(
+                f"SIMULATION — la note « {title} » n'a PAS ete creee "
+                "(mode developpement). Precise-le a l'utilisateur."
+            ),
+            data={"dry_run": True, "title": title},
+        )
+
+    parent_id = ""
+    if folder.strip():
+        # Un dossier nomme mais introuvable est une erreur, pas une invitation
+        # a deposer a la racine: l'utilisateur ne retrouverait pas sa note.
+        parent_id = await google.drive.find_folder(folder.strip())
+        if not parent_id:
+            return ToolResult.failure(
+                summary=(
+                    f"Je ne trouve pas de dossier « {folder} » sur ton Drive. "
+                    "Precise un autre nom, ou je peux le creer d'abord."
+                )
+            )
+
+    created = await google.drive.create_document(title, content, parent_id=parent_id)
+    where = f" dans « {folder} »" if folder.strip() else ""
+    return ToolResult.success(
+        summary=f"Note « {created.name} » creee sur ton Drive{where}.",
+        data={"id": created.id, "name": created.name, "url": created.url},
+    )
+
+
+@registry.tool(
+    name="create_drive_folder",
+    description=(
+        "Cree un dossier sur Google Drive. Utile avant d'y deposer des notes."
+    ),
+    permission=PermissionLevel.LOW_WRITE,
+    feature_flag="drive_write",
+    schema={
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "maxLength": 200},
+            "parent": {
+                "type": "string",
+                "description": "Dossier parent. Vide = racine du Drive.",
+                "maxLength": 200,
+            },
+        },
+        "required": ["name"],
+    },
+    tags=("drive",),
+)
+async def create_drive_folder(
+    ctx: ToolContext, *, name: str, parent: str = ""
+) -> ToolResult:
+    google = _workspace(ctx)
+
+    if ctx.dry_run:
+        return ToolResult.success(
+            summary=(
+                f"SIMULATION — le dossier « {name} » n'a PAS ete cree "
+                "(mode developpement). Precise-le a l'utilisateur."
+            ),
+            data={"dry_run": True, "name": name},
+        )
+
+    parent_id = ""
+    if parent.strip():
+        parent_id = await google.drive.find_folder(parent.strip())
+        if not parent_id:
+            return ToolResult.failure(
+                summary=f"Je ne trouve pas de dossier « {parent} » sur ton Drive."
+            )
+
+    created = await google.drive.create_folder(name, parent_id=parent_id)
+    return ToolResult.success(
+        summary=f"Dossier « {created.name} » cree sur ton Drive.",
+        data={"id": created.id, "name": created.name, "url": created.url},
+    )

@@ -49,13 +49,23 @@ SCOPES_CONTACTS = ("https://www.googleapis.com/auth/contacts.readonly",)
 #: `drive.readonly` donne acces a tout le Drive: on la demande seulement si
 #: la fonctionnalite est activee, et l'indexation reste bornee a un dossier.
 SCOPES_DRIVE = ("https://www.googleapis.com/auth/drive.readonly",)
+#: `drive.file` ne donne acces qu'aux fichiers **crees par JARVIS**. C'est
+#: volontairement plus etroit que `drive`: creer une note ne doit pas ouvrir
+#: le droit de modifier ou supprimer le reste du Drive.
+SCOPES_DRIVE_WRITE = ("https://www.googleapis.com/auth/drive.file",)
 
 #: Duree de vie d'une demande d'autorisation en attente.
 PENDING_TTL_SECONDS = 600
 
 
 def scopes_for(
-    *, gmail: bool, gmail_write: bool, calendar: bool, contacts: bool, drive: bool = False
+    *,
+    gmail: bool,
+    gmail_write: bool,
+    calendar: bool,
+    contacts: bool,
+    drive: bool = False,
+    drive_write: bool = False,
 ) -> list[str]:
     """Portees a demander compte tenu des capacites activees."""
     scopes: list[str] = list(SCOPES_IDENTITY)
@@ -69,6 +79,10 @@ def scopes_for(
         scopes.extend(SCOPES_CONTACTS)
     if drive:
         scopes.extend(SCOPES_DRIVE)
+    if drive_write:
+        # Independante de `drive`: on peut vouloir creer des notes sans
+        # autoriser la lecture de tout le Drive.
+        scopes.extend(SCOPES_DRIVE_WRITE)
     return scopes
 
 

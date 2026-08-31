@@ -21,12 +21,19 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from jarvis_core.errors import IntegrationUnavailableError
 from jarvis_core.integrations.google.client import GoogleClient
 
 logger = logging.getLogger(__name__)
 
 BASE = "https://www.googleapis.com/drive/v3"
+UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3"
+
+FOLDER_MIME = "application/vnd.google-apps.folder"
+DOCUMENT_MIME = "application/vnd.google-apps.document"
 SCOPE_DRIVE_READ = "https://www.googleapis.com/auth/drive.readonly"
+#: Ecriture restreinte aux fichiers crees par JARVIS, jamais au reste du Drive.
+SCOPE_DRIVE_WRITE = "https://www.googleapis.com/auth/drive.file"
 
 #: Documents Google natifs -> format d'export demande.
 EXPORT_FORMATS = {
@@ -48,6 +55,8 @@ BINARY_TYPES = {
 MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
 
 FIELDS = "nextPageToken,files(id,name,mimeType,modifiedTime,size,webViewLink,md5Checksum)"
+#: Les memes champs, pour un fichier seul (creation, relecture).
+FILE_FIELDS = "id,name,mimeType,modifiedTime,size,webViewLink,md5Checksum"
 
 
 @dataclass
@@ -171,6 +180,69 @@ class DriveService:
         )
         found = payload.get("files") or []
         return str(found[0]["id"]) if found else ""
+
+    # ------------------------------------------------------------- ecriture
+    #
+    # Toutes les creations passent par la portee `drive.file`, qui ne donne
+    # acces qu'aux fichiers crees par JARVIS. Creer une note ne doit jamais
+    # ouvrir le droit de modifier le reste du Drive.
+
+    async def create_folder(self, name: str, *, parent_id: str = "") -> DriveFile:
+        """Cree un dossier et le retourne."""
+        self.client.require_scope(SCOPE_DRIVE_WRITE, "creer des fichiers sur ton Drive")
+        body: dict[str, Any] = {
+            "name": name.strip() or "Nouveau dossier",
+            "mimeType": FOLDER_MIME,
+        }
+        if parent_id:
+            body["parents"] = [parent_id]
+        payload = await self.client.request(
+            "POST", f"{BASE}/files", params={"fields": FILE_FIELDS}, json_body=body
+        )
+        return _to_file(payload)
+
+    async def create_document(
+        self, name: str, content: str, *, parent_id: str = "", as_google_doc: bool = True
+    ) -> DriveFile:
+        """Cree un document texte sur le Drive.
+
+        Args:
+            as_google_doc: convertit en Google Docs (modifiable dans le
+                navigateur) plutot que de deposer un .txt inerte. C'est ce que
+                l'utilisateur attend en disant « ajoute une note sur mon Drive ».
+
+        La creation se fait en deux temps — metadonnees puis contenu — plutot
+        qu'en un seul envoi multipart: l'API accepte les deux, et deux appels
+        simples se diagnostiquent mieux qu'un corps multipart mal forme.
+        """
+        self.client.require_scope(SCOPE_DRIVE_WRITE, "creer des fichiers sur ton Drive")
+
+        body: dict[str, Any] = {"name": name.strip() or "Note"}
+        if as_google_doc:
+            body["mimeType"] = DOCUMENT_MIME
+        if parent_id:
+            body["parents"] = [parent_id]
+
+        created = await self.client.request(
+            "POST", f"{BASE}/files", params={"fields": FILE_FIELDS}, json_body=body
+        )
+        file_id = str(created.get("id", ""))
+        if not file_id:
+            raise IntegrationUnavailableError("Drive", "creation sans identifiant")
+
+        if content.strip():
+            # `uploadType=media` remplace le contenu du fichier qu'on vient de
+            # creer. Le texte brut est converti par Google en document.
+            await self.client.upload(
+                f"{UPLOAD_BASE}/files/{file_id}",
+                content.encode("utf-8"),
+                content_type="text/plain; charset=UTF-8",
+                params={"uploadType": "media", "fields": FILE_FIELDS},
+            )
+            created = await self.client.request(
+                "GET", f"{BASE}/files/{file_id}", params={"fields": FILE_FIELDS}
+            )
+        return _to_file(created)
 
     async def fetch_content(self, file: DriveFile) -> bytes:
         """Recupere le contenu d'un fichier, exporte si c'est un document Google."""

@@ -108,6 +108,16 @@ TOGGLES: tuple[Toggle, ...] = (
         needs_reconnect=True,
     ),
     Toggle(
+        key="JARVIS_FEATURE_DRIVE_WRITE",
+        field="feature_drive_write",
+        label="Ecrire sur Drive",
+        description=(
+            "Creer des notes et des dossiers a la voix. JARVIS ne peut toucher "
+            "qu'aux fichiers qu'il a lui-meme crees, jamais au reste du Drive."
+        ),
+        needs_reconnect=True,
+    ),
+    Toggle(
         key="JARVIS_FEATURE_DRIVE",
         field="feature_drive",
         label="Google Drive",

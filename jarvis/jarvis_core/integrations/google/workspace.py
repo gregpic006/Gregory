@@ -76,6 +76,7 @@ class GoogleWorkspace:
             calendar=self.settings.feature_calendar,
             contacts=self.settings.feature_gmail or self.settings.feature_calendar,
             drive=self.settings.feature_drive and self.settings.feature_documents,
+            drive_write=self.settings.feature_drive_write,
         )
 
     def status(self) -> dict[str, Any]:

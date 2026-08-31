@@ -140,6 +140,9 @@ class Settings(BaseSettings):
     feature_calendar: bool = Field(default=False, alias="JARVIS_FEATURE_CALENDAR")
     feature_documents: bool = Field(default=False, alias="JARVIS_FEATURE_DOCUMENTS")
     feature_drive: bool = Field(default=False, alias="JARVIS_FEATURE_DRIVE")
+    #: Creer des notes et des dossiers sur Drive a la voix. Portee `drive.file`:
+    #: JARVIS ne peut toucher qu'aux fichiers qu'il a lui-meme crees.
+    feature_drive_write: bool = Field(default=False, alias="JARVIS_FEATURE_DRIVE_WRITE")
     feature_business: bool = Field(default=False, alias="JARVIS_FEATURE_BUSINESS")
     feature_proactive: bool = Field(default=True, alias="JARVIS_FEATURE_PROACTIVE")
     feature_persistent_memory: bool = Field(
@@ -198,6 +201,7 @@ class Settings(BaseSettings):
             "calendar": self.feature_calendar,
             "documents": self.feature_documents,
             "drive": self.feature_drive,
+            "drive_write": self.feature_drive_write,
             "business": self.feature_business,
             "proactive": self.feature_proactive,
             "persistent_memory": self.feature_persistent_memory,
