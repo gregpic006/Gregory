@@ -103,6 +103,14 @@ const RAPPROCHEMENT_MAX_RESUME_ = 5;
 /** Texte de la colonne « Relance » tant qu'aucun courriel n'a été préparé. */
 const RAPPROCHEMENT_SANS_RELANCE_ = '—';
 
+/**
+ * Valeurs de la colonne « Relance » qui signifient qu'un courriel a DÉJÀ été
+ * préparé pour ce client sur ce trimestre (§3.7). Relancer le rapprochement du
+ * même trimestre doit les reporter telles quelles : sans cela, la colonne
+ * repasserait à « — » et le client recevrait une seconde relance identique.
+ */
+const RAPPROCHEMENT_RELANCES_FAITES_ = ['Envoyée', 'Brouillon créé'];
+
 // ---------------------------------------------------------------------------
 // Point d'entrée : la seule fonction de ce fichier qui touche aux feuilles
 // ---------------------------------------------------------------------------
@@ -155,6 +163,9 @@ function rapprochementLireDonnees_(params) {
     paiements: lireTable_(CONFIG.ONGLETS.PAIEMENTS.nom),
     soldes: lireTable_(CONFIG.ONGLETS.SOLDES_DECLARES.nom),
     bilans: lireTable_(CONFIG.ONGLETS.BILANS.nom),
+    // Lu AVANT remplacerPeriode_ : c'est là que se trouve l'état des relances
+    // déjà envoyées pour ce trimestre.
+    rapprochements: lireTable_(CONFIG.ONGLETS.RAPPROCHEMENT.nom),
     params: params || {},
     maintenant: new Date(),
   };
@@ -182,7 +193,8 @@ function rapprochementEcrireResultat_(resultat) {
 
 /**
  * Prépare les relances si le réglage RELANCE_AUTO est à « Oui » et qu'au moins
- * un client est en écart. Un échec de relance ne fait jamais perdre le rapport.
+ * un client est en écart. La relance porte sur LE trimestre qui vient d'être
+ * calculé, jamais sur un autre. Un échec de relance ne fait jamais perdre le rapport.
  * @param {Object} params Réglages lus par lireParametres_().
  * @param {Object} resultat Ce que renvoie rapprocherPeriode_().
  * @return {string} Phrase à ajouter au résumé, ou chaîne vide.
@@ -197,7 +209,7 @@ function rapprochementRelanceAuto_(params, resultat) {
     return '';
   }
   try {
-    const retour = relancerClientsEnEcart();
+    const retour = relancerClientsEnEcart(resultat.periode);
     return typeof retour === 'string' && retour ? retour : 'Les relances ont été préparées.';
   } catch (e) {
     journalErreur_('rapprochementRelanceAuto_',
@@ -244,7 +256,8 @@ function rapprochementPeriodeChoisie_(demande, donnees) {
  * @param {Object} donnees {clients, factures, paiements, soldes, bilans,
  *     params, maintenant} — tel que le renvoie rapprochementLireDonnees_().
  * @return {Object} {periode, debut, fin, lignes, majPaiements, compteurs,
- *     total, inexpliques, paiementsConfirmes, paiementsRefuses, messages}.
+ *     total, inexpliques, paiementsConfirmes, paiementsRefuses, piecesSansDate,
+ *     clientsSansDate, messages}.
  */
 function rapprocherPeriode_(periode, donnees) {
   const base = rapprochementPreparer_(periode, donnees);
@@ -265,6 +278,10 @@ function rapprocherPeriode_(periode, donnees) {
     fiche.majPaiements.forEach((maj) => resultat.majPaiements.push(maj));
     resultat.paiementsConfirmes += fiche.confirmes;
     resultat.paiementsRefuses += fiche.refuses;
+    if (fiche.sansDate) {
+      resultat.piecesSansDate += fiche.sansDate;
+      resultat.clientsSansDate.push(`${fiche.nom || fiche.id} (${fiche.id})`);
+    }
   });
   resultat.total = fiches.length;
   resultat.inexpliques = fiches
@@ -282,7 +299,7 @@ function rapprocherPeriode_(periode, donnees) {
  * @param {string} periode Trimestre demandé.
  * @param {Object} donnees Jeu de données complet.
  * @return {Object} {periode, bornes, params, decalage, toleranceCents,
- *     deviseDefaut, maintenant, dossiers}.
+ *     deviseDefaut, maintenant, dossiers, relances}.
  */
 function rapprochementPreparer_(periode, donnees) {
   const jeu = donnees || {};
@@ -298,7 +315,34 @@ function rapprochementPreparer_(periode, donnees) {
     deviseDefaut: params.DEVISE || CONFIG.PARAMETRES_DEFAUT.DEVISE,
     maintenant: versDate_(jeu.maintenant) || new Date(),
     dossiers: rapprochementDossiers_(jeu),
+    relances: rapprochementRelancesExistantes_(jeu.rapprochements, canonique),
   };
+}
+
+/**
+ * Relit la colonne « Relance » des lignes déjà écrites pour ce trimestre, afin
+ * de la reporter sur les nouvelles lignes. Seuls les états qui prouvent qu'un
+ * courriel a été préparé sont repris ; « — » et « Échec » ne le sont pas, pour
+ * qu'un envoi manqué puisse être retenté.
+ * @param {Array<Object>} lignes Lignes de l'onglet Rapprochement, lues avant
+ *     la réécriture de la période.
+ * @param {string} periode Trimestre traité, au format canonique.
+ * @return {Map<string, string>} Clé du client vers l'état de relance à reprendre.
+ */
+function rapprochementRelancesExistantes_(lignes, periode) {
+  const reprises = new Map();
+  if (!periode) return reprises;
+  (lignes || []).forEach((ligne) => {
+    if (!ligne) return;
+    if (rapprochementPeriodeValide_(ligne[RAPPROCHEMENT_COL_.RAP_PERIODE]) !== periode) return;
+    const cle = rapprochementCle_(ligne[RAPPROCHEMENT_COL_.RAP_CLIENT]);
+    if (!cle) return;
+    const valeur = rapprochementTexte_(ligne[RAPPROCHEMENT_COL_.RAP_RELANCE]);
+    const faite = RAPPROCHEMENT_RELANCES_FAITES_
+      .some((etat) => texteNormalise_(etat) === texteNormalise_(valeur));
+    if (faite) reprises.set(cle, valeur);
+  });
+  return reprises;
 }
 
 /**
@@ -319,6 +363,8 @@ function rapprochementResultatVide_(periode, bornes) {
     inexpliques: [],
     paiementsConfirmes: 0,
     paiementsRefuses: 0,
+    piecesSansDate: 0,
+    clientsSansDate: [],
     messages: [],
   };
 }
@@ -381,9 +427,9 @@ function rapprochementTraiterClient_(dossier, base) {
   const theorique = calculerSoldeTheorique_(dossier.cle, base.bornes.fin, donneesClient);
   const declaration = rapprochementDeclaration_(dossier, base);
   const paiementsPeriode = rapprochementPiecesPeriode_(
-    dossier.paiements.map(rapprochementPiecePaiement_), base.bornes);
+    dossier.paiements.map(rapprochementPiecePaiement_), base.bornes, true);
   const facturesPeriode = rapprochementPiecesPeriode_(
-    dossier.factures.map(rapprochementPieceFacture_), base.bornes);
+    dossier.factures.map(rapprochementPieceFacture_), base.bornes, true);
   if (!declaration.connu && theorique === 0 && !paiementsPeriode.length && !facturesPeriode.length) {
     return null; // Client sans activité et sans solde déclaré : aucune ligne, aucun bruit.
   }
@@ -401,6 +447,7 @@ function rapprochementTraiterClient_(dossier, base) {
     theoriqueCents: theorique, declareCents: declaration.cents, declareConnu: declaration.connu,
     ecartCents: declaration.connu ? theorique - declaration.cents : 0,
     verdict: diag.verdict, diag: diag, paiementsPeriode: paiementsPeriode,
+    sansDate: Number(diag.piecesSansDate) || 0,
     majPaiements: [], confirmes: 0, refuses: 0,
   };
   rapprochementMajPaiements_(fiche, base);
@@ -501,7 +548,8 @@ function rapprochementLigneFeuille_(fiche, base) {
   ligne[col.RAP_DIAGNOSTIC] = fiche.diag.diagnostic;
   ligne[col.RAP_DETAIL] = fiche.diag.detail;
   ligne[col.RAP_ACTION] = fiche.diag.action;
-  ligne[col.RAP_RELANCE] = RAPPROCHEMENT_SANS_RELANCE_;
+  const dejaRelance = base.relances ? base.relances.get(fiche.cle) : '';
+  ligne[col.RAP_RELANCE] = dejaRelance || RAPPROCHEMENT_SANS_RELANCE_;
   ligne[col.RAP_EXECUTE] = base.maintenant;
   return ligne;
 }
@@ -658,11 +706,22 @@ function rapprochementAvantOuEgal_(date, borne) {
  *     decalageMois, toleranceCents, soldeDeclareConnu, soldeTheoriqueCents,
  *     soldeDeclareCents, ecartCents (facultatif), factures, paiements, bilans}.
  * @return {{verdict: string, diagnostic: string, detail: string, action: string,
- *     paiementsNonDeduits: Array<string>, sourcesNonDeduites: Array<Object>}}
+ *     paiementsNonDeduits: Array<string>, sourcesNonDeduites: Array<Object>,
+ *     piecesSansDate: number}}
  *     Verdict, explication nommant les pièces, et geste à faire ensuite.
  */
 function diagnostiquerEcart_(contexte) {
   const c = rapprochementContexte_(contexte);
+  return rapprochementSignalerSansDate_(rapprochementChoisirHypothese_(c), c);
+}
+
+/**
+ * Déroule les hypothèses du §4.4 dans l'ordre et renvoie la première qui
+ * explique EXACTEMENT l'écart.
+ * @param {Object} c Contexte complété par rapprochementContexte_().
+ * @return {Object} Résultat de diagnostic.
+ */
+function rapprochementChoisirHypothese_(c) {
   if (!c.soldeDeclareConnu) return rapprochementNonDeclare_(c);
   if (Math.abs(c.ecartCents) <= c.toleranceCents) return rapprochementBalance_(c);
   const atelier = rapprochementAtelier_(c);
@@ -681,6 +740,22 @@ function diagnostiquerEcart_(contexte) {
     if (trouve) return trouve;
   }
   return rapprochementHypInexplique_(c, atelier);   // 9
+}
+
+/**
+ * Ajoute au « Détail » la phrase qui nomme les pièces sans date (§4.4). Ces
+ * pièces comptent dans le solde théorique : les taire reviendrait à déclarer
+ * « inexpliqué » un écart dont la cause est dans le classeur.
+ * @param {Object} resultat Résultat de diagnostic, complété sur place.
+ * @param {Object} c Contexte complété.
+ * @return {Object} Le même résultat, enrichi.
+ */
+function rapprochementSignalerSansDate_(resultat, c) {
+  const phrase = rapprochementPhraseSansDate_(c);
+  resultat.piecesSansDate = rapprochementPiecesSansDate_(c).length;
+  if (!phrase) return resultat;
+  resultat.detail = resultat.detail ? `${resultat.detail} ${phrase}` : phrase;
+  return resultat;
 }
 
 /**
@@ -722,12 +797,22 @@ function rapprochementAtelier_(c) {
   const paiements = c.paiements.map(rapprochementPiecePaiement_);
   const bilans = c.bilans.map(rapprochementPieceBilan_);
   const fin = c.bornes ? c.bornes.fin : null;
+  // §4.4 : une hypothèse ne raisonne que sur les pièces qui composent RÉELLEMENT
+  // le solde théorique (§4.2). Une facture Annulée, Rejetée, Doublon ou Sans
+  // bilan n'y entre pas : l'accuser d'expliquer un écart est une contradiction,
+  // et le courriel qui en découlerait enverrait le client vérifier une pièce
+  // qu'aucun des deux ne compte. Le filtre est posé ICI, une fois, plutôt que
+  // répété dans chaque hypothèse — c'est l'oubli d'un de ces filtres qui a
+  // produit les faux diagnostics des hypothèses 6, 8 et 9.
+  // Seule l'hypothèse 5, dont c'est précisément l'objet, regarde les factures
+  // écartées : elle passe par facturesAvant, volontairement non filtrée.
+  const reconnues = factures.filter((piece) => rapprochementFactureReconnue_(piece.source));
   return {
-    facturesPeriode: rapprochementPiecesPeriode_(factures, c.bornes),
-    paiementsPeriode: rapprochementPiecesPeriode_(paiements, c.bornes),
+    facturesPeriode: rapprochementPiecesPeriode_(reconnues, c.bornes, true),
+    paiementsPeriode: rapprochementPiecesPeriode_(paiements, c.bornes, true),
     bilansPeriode: rapprochementPiecesPeriode_(bilans, c.bornes),
     facturesAvant: factures.filter((piece) => rapprochementAvantOuEgal_(piece.date, fin)),
-    voisines: rapprochementPiecesVoisines_(c, factures.concat(paiements)),
+    voisines: rapprochementPiecesVoisines_(c, reconnues.concat(paiements)),
   };
 }
 
@@ -785,13 +870,15 @@ function rapprochementSousEnsemblePaiements_(paiements, cibleCents) {
  * @return {?Object} Résultat de diagnostic, ou null.
  */
 function rapprochementHypFactureNonComptabilisee_(c, atelier) {
-  const conformes = atelier.facturesPeriode.filter((piece) =>
-    texteNormalise_(piece.source[RAPPROCHEMENT_COL_.FACTURE_VERIFICATION]) ===
-      texteNormalise_(STATUT_VERIF.CONFORME));
-  const indices = trouverSousEnsemble_(conformes.map((piece) => piece.cents), c.ecartCents,
+  // Toutes les factures RECONNUES, pas seulement les « Conforme » : une facture
+  // « Écart de montant » compte dans le solde théorique (§4.2), donc le client
+  // peut tout aussi bien avoir omis de la comptabiliser. La restreindre aux
+  // « Conforme » rendait le rapport contradictoire avec son propre calcul.
+  const reconnues = atelier.facturesPeriode;
+  const indices = trouverSousEnsemble_(reconnues.map((piece) => piece.cents), c.ecartCents,
     CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS);
   if (!indices) return null;
-  const trouves = indices.map((position) => conformes[position]);
+  const trouves = indices.map((position) => reconnues[position]);
   return rapprochementResultat_(VERDICT.EXPLIQUE,
     `${trouves.length} facture(s) que le client n'a pas comptabilisée(s).`,
     `${rapprochementSens_(c)} ${formaterMontant_(c.ecartCents, c.devise)}, ` +
@@ -801,33 +888,29 @@ function rapprochementHypFactureNonComptabilisee_(c, atelier) {
 }
 
 /**
- * Hypothèse 3 — un paiement compté deux fois par le client.
+ * Hypothèse 3 — un paiement déduit deux fois par le client (§4.4).
+ *
+ * SIGNE IMPOSÉ : écart > 0. Retrancher un paiement une fois de trop ABAISSE le
+ * solde du client ; son solde est donc plus bas que le vôtre, exactement du
+ * montant de ce paiement (et non du double : le paiement légitime est déjà
+ * déduit des deux côtés). Un écart négatif ne peut pas venir de là.
+ *
  * @param {Object} c Contexte complété.
  * @param {Object} atelier Pièces préparées.
  * @return {?Object} Résultat de diagnostic, ou null.
  */
 function rapprochementHypPaiementDouble_(c, atelier) {
+  if (c.ecartCents <= 0) return null;
   const paiements = atelier.paiementsPeriode;
-  const absolu = Math.abs(c.ecartCents);
-  const proche = (valeur) => valeur !== 0 && Math.abs(absolu - Math.abs(valeur)) <= c.toleranceCents;
   for (let i = 0; i < paiements.length; i++) {
     const piece = paiements[i];
-    if (proche(2 * piece.cents)) {
-      return rapprochementResultat_(VERDICT.EXPLIQUE, 'Un paiement semble compté deux fois.',
-        `${rapprochementSens_(c)} ${formaterMontant_(absolu, c.devise)}, soit exactement ` +
-        `le double ${rapprochementDe_(piece)}${rapprochementDecrire_(piece, c.devise)}.`,
-        'Demandez-lui de vérifier qu\'il n\'a pas enregistré ce paiement deux fois.');
-    }
-    const jumeau = paiements.filter((autre) => autre !== piece && autre.cents === piece.cents);
-    if (jumeau.length && proche(piece.cents)) {
-      return rapprochementResultat_(VERDICT.EXPLIQUE,
-        'Deux paiements de même montant : un seul semble avoir été pris en compte.',
-        `${rapprochementSens_(c)} ${formaterMontant_(absolu, c.devise)}. Or ce montant ` +
-        `apparaît deux fois dans vos paiements : ${rapprochementDecrire_(piece, c.devise)} ` +
-        `et ${rapprochementDecrire_(jumeau[0], c.devise)}.`,
-        'Demandez-lui lequel des deux paiements il a enregistré : le second est probablement ' +
-        'resté de côté (ou a été compté deux fois).');
-    }
+    if (piece.cents <= 0) continue;
+    if (Math.abs(piece.cents - c.ecartCents) > c.toleranceCents) continue;
+    return rapprochementResultat_(VERDICT.EXPLIQUE, 'Un paiement semble compté deux fois.',
+      `${rapprochementSens_(c)} ${formaterMontant_(c.ecartCents, c.devise)}, soit exactement ` +
+      `le montant ${rapprochementDe_(piece)}${rapprochementDecrire_(piece, c.devise)} : ` +
+      'il l\'a vraisemblablement retranché une fois de trop de son solde.',
+      'Demandez-lui de vérifier qu\'il n\'a pas enregistré ce paiement deux fois.');
   }
   return null;
 }
@@ -846,7 +929,10 @@ function rapprochementHypEcartFacturation_(c, atelier) {
   if (!enEcart.length) return null;
   const somme = enEcart.reduce((total, piece) =>
     total + enCents_(piece.source[RAPPROCHEMENT_COL_.FACTURE_ECART]), 0);
-  if (somme === 0 || Math.abs(Math.abs(somme) - Math.abs(c.ecartCents)) > c.toleranceCents) {
+  // La somme des « Écart vs bilan » a un sens déterminé : on la compare SIGNÉE
+  // à l'écart signé. En valeur absolue, un écart de sens contraire serait
+  // présenté comme l'explication exacte, ce qu'il n'est pas.
+  if (somme === 0 || Math.abs(somme - c.ecartCents) > c.toleranceCents) {
     return null;
   }
   const details = enEcart.map((piece) => `${rapprochementDecrire_(piece, c.devise)} — écart de ` +
@@ -869,13 +955,16 @@ function rapprochementHypEcartFacturation_(c, atelier) {
  * @return {?Object} Résultat de diagnostic, ou null.
  */
 function rapprochementHypFactureEcartee_(c, atelier) {
-  const absolu = Math.abs(c.ecartCents);
+  // SIGNE IMPOSÉ : écart < 0. Si le client compte une facture que vous avez
+  // écartée, son solde est plus ÉLEVÉ que le vôtre, jamais plus bas.
+  if (c.ecartCents >= 0) return null;
+  const absolu = -c.ecartCents;
   const ecartees = atelier.facturesAvant.filter((piece) => {
     const statut = texteNormalise_(piece.source[RAPPROCHEMENT_COL_.FACTURE_VERIFICATION]);
     return RAPPROCHEMENT_STATUTS_ECARTES_.some((v) => texteNormalise_(v) === statut);
   });
   const trouvee = ecartees.filter((piece) =>
-    piece.cents !== 0 && Math.abs(Math.abs(piece.cents) - absolu) <= c.toleranceCents)[0];
+    piece.cents !== 0 && Math.abs(piece.cents - absolu) <= c.toleranceCents)[0];
   if (!trouvee) return null;
   const statut = rapprochementTexte_(trouvee.source[RAPPROCHEMENT_COL_.FACTURE_VERIFICATION]);
   return rapprochementResultat_(VERDICT.EXPLIQUE,
@@ -1047,6 +1136,7 @@ function rapprochementResultat_(verdict, diagnostic, detail, action) {
     action: action,
     paiementsNonDeduits: [],
     sourcesNonDeduites: [],
+    piecesSansDate: 0,
   };
 }
 
@@ -1115,16 +1205,101 @@ function rapprochementPieceBilan_(bilan) {
 
 /**
  * Ne garde que les pièces dont la date tombe dans le trimestre.
+ *
+ * Une pièce SANS DATE compte dans le solde théorique (§4.2) : elle est donc
+ * rattachée au trimestre traité (§4.4, « Pièces sans date ») pour que les
+ * hypothèses puissent la nommer. Ce rattachement ne vaut que pour le trimestre
+ * examiné : les trimestres voisins (hypothèse 8) ne l'appliquent pas, sans quoi
+ * la même pièce appartiendrait à trois trimestres à la fois.
+ *
  * @param {Array<Object>} pieces Pièces normalisées.
  * @param {?Object} bornes {debut, fin} du trimestre.
+ * @param {boolean} [inclureSansDate] Vrai pour le trimestre traité.
  * @return {Array<Object>} Pièces du trimestre.
  */
-function rapprochementPiecesPeriode_(pieces, bornes) {
+function rapprochementPiecesPeriode_(pieces, bornes, inclureSansDate) {
   if (!bornes) return [];
   const debut = bornes.debut.getTime();
   const fin = bornes.fin.getTime();
-  return (pieces || []).filter((piece) =>
-    piece.date && piece.date.getTime() >= debut && piece.date.getTime() <= fin);
+  return (pieces || []).filter((piece) => {
+    if (!piece.date) return inclureSansDate === true;
+    return piece.date.getTime() >= debut && piece.date.getTime() <= fin;
+  });
+}
+
+/**
+ * Pièces (factures et paiements) d'un client dont la date est vide ou illisible.
+ * Elles comptent dans le solde théorique : le rapport doit les nommer, sinon
+ * l'écart qu'elles créent serait déclaré inexpliqué alors que sa cause est dans
+ * le classeur (§4.4).
+ * @param {Object} c Contexte complété.
+ * @return {Array<Object>} Pièces sans date, factures d'abord.
+ */
+function rapprochementPiecesSansDate_(c) {
+  const sansDate = (piece) => !piece.date;
+  // Seules les factures reconnues sont annoncées : la phrase dit « ces pièces
+  // comptent dans votre solde », ce qui serait faux d'une facture Rejetée ou
+  // Doublon — et enverrait Grégory compléter la date d'une facture qu'il a
+  // lui-même écartée, avec un avertissement qui ne disparaîtrait jamais.
+  return c.factures.map(rapprochementPieceFacture_)
+    .filter((piece) => sansDate(piece) && rapprochementFactureReconnue_(piece.source))
+    .concat(c.paiements.map(rapprochementPiecePaiement_).filter(sansDate));
+}
+
+/**
+ * Phrase qui nomme les lignes du classeur dont la date manque.
+ * Exemple : « 2 pièce(s) sans date : lignes 14 et 27 de l'onglet Paiements —
+ * complétez la colonne Date. »
+ * @param {Object} c Contexte complété.
+ * @return {string} Phrase à ajouter au « Détail », ou chaîne vide.
+ */
+function rapprochementPhraseSansDate_(c) {
+  const pieces = rapprochementPiecesSansDate_(c);
+  if (!pieces.length) return '';
+  const groupes = [
+    { onglet: CONFIG.ONGLETS.FACTURES.nom, genre: 'facture' },
+    { onglet: CONFIG.ONGLETS.PAIEMENTS.nom, genre: 'paiement' },
+  ].map((groupe) => rapprochementGroupeSansDate_(
+    pieces.filter((piece) => piece.genre === groupe.genre), groupe.onglet))
+    .filter((texte) => texte !== '');
+  return `${pieces.length} pièce(s) sans date : ${groupes.join(' ; ')} — complétez la ` +
+    'colonne Date : ces pièces comptent dans votre solde mais ne peuvent pas être rattachées ' +
+    'à un trimestre.';
+}
+
+/**
+ * Désigne les pièces sans date d'un onglet : « lignes 14 et 27 de l'onglet
+ * Paiements ». Une pièce lue hors du classeur (tests) est nommée par son
+ * identifiant, faute de numéro de ligne.
+ * @param {Array<Object>} pieces Pièces sans date de cet onglet.
+ * @param {string} onglet Nom de l'onglet.
+ * @return {string} Désignation lisible, ou chaîne vide.
+ */
+function rapprochementGroupeSansDate_(pieces, onglet) {
+  if (!pieces.length) return '';
+  const numeros = [];
+  const nommees = [];
+  pieces.forEach((piece) => {
+    const numero = piece.source ? piece.source._ligne : null;
+    if (numero) numeros.push(String(numero));
+    else nommees.push(piece.id || '(sans identifiant)');
+  });
+  const morceaux = [];
+  if (numeros.length) {
+    morceaux.push(`${numeros.length > 1 ? 'lignes' : 'ligne'} ${rapprochementEnumererEt_(numeros)}`);
+  }
+  if (nommees.length) morceaux.push(rapprochementEnumererEt_(nommees));
+  return `${morceaux.join(', ')} de l'onglet ${onglet}`;
+}
+
+/**
+ * Énumère des textes avec « et » avant le dernier.
+ * @param {Array<string>} textes Textes à énumérer.
+ * @return {string} Énumération lisible.
+ */
+function rapprochementEnumererEt_(textes) {
+  if (textes.length <= 1) return textes.join('');
+  return `${textes.slice(0, -1).join(', ')} et ${textes[textes.length - 1]}`;
 }
 
 /**
@@ -1207,63 +1382,88 @@ function rapprochementJoindre_(textes) {
  * Cherche un sous-ensemble dont la somme vaut EXACTEMENT la cible (§4.4).
  *
  * Stratégie, dans cet ordre :
- *   1. toutes les combinaisons de 1, 2 puis 3 éléments (exhaustif) — ce sont
- *      les seules explications qu'un humain accepte de vérifier à la main ;
- *   2. au-delà, programmation dynamique sur les cents, avec reconstruction de
- *      la solution, bornée par CONFIG.SOUS_ENSEMBLE_MAX_CIBLE.
+ *   1. la recherche exhaustive des combinaisons de 1, 2 puis 3 éléments a
+ *      TOUJOURS lieu, quel que soit le nombre de pièces : ce sont les seules
+ *      explications qu'un humain accepte de vérifier à la main, et ce sont les
+ *      plus fréquentes (taille 1 en O(n), tailles 2 et 3 par table de hachage,
+ *      la taille 3 étant plafonnée à CONFIG.SOUS_ENSEMBLE_MAX_TAILLE3 pièces) ;
+ *   2. ensuite seulement, si la liste ne dépasse pas la borne demandée,
+ *      programmation dynamique sur les cents, avec reconstruction de la
+ *      solution, bornée par CONFIG.SOUS_ENSEMBLE_MAX_CIBLE.
  *
  * Jamais d'à-peu-près : sans correspondance exacte, la réponse est null.
  *
  * @param {Array<number>} montantsCents Montants en cents entiers (les valeurs
  *     négatives et les doublons sont acceptés).
  * @param {number} cibleCents Somme recherchée, en cents. Doit être > 0.
- * @param {number} [maxElements] Taille maximale de la liste d'entrée ;
- *     CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS par défaut.
+ * @param {number} [maxElements] Taille maximale de la liste ACCEPTÉE PAR LA
+ *     PROGRAMMATION DYNAMIQUE ; CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS par défaut.
+ *     Elle ne borne jamais la recherche exhaustive de 1, 2 ou 3 éléments.
  * @return {?Array<number>} Indices (croissants) des montants retenus, ou null.
  */
 function trouverSousEnsemble_(montantsCents, cibleCents, maxElements) {
   if (!Array.isArray(montantsCents) || !montantsCents.length) return null;
   const cible = Math.round(Number(cibleCents));
   if (!isFinite(cible) || cible <= 0) return null;
-  const plafond = (maxElements === null || maxElements === undefined || !isFinite(maxElements))
-    ? Number(CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS)
-    : Math.floor(Number(maxElements));
-  if (!(plafond >= 1) || montantsCents.length > plafond) return null;
   const montants = montantsCents.map((valeur) => {
     const entier = Math.round(Number(valeur));
     return isFinite(entier) ? entier : 0;
   });
+  let totalPositif = 0;
+  for (let i = 0; i < montants.length; i++) {
+    if (montants[i] > 0) totalPositif += montants[i];
+  }
+  if (cible > totalPositif) return null;
   const petit = rapprochementSousEnsembleExhaustif_(montants, cible);
   if (petit) return petit;
+  const plafond = (maxElements === null || maxElements === undefined || !isFinite(maxElements))
+    ? Number(CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS)
+    : Math.floor(Number(maxElements));
+  if (!(plafond >= 1) || montants.length > plafond) return null;
   if (montants.length <= 3) return null;
   return rapprochementSousEnsembleDynamique_(montants, cible);
 }
 
 /**
- * Recherche exhaustive des combinaisons de 1, 2 puis 3 éléments.
+ * Recherche exhaustive des combinaisons de 1, 2 puis 3 éléments. Elle a
+ * toujours lieu, quelle que soit la taille de la liste (§4.4) : taille 1 en
+ * O(n), taille 2 en O(n) par table de hachage, taille 3 en O(n²) par table de
+ * hachage, plafonnée à CONFIG.SOUS_ENSEMBLE_MAX_TAILLE3 éléments.
  * @param {Array<number>} montants Montants en cents entiers.
  * @param {number} cible Somme recherchée.
- * @return {?Array<number>} Indices retenus, ou null.
+ * @return {?Array<number>} Indices retenus (croissants), ou null.
  */
 function rapprochementSousEnsembleExhaustif_(montants, cible) {
   const n = montants.length;
   for (let i = 0; i < n; i++) {
     if (montants[i] === cible) return [i];
   }
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      if (montants[i] + montants[j] === cible) return [i, j];
-    }
+  const vus = new Map();
+  for (let j = 0; j < n; j++) {
+    const complement = cible - montants[j];
+    if (vus.has(complement)) return [vus.get(complement), j];
+    if (!vus.has(montants[j])) vus.set(montants[j], j);
   }
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      const partiel = montants[i] + montants[j];
-      for (let k = j + 1; k < n; k++) {
-        if (partiel + montants[k] === cible) return [i, j, k];
-      }
+  const limite = Math.min(n, rapprochementPlafondTaille3_());
+  for (let i = 0; i < limite; i++) {
+    const restant = cible - montants[i];
+    const paires = new Map();
+    for (let k = i + 1; k < limite; k++) {
+      const complement = restant - montants[k];
+      if (paires.has(complement)) return [i, paires.get(complement), k];
+      if (!paires.has(montants[k])) paires.set(montants[k], k);
     }
   }
   return null;
+}
+
+/**
+ * Nombre maximal de pièces examinées par la recherche de taille 3 (O(n²)).
+ * @return {number} Plafond, au moins 3.
+ */
+function rapprochementPlafondTaille3_() {
+  const brut = Math.floor(Number(CONFIG.SOUS_ENSEMBLE_MAX_TAILLE3));
+  return isFinite(brut) && brut >= 3 ? brut : 3;
 }
 
 /**
@@ -1444,6 +1644,13 @@ function rapprochementResume_(resultat, relance) {
     resultat.inexpliques.forEach((ecart) => {
       lignes.push(`• ${ecart.nom || ecart.id} (${ecart.id}) : ${ecart.montant}`);
     });
+  }
+  if (resultat.piecesSansDate) {
+    lignes.push('');
+    lignes.push(`${resultat.piecesSansDate} pièce(s) sans date comptée(s) dans le solde de ` +
+      `${resultat.clientsSansDate.join(', ')} : complétez la colonne Date des onglets ` +
+      `${CONFIG.ONGLETS.FACTURES.nom} et ${CONFIG.ONGLETS.PAIEMENTS.nom}. La colonne ` +
+      '« Détail » du rapport nomme les lignes concernées.');
   }
   if (resultat.paiementsConfirmes || resultat.paiementsRefuses) {
     lignes.push('');

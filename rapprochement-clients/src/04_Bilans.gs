@@ -572,7 +572,7 @@ function envoyerBilans() {
     majs: [],
     resume: bilansNouveauResumeEnvoi_(enAttente.length),
   };
-  const disponible = bilansQuotaDisponible_(enAttente.length, contexte.resume);
+  const disponible = bilansQuotaDisponible_(enAttente.length, contexte.resume, contexte.params);
   try {
     for (let i = 0; i < enAttente.length; i++) {
       if (contexte.resume.traites >= disponible) {
@@ -624,11 +624,17 @@ function bilansNouveauResumeEnvoi_(total) {
 /**
  * Nombre de courriels que l'on s'autorise aujourd'hui : le quota Gmail restant,
  * moins une marge de sécurité. Un quota illisible vaut zéro (on ne risque rien).
+ *
+ * En mode Brouillon — le mode par défaut — rien ne part : GmailApp.createDraft
+ * ne consomme pas le quota d'envoi, donc on ne bride rien (même règle que
+ * courrielsContexte_ dans 08_Courriels.gs).
  * @param {number} total Nombre de bilans à envoyer.
  * @param {Object} resume Compteur de résultats, complété au passage.
+ * @param {Object} params Réglages lus par lireParametres_().
  * @return {number} Nombre maximal d'envois pour ce passage.
  */
-function bilansQuotaDisponible_(total, resume) {
+function bilansQuotaDisponible_(total, resume, params) {
+  if (texteNormalise_((params || {}).MODE_ENVOI) !== 'DIRECT') return total;
   let quota = 0;
   try {
     quota = Number(quotaCourrielRestant_());

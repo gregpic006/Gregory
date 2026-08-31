@@ -71,6 +71,16 @@ const COURRIELS_MARGE_QUOTA_ = 5;
 /** Nombre maximal de pièces détaillées dans un courriel de relance. */
 const COURRIELS_MAX_PIECES_ = 30;
 
+/**
+ * Durée au-delà de laquelle la relance s'arrête proprement (4 min 30 s).
+ * Apps Script tue une exécution à 6 minutes : sans cette marge, des brouillons
+ * existeraient dans Gmail sans que la colonne « Relance » ait pu être écrite.
+ */
+const COURRIELS_DUREE_MAX_MS_ = 270000;
+
+/** Nombre de clients traités entre deux écritures de la colonne « Relance ». */
+const COURRIELS_LOT_MAJ_ = 10;
+
 /** Noms des mois, pour écrire une période en toutes lettres. */
 const COURRIELS_MOIS_ = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
   'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -387,9 +397,13 @@ function courrielsSignatureHtml_(params) {
 function courrielsBornesPeriode_(periode, params) {
   const texte = courrielsTexte_(periode).toUpperCase();
   if (!texte) return null;
+  const decalage = params ? Math.round(parametreNombre_(params, 'TRIMESTRE_DECALAGE_MOIS', 0)) : 0;
   if (typeof bornesTrimestre_ === 'function' && /^\d{4}-T[1-4]$/.test(texte)) {
     try {
-      const bornes = bornesTrimestre_(texte);
+      // Le décalage doit être transmis : sans lui, la relance bornerait le
+      // trimestre autrement que le rapprochement, et le courriel annoncerait au
+      // client la mauvaise période avec les pièces d'un autre trimestre.
+      const bornes = bornesTrimestre_(texte, decalage);
       if (bornes && bornes.debut && bornes.fin) return bornes;
     } catch (e) {
       journalAvert_('courrielsBornesPeriode_',
@@ -397,7 +411,6 @@ function courrielsBornesPeriode_(periode, params) {
         `${e.message}\n${e.stack}`);
     }
   }
-  const decalage = params ? Math.round(parametreNombre_(params, 'TRIMESTRE_DECALAGE_MOIS', 0)) : 0;
   const trimestre = /^(\d{4})-T([1-4])$/.exec(texte);
   if (trimestre) {
     const premierMois = (Number(trimestre[2]) - 1) * 3 + decalage;
@@ -807,41 +820,90 @@ function courrielsPieceFacture_(facture) {
 // ---------------------------------------------------------------------------
 
 /**
- * Prépare un courriel de relance par client en écart, à partir de la période la
- * plus récente de l'onglet Rapprochement. Les lignes déjà relancées sont
+ * Prépare un courriel de relance par client en écart. La période traitée est
+ * celle que l'appelant transmet — 07_Rapprochement.gs passe la période qu'il
+ * vient de calculer, pour ne jamais relancer un autre trimestre que celui-là.
+ * Sans argument (appel depuis le menu), c'est la période la plus récente de
+ * l'onglet Rapprochement qui est retenue. Les lignes déjà relancées sont
  * sautées : videz la cellule « Relance » pour en refaire une.
+ * @param {string} [periode] Période 'AAAA-TN' à relancer.
  * @return {string} Résumé lisible, affiché par le menu.
  */
-function relancerClientsEnEcart() {
+function relancerClientsEnEcart(periode) {
+  const debut = new Date().getTime();
   const nomOnglet = CONFIG.ONGLETS.RAPPROCHEMENT.nom;
   const params = lireParametres_();
   const lignes = lireTable_(nomOnglet);
-  const periode = courrielsPeriodeLaPlusRecente_(lignes);
-  if (!periode) {
+  const periodeTraitee = courrielsTexte_(periode) || courrielsPeriodeLaPlusRecente_(lignes);
+  if (!periodeTraitee) {
     return `Aucune période à relancer : l'onglet « ${nomOnglet} » est vide. ` +
       'Lancez d\'abord « 7. Rapprochement trimestriel ».';
   }
-  const selection = courrielsSelectionner_(lignes, periode);
-  const resume = courrielsNouveauResume_(periode, selection);
+  const selection = courrielsSelectionner_(lignes, periodeTraitee);
+  const resume = courrielsNouveauResume_(periodeTraitee, selection);
   if (!selection.aTraiter.length) {
     return courrielsResume_(resume);
   }
-  const contexte = courrielsContexte_(periode, params);
+  const contexte = courrielsContexte_(periodeTraitee, params);
   const groupes = indexerGroupesPar_(selection.aTraiter, COURRIELS_COL_.RAPPRO_CLIENT);
-  const majs = [];
-  groupes.forEach((lignesClient, idClient) => {
+  const entrees = [];
+  groupes.forEach((lignesClient, idClient) => entrees.push({ id: idClient, lignes: lignesClient }));
+
+  // Les brouillons sont créés un par un dans Gmail : la colonne « Relance » est
+  // écrite au fil de l'eau (tous les COURRIELS_LOT_MAJ_ clients) et l'exécution
+  // s'arrête d'elle-même avant les 6 minutes. Ainsi un courriel qui existe déjà
+  // dans Gmail est toujours marqué, et le passage suivant ne le refait pas.
+  let majs = [];
+  let traites = 0;
+  let arretTemps = false;
+  for (let i = 0; i < entrees.length; i++) {
+    const entree = entrees[i];
+    if (arretTemps) { resume.interrompus += entree.lignes.length; continue; }
     if (resume.envoyes + resume.brouillons >= contexte.disponible) {
-      resume.restants += lignesClient.length;
-      return;
+      resume.restants += entree.lignes.length;
+      continue;
     }
-    const statut = courrielsTraiterClient_(contexte, idClient, lignesClient, resume);
+    if (new Date().getTime() - debut > COURRIELS_DUREE_MAX_MS_) {
+      arretTemps = true;
+      resume.interrompus += entree.lignes.length;
+      continue;
+    }
+    const statut = courrielsTraiterClient_(contexte, entree.id, entree.lignes, resume);
     const patch = {};
     patch[COURRIELS_COL_.RAPPRO_RELANCE] = statut;
-    lignesClient.forEach((ligne) => majs.push({ ligne: ligne._ligne, patch: patch }));
-  });
-  majLignes_(nomOnglet, majs);
+    entree.lignes.forEach((ligne) => majs.push({ ligne: ligne._ligne, patch: patch }));
+    traites++;
+    if (traites % COURRIELS_LOT_MAJ_ === 0) {
+      courrielsEcrireRelances_(nomOnglet, majs);
+      majs = [];
+    }
+  }
+  courrielsEcrireRelances_(nomOnglet, majs);
   courrielsJournaliserRelance_(resume);
   return courrielsResume_(resume);
+}
+
+/**
+ * Écrit un lot de valeurs dans la colonne « Relance ». Un échec d'écriture est
+ * journalisé sans interrompre la relance : les courriels déjà préparés restent
+ * tracés dans le Journal, et l'utilisateur sait quoi regarder.
+ * @param {string} nomOnglet Onglet Rapprochement.
+ * @param {Array<{ligne: number, patch: Object}>} majs Mises à jour à écrire.
+ * @return {boolean} Vrai si le lot a bien été écrit.
+ */
+function courrielsEcrireRelances_(nomOnglet, majs) {
+  if (!majs || !majs.length) return true;
+  try {
+    majLignes_(nomOnglet, majs);
+    return true;
+  } catch (e) {
+    journalErreur_('relancerClientsEnEcart',
+      `${majs.length} ligne(s) de l'onglet ${nomOnglet} n'ont pas pu être marquées dans la ` +
+      `colonne « ${COURRIELS_COL_.RAPPRO_RELANCE} » : leurs courriels ont pourtant été ` +
+      'préparés. Vérifiez Gmail avant de relancer cette action.',
+      `${e.message}\n${e.stack}`);
+    return false;
+  }
 }
 
 /**
@@ -1025,6 +1087,7 @@ function courrielsNouveauResume_(periode, selection) {
     envoyes: 0,
     brouillons: 0,
     restants: 0,
+    interrompus: 0,
     echecs: [],
     sansCourriel: [],
   };
@@ -1046,6 +1109,14 @@ function courrielsJournaliserRelance_(resume) {
       `Quota de courriels atteint : ${resume.restants} ligne(s) restent à relancer.`,
       'Leur colonne « Relance » n\'a pas été touchée : le prochain passage reprendra ' +
       'exactement là où celui-ci s\'est arrêté.');
+  }
+  if (resume.interrompus > 0) {
+    journalAvert_('relancerClientsEnEcart',
+      `Arrêt volontaire avant la limite des 6 minutes : ${resume.interrompus} ligne(s) ` +
+      'restent à relancer.',
+      `Les relances déjà préparées sont marquées dans la colonne ` +
+      `« ${COURRIELS_COL_.RAPPRO_RELANCE} » : relancez la même action pour reprendre ` +
+      'exactement là où celle-ci s\'est arrêtée, sans créer de doublon dans Gmail.');
   }
 }
 
@@ -1089,6 +1160,12 @@ function courrielsResume_(resume) {
   if (resume.restants) {
     lignes.push(`${resume.restants} ligne(s) n'ont pas pu être traitées aujourd'hui ` +
       '(quota de courriels atteint) : relancez cette action demain.');
+  }
+  if (resume.interrompus) {
+    lignes.push(`${resume.interrompus} ligne(s) n'ont pas pu être traitées dans le temps ` +
+      'imparti (Google coupe une exécution au bout de 6 minutes). Relancez simplement la ' +
+      'même action : elle reprendra où elle s\'est arrêtée et ne renverra pas les courriels ' +
+      'déjà préparés.');
   }
   lignes.push(`La colonne « ${COURRIELS_COL_.RAPPRO_RELANCE} » de l'onglet ` +
     `${CONFIG.ONGLETS.RAPPROCHEMENT.nom} indique le résultat, client par client.`);

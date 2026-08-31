@@ -73,6 +73,7 @@ function feuille_(nom) {
   }
   const nouvelle = classeur.insertSheet(nom);
   const noms = schema.colonnes.map((c) => c.nom);
+  feuillesGarantirColonnes_(nouvelle, noms.length);
   const plage = nouvelle.getRange(1, 1, 1, noms.length);
   plage.setValues([noms]);
   plage.setFontWeight('bold');
@@ -115,6 +116,7 @@ function feuillesEntetes_(feuille, valeurs) {
   const schema = feuillesSchema_(feuille.getName());
   if (!schema) return entetes;
   const noms = schema.colonnes.map((c) => c.nom);
+  feuillesGarantirColonnes_(feuille, noms.length);
   feuille.getRange(1, 1, 1, noms.length).setValues([noms]);
   feuille.getRange(1, 1, 1, noms.length).setFontWeight('bold');
   feuille.setFrozenRows(1);
@@ -185,21 +187,52 @@ function entetesTable_(nom) {
 
 /**
  * Indexe une liste d'objets par la valeur d'un champ (le dernier gagne).
+ *
+ * Une clé présente sur plusieurs lignes est une faute de saisie qui fait
+ * silencieusement disparaître une ligne (le bilan part alors à la mauvaise
+ * adresse) : chaque doublon est donc signalé au Journal, en nommant les lignes.
  * @param {Array<Object>} objets Lignes à indexer.
  * @param {string} champ Nom du champ servant de clé.
  * @return {Map<string, Object>} Clé (texte, nettoyée) vers objet.
  */
 function indexerPar_(objets, champ) {
   const index = new Map();
+  const lignesParCle = new Map();
   (objets || []).forEach((objet) => {
     if (!objet) return;
     const brut = objet[champ];
     if (brut === null || brut === undefined) return;
     const cle = String(brut).trim();
     if (cle === '') return;
+    if (!lignesParCle.has(cle)) lignesParCle.set(cle, []);
+    lignesParCle.get(cle).push(objet._ligne === undefined ? '?' : objet._ligne);
     index.set(cle, objet);
   });
+  feuillesSignalerDoublons_(champ, lignesParCle);
   return index;
+}
+
+/**
+ * Journalise un AVERT par clé présente plus d'une fois, en nommant toutes les
+ * lignes concernées et celle qui l'emporte réellement.
+ * @param {string} champ Nom du champ servant de clé.
+ * @param {Map<string, Array<*>>} lignesParCle Clé vers numéros de ligne rencontrés.
+ * @return {number} Nombre de clés en double.
+ */
+function feuillesSignalerDoublons_(champ, lignesParCle) {
+  let doublons = 0;
+  lignesParCle.forEach((lignes, cle) => {
+    if (lignes.length < 2) return;
+    doublons++;
+    const retenue = lignes[lignes.length - 1];
+    const debut = lignes.slice(0, lignes.length - 1).join(', ');
+    journalAvert_('indexerPar_',
+      `${champ} ${cle} présent en lignes ${debut} et ${retenue} : ` +
+      `seule la ligne ${retenue} est utilisée.`,
+      'Supprimez ou corrigez la ligne en trop : tant que le doublon existe, les lignes ' +
+      'précédentes sont ignorées partout (bilans, envois, rapprochement).');
+  });
+  return doublons;
 }
 
 /**
@@ -226,6 +259,37 @@ function indexerGroupesPar_(objets, champ) {
 // ---------------------------------------------------------------------------
 // Écriture
 // ---------------------------------------------------------------------------
+
+/**
+ * Agrandit la grille de l'onglet si l'écriture prévue dépasse sa dernière ligne.
+ * Une feuille neuve n'a que 1000 lignes : sans cela, setValues() lève
+ * « The coordinates or dimensions of the range are invalid » et l'écriture est
+ * perdue (journal muet, rapport de trimestre effacé puis non réécrit).
+ * @param {Sheet} feuille Onglet concerné.
+ * @param {number} derniereLigne Numéro de la dernière ligne qui sera écrite.
+ * @return {number} Nombre de lignes ajoutées à la grille.
+ */
+function feuillesGarantirLignes_(feuille, derniereLigne) {
+  const maximum = feuille.getMaxRows();
+  const manquantes = Math.ceil(Number(derniereLigne) || 0) - maximum;
+  if (manquantes <= 0) return 0;
+  feuille.insertRowsAfter(maximum, manquantes);
+  return manquantes;
+}
+
+/**
+ * Agrandit la grille de l'onglet si l'écriture prévue dépasse sa dernière colonne.
+ * @param {Sheet} feuille Onglet concerné.
+ * @param {number} derniereColonne Numéro de la dernière colonne qui sera écrite.
+ * @return {number} Nombre de colonnes ajoutées à la grille.
+ */
+function feuillesGarantirColonnes_(feuille, derniereColonne) {
+  const maximum = feuille.getMaxColumns();
+  const manquantes = Math.ceil(Number(derniereColonne) || 0) - maximum;
+  if (manquantes <= 0) return 0;
+  feuille.insertColumnsAfter(maximum, manquantes);
+  return manquantes;
+}
 
 /**
  * Prépare une valeur avant écriture dans une cellule.
@@ -263,6 +327,7 @@ function ajouterLignes_(nom, objets) {
     return entetes.map((entete) => feuillesValeurSortie_((objet || {})[entete]));
   });
   const premiereLigne = Math.max(feuille.getLastRow(), 1) + 1;
+  feuillesGarantirLignes_(feuille, premiereLigne + matrice.length - 1);
   feuille.getRange(premiereLigne, 1, matrice.length, entetes.length).setValues(matrice);
   invaliderCacheFeuille_(nom);
 

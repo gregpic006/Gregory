@@ -19,6 +19,8 @@
 const MENU_COL_ = {
   BILAN_STATUT: CONFIG.ONGLETS.BILANS.colonnes[8].nom,              // Statut
   BILAN_MONTANT: CONFIG.ONGLETS.BILANS.colonnes[6].nom,             // Montant du bilan
+  FACTURE_ID: CONFIG.ONGLETS.FACTURES.colonnes[0].nom,              // ID facture
+  FACTURE_CLIENT: CONFIG.ONGLETS.FACTURES.colonnes[1].nom,          // ID client
   FACTURE_VERIFICATION: CONFIG.ONGLETS.FACTURES.colonnes[10].nom,   // Statut vérification
   FACTURE_PAIEMENT: CONFIG.ONGLETS.FACTURES.colonnes[12].nom,       // Statut paiement
   FACTURE_TOTAL: CONFIG.ONGLETS.FACTURES.colonnes[8].nom,           // Montant total
@@ -63,6 +65,7 @@ function menuConstruire_(ui) {
   menu.addItem('4. Vérifier les factures', 'menuVerifierFactures');
   menu.addItem('5. Préparer le lot de paiements', 'menuPreparerLotPaiements');
   menu.addItem('6. Confirmer les paiements du lot', 'menuConfirmerLotPaiements');
+  menu.addItem('Annuler le lot de paiements en cours', 'menuAnnulerLotPaiements');
   menu.addSeparator();
   menu.addItem('7. Rapprochement trimestriel', 'menuRapprochementTrimestriel');
   menu.addItem('8. Relancer les clients en écart', 'menuRelancerEcarts');
@@ -333,6 +336,25 @@ function menuLignesFiltrees_(nomOnglet, criteres) {
 }
 
 /**
+ * Factures que la vérification va réellement traiter. On délègue à
+ * facturesAVerifier_ (05_Factures.gs) pour que le compteur annoncé à
+ * l'utilisateur ne puisse jamais diverger de ce que fait le moteur. Si le
+ * module des factures n'a pas été copié, on retombe sur le filtre par statut.
+ * @return {Array<Object>} Les factures à vérifier.
+ */
+function menuFacturesAVerifier_() {
+  const factures = lireTable_(CONFIG.ONGLETS.FACTURES.nom);
+  if (typeof facturesAVerifier_ === 'function') return facturesAVerifier_(factures);
+  const acceptes = ['', STATUT_VERIF.A_VERIFIER, STATUT_VERIF.SANS_BILAN,
+    STATUT_VERIF.ECART, STATUT_VERIF.DOUBLON].map((valeur) => texteNormalise_(valeur));
+  return factures.filter((ligne) => {
+    if (!String(ligne[MENU_COL_.FACTURE_ID] || '').trim() &&
+        !String(ligne[MENU_COL_.FACTURE_CLIENT] || '').trim()) return false;
+    return acceptes.indexOf(texteNormalise_(ligne[MENU_COL_.FACTURE_VERIFICATION])) >= 0;
+  });
+}
+
+/**
  * Additionne une colonne de montants, en cents entiers.
  * @param {Array<Object>} lignes Lignes lues par lireTable_.
  * @param {string} colonne Nom de la colonne de montants.
@@ -440,11 +462,14 @@ function menuImporterFactures() {
 function menuVerifierFactures() {
   executer_('4. Vérifier les factures', () => {
     menuExigerInstallation_();
-    const factures = menuLignesFiltrees_(CONFIG.ONGLETS.FACTURES.nom, [
-      { colonne: MENU_COL_.FACTURE_VERIFICATION, valeurs: [STATUT_VERIF.A_VERIFIER] },
-    ]);
+    // Exactement le même critère que le moteur (facturesAVerifier_ de
+    // 05_Factures.gs) : une facture saisie à la main dont le statut de
+    // vérification est resté vide doit être comptée, sinon le menu affirmerait
+    // « tout est déjà vérifié » alors que le travail n'a pas été fait.
+    const factures = menuFacturesAVerifier_();
     if (!factures.length) {
-      return 'Aucune facture au statut « ' + STATUT_VERIF.A_VERIFIER + ' » : tout est déjà vérifié.';
+      return 'Aucune facture à vérifier : tout est déjà vérifié ou tranché à la main ' +
+        `(« ${STATUT_VERIF.CONFORME} », « ${STATUT_VERIF.REJETEE} »).`;
     }
     const question = `${factures.length} facture(s) vont être comparées à leur bilan, et leur ` +
       'statut de vérification sera mis à jour automatiquement.\n\n' +
@@ -510,6 +535,39 @@ function menuConfirmerLotPaiements() {
       return 'Confirmation annulée : aucun paiement n\'a été enregistré.';
     }
     return menuAppeler_('confirmerLotDePaiements');
+  });
+}
+
+/**
+ * Annule le lot de paiements en cours : les factures « À payer » qui n'ont pas
+ * encore été réglées reviennent à « Non payée », de sorte qu'un lot préparé par
+ * erreur puisse être défait sans passer par l'éditeur de script et sans
+ * confirmer des virements qui n'ont pas eu lieu.
+ * @return {void}
+ */
+function menuAnnulerLotPaiements() {
+  executer_('Annuler le lot de paiements en cours', () => {
+    menuExigerInstallation_();
+    const factures = menuLignesFiltrees_(CONFIG.ONGLETS.FACTURES.nom, [
+      { colonne: MENU_COL_.FACTURE_PAIEMENT, valeurs: [STATUT_PAIEMENT.A_PAYER] },
+    ]);
+    if (!factures.length) {
+      return 'Aucun lot en cours : aucune facture n\'est au statut « ' +
+        STATUT_PAIEMENT.A_PAYER + ' ». Il n\'y a rien à annuler.';
+    }
+    const total = formaterMontant_(menuTotalCents_(factures, MENU_COL_.FACTURE_TOTAL), menuDevise_());
+    const question = `${factures.length} facture(s) sont actuellement au statut ` +
+      `« ${STATUT_PAIEMENT.A_PAYER} », pour un total de ${total}.\n\n` +
+      `Elles reviendront toutes au statut « ${STATUT_PAIEMENT.NON_PAYEE} », et vous pourrez ` +
+      'préparer un nouveau lot.\n\n' +
+      'Aucun paiement déjà enregistré n\'est supprimé, aucune facture déjà ' +
+      `« ${STATUT_PAIEMENT.PAYEE} » n'est touchée, et aucun courriel n'est envoyé.\n\n` +
+      'Répondez Non si vous avez déjà fait ces virements : dans ce cas, utilisez plutôt ' +
+      '« 6. Confirmer les paiements du lot ».\n\nVoulez-vous annuler le lot ?';
+    if (!menuConfirmer_('Annuler le lot de paiements en cours', question)) {
+      return 'Annulation abandonnée : le lot reste en cours, aucun statut n\'a changé.';
+    }
+    return menuAppeler_('annulerLot');
   });
 }
 
@@ -775,6 +833,9 @@ function menuModeEmploiFin_() {
       <li>Vous pouvez relancer n'importe quelle étape autant de fois que vous voulez : elle ne
         crée pas de doublon.</li>
       <li>Le script ne paie jamais rien tout seul et ne supprime jamais ce que vous avez saisi.</li>
+      <li>Vous avez préparé un lot de paiements par erreur ? <i>Annuler le lot de paiements en
+        cours</i> remet les factures « ${STATUT_PAIEMENT.A_PAYER} » à
+        « ${STATUT_PAIEMENT.NON_PAYEE} », sans toucher aux paiements déjà enregistrés.</li>
       <li>Avant tout envoi de courriel ou tout changement de statut en masse, une fenêtre vous
         annonce combien d'éléments sont concernés et si vous êtes en mode Brouillon ou Direct.</li>
       <li>Si quelque chose se passe mal, le message reste en français et le détail technique est

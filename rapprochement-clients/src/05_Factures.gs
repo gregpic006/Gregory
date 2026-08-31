@@ -11,8 +11,11 @@
  *   1. LE SCRIPT NE DÉCIDE JAMAIS DU MONTANT À PAYER. Un montant lu dans un
  *      courriel est une SUGGESTION : la facture reste « À vérifier » et la
  *      colonne Notes le dit en toutes lettres.
- *   2. LA DÉCISION HUMAINE EST RESPECTÉE. Une facture que vous avez passée à
- *      « Conforme », « Rejetée » ou « Doublon » n'est jamais réécrite.
+ *   2. LA DÉCISION HUMAINE EST RESPECTÉE. Une facture passée à « Conforme » ou
+ *      « Rejetée » n'est jamais réécrite (§4.3) — ce sont les deux seuls verdicts
+ *      que le script vous laisse. À l'inverse, « Sans bilan », « Écart de montant »
+ *      et « Doublon » sont SES propres verdicts : il les réexamine à chaque
+ *      passage, pour que « corrigez puis relancez la vérification » fonctionne.
  *
  * verifierUneFacture_(), rattacherBilan_() et expliquerEcartFacture_() sont des
  * fonctions PURES : elles ne touchent ni au classeur, ni à Gmail, ni à Drive.
@@ -94,11 +97,17 @@ const FACTURES_ECART_RELATIF_MAX_ = 0.02;
 const FACTURES_TOLERANCE_TAXES_ = 2;
 
 /**
- * Le commentaire automatique de vérification commence toujours par cet en-tête.
- * Tout ce que VOUS écrivez avant est conservé : le script ne réécrit que sa
- * propre partie de la colonne Notes.
+ * Le commentaire automatique de vérification est encadré par ces deux
+ * marqueurs. Le script ne réécrit QUE ce qui se trouve strictement entre eux :
+ * tout ce que VOUS écrivez avant ⟦auto⟧ ou après ⟦/auto⟧ est conservé tel quel.
  */
+const FACTURES_MARQUEUR_DEBUT_ = '⟦auto⟧';
+const FACTURES_MARQUEUR_FIN_ = '⟦/auto⟧';
+
+/** En-tête du commentaire automatique, à l'intérieur des marqueurs. */
 const FACTURES_ENTETE_NOTE_ = 'Vérification : ';
+
+/** Ancien délimiteur, d'avant les marqueurs : encore lu, jamais réécrit. */
 const FACTURES_SEPARATEUR_NOTE_ = ' | ' + FACTURES_ENTETE_NOTE_;
 
 /** Un montant écrit à la québécoise : 1 234,56 / 1,234.56 / 1234.56 / 1234. */
@@ -308,20 +317,14 @@ function facturesLignesDuBilan_(bilan, lignes) {
     facturesTexte_(ligne[FACTURES_COL_LIGNE_.PERIODE]) === periode);
 }
 
-/**
- * Montant d'une ligne de bilan, en cents (Quantité × Prix unitaire si le
- * montant n'est pas saisi).
- * @param {Object} ligne Ligne de l'onglet Lignes_bilan.
- * @return {number} Montant en cents.
+/*
+ * Le montant d'une ligne de Lignes_bilan est calculé PAR bilansMontantLigneCents_
+ * (04_Bilans.gs), et par elle seule : c'est la fonction qui a servi à écrire la
+ * colonne « Montant du bilan ». Recalculer ici avec d'autres règles (cellule vide
+ * confondue avec un zéro saisi, quantité « 2,5 » lue par Number(), quantité vide
+ * traitée comme 0) ferait porter l'explication de l'écart sur des montants que le
+ * bilan n'a jamais comptés.
  */
-function facturesMontantLigne_(ligne) {
-  const montant = enCents_(ligne[FACTURES_COL_LIGNE_.MONTANT]);
-  if (montant !== 0) return montant;
-  const quantite = Number(ligne[FACTURES_COL_LIGNE_.QUANTITE]);
-  const prix = enCents_(ligne[FACTURES_COL_LIGNE_.PRIX]);
-  if (!isFinite(quantite) || !quantite || !prix) return 0;
-  return Math.round(quantite * prix);
-}
 
 /**
  * Teste si l'écart s'explique par les taxes : TPS (5 %), TVQ (9,975 %),
@@ -374,7 +377,7 @@ function facturesExplicationLigne_(ecartCents, lignes, tolerance, devise) {
   const absolu = Math.abs(ecartCents);
   const liste = lignes || [];
   for (let i = 0; i < liste.length; i++) {
-    const montant = facturesMontantLigne_(liste[i]);
+    const montant = bilansMontantLigneCents_(liste[i]);
     if (montant === 0 || Math.abs(Math.abs(montant) - absolu) > tolerance) continue;
     const description =
       facturesTexte_(liste[i][FACTURES_COL_LIGNE_.DESCRIPTION]) || '(ligne sans description)';
@@ -547,38 +550,116 @@ function verifierUneFacture_(facture, contexte) {
 // ---------------------------------------------------------------------------
 
 /**
- * Ne garde que les factures que le script a le droit de traiter : celles dont
- * le statut de vérification est « À vérifier » ou vide. Une facture passée à la
- * main à Conforme, Rejetée ou Doublon n'est jamais réécrite.
+ * Statuts de vérification que le SCRIPT a lui-même posés : il a donc le droit
+ * de les remettre en question au passage suivant. C'est ce qui rend l'invite
+ * « corrigez puis relancez la vérification » (notes « Sans bilan » et « Écart de
+ * montant ») réellement opérante.
+ * Les deux seules décisions HUMAINES protégées par le §4.3 — « Conforme » et
+ * « Rejetée » — n'y figurent pas : le script ne les réécrit jamais.
+ */
+const FACTURES_STATUTS_REJOUABLES_ = [
+  '',
+  STATUT_VERIF.A_VERIFIER,
+  STATUT_VERIF.SANS_BILAN,
+  STATUT_VERIF.ECART,
+  STATUT_VERIF.DOUBLON,
+].map(texteNormalise_);
+
+/**
+ * Ne garde que les factures que le script a le droit de traiter : statut vide,
+ * « À vérifier », « Sans bilan », « Écart de montant » ou « Doublon ». Une
+ * facture passée à « Conforme » ou « Rejetée » n'est jamais réécrite (§4.3).
  * @param {Array<Object>} factures Toutes les lignes de l'onglet Factures.
  * @return {Array<Object>} Les factures à retraiter.
  */
 function facturesAVerifier_(factures) {
-  const aVerifier = texteNormalise_(STATUT_VERIF.A_VERIFIER);
   return (factures || []).filter((facture) => {
+    if (!facture) return false;
     if (!facturesTexte_(facture[FACTURES_COL_.ID]) &&
         !facturesTexte_(facture[FACTURES_COL_.CLIENT])) return false;
     const statut = texteNormalise_(facture[FACTURES_COL_.VERIFICATION]);
-    return statut === '' || statut === aVerifier;
+    return FACTURES_STATUTS_REJOUABLES_.indexOf(statut) >= 0;
   });
 }
 
 /**
- * Assemble la nouvelle colonne Notes : ce que l'utilisateur a écrit est
- * conservé, seul le commentaire automatique précédent est remplacé.
+ * Découpe la colonne Notes en trois : ce qui précède le bloc automatique, le
+ * bloc automatique lui-même, et ce qui le suit. Une annotation écrite à la main
+ * APRÈS le commentaire du script est ainsi reconnue et conservée.
+ * @param {*} existantes Contenu actuel de la colonne Notes.
+ * @return {{avant: string, apres: string, herite: boolean, ancien: string}}
+ *     `herite` signale l'ancien format (sans marqueurs), dont on ne peut pas
+ *     deviner la fin : `ancien` porte alors le texte qui va être remplacé.
+ */
+function facturesDecouperNote_(existantes) {
+  // Le « | » qui séparait les morceaux appartient à la mise en forme, pas au
+  // texte de l'utilisateur : on ne le reporte pas, sinon il se dédouble à
+  // chaque vérification.
+  const nettoyer = (texte) => String(texte).replace(/^[\s|]+/, '').replace(/[\s|]+$/, '');
+  const brut = existantes === null || existantes === undefined ? '' : String(existantes);
+  const debut = brut.indexOf(FACTURES_MARQUEUR_DEBUT_);
+  const fin = debut < 0 ? -1
+    : brut.indexOf(FACTURES_MARQUEUR_FIN_, debut + FACTURES_MARQUEUR_DEBUT_.length);
+  if (debut >= 0 && fin > debut) {
+    return {
+      avant: nettoyer(brut.slice(0, debut)),
+      apres: nettoyer(brut.slice(fin + FACTURES_MARQUEUR_FIN_.length)),
+      herite: false,
+      ancien: '',
+    };
+  }
+  // Format hérité : le bloc automatique commençait à « Vérification : » et
+  // courait jusqu'au bout de la cellule, sans marqueur de fin.
+  let position = brut.indexOf(FACTURES_SEPARATEUR_NOTE_);
+  if (position < 0 && brut.indexOf(FACTURES_ENTETE_NOTE_) === 0) position = 0;
+  if (position >= 0) {
+    return {
+      avant: nettoyer(brut.slice(0, position)),
+      apres: '',
+      herite: true,
+      ancien: nettoyer(brut.slice(position)),
+    };
+  }
+  return { avant: nettoyer(brut), apres: '', herite: false, ancien: '' };
+}
+
+/**
+ * Assemble la nouvelle colonne Notes : ce que l'utilisateur a écrit avant ET
+ * après le bloc ⟦auto⟧…⟦/auto⟧ est conservé, seul l'intérieur du bloc est
+ * remplacé.
  * @param {*} existantes Contenu actuel de la colonne Notes.
  * @param {string} note Nouveau commentaire de vérification.
  * @return {string} Notes complètes.
  */
 function facturesFusionnerNote_(existantes, note) {
-  const brut = existantes === null || existantes === undefined ? '' : String(existantes);
-  let position = brut.indexOf(FACTURES_SEPARATEUR_NOTE_);
-  if (position < 0 && brut.indexOf(FACTURES_ENTETE_NOTE_) === 0) position = 0;
-  const conserve = (position >= 0 ? brut.slice(0, position) : brut).trim();
-  if (!note) return conserve;
-  return conserve
-    ? conserve + FACTURES_SEPARATEUR_NOTE_ + note
-    : FACTURES_ENTETE_NOTE_ + note;
+  const parties = facturesDecouperNote_(existantes);
+  const morceaux = [];
+  if (parties.avant) morceaux.push(parties.avant);
+  if (note) {
+    morceaux.push(`${FACTURES_MARQUEUR_DEBUT_} ${FACTURES_ENTETE_NOTE_}${note} ` +
+      FACTURES_MARQUEUR_FIN_);
+  }
+  if (parties.apres) morceaux.push(parties.apres);
+  return morceaux.join(' | ');
+}
+
+/**
+ * Journalise le texte d'un ancien bloc automatique (format sans marqueur de
+ * fin) avant de le remplacer : si une annotation manuelle y avait été ajoutée à
+ * la suite, elle reste retrouvable dans le Journal. Ne se produit qu'une fois
+ * par facture — la note réécrite porte désormais ses marqueurs.
+ * @param {Object} facture Facture vérifiée.
+ * @param {{herite: boolean, ancien: string}} parties Découpage de la note.
+ * @param {string} note Nouveau commentaire de vérification.
+ * @return {void}
+ */
+function facturesSignalerNoteHeritee_(facture, parties, note) {
+  if (!parties.herite || !parties.ancien) return;
+  if (parties.ancien === (FACTURES_ENTETE_NOTE_ + note).trim()) return;
+  const reference = facturesTexte_(facture[FACTURES_COL_.ID]) || `ligne ${facture._ligne}`;
+  journalAvert_('verifierFactures',
+    `Facture ${reference} : ancien commentaire de la colonne Notes remplacé.`,
+    `Texte remplacé (recopiez-en ce qui était de votre main) : ${parties.ancien}`);
 }
 
 /**
@@ -593,6 +674,8 @@ function facturesPatchFacture_(facture, resultat, bilan) {
   patch[FACTURES_COL_.VERIFICATION] = resultat.statut;
   patch[FACTURES_COL_.BILAN] = resultat.idBilan || '';
   patch[FACTURES_COL_.ECART] = resultat.idBilan ? enDollars_(resultat.ecartCents) : '';
+  facturesSignalerNoteHeritee_(
+    facture, facturesDecouperNote_(facture[FACTURES_COL_.NOTES]), resultat.notes);
   patch[FACTURES_COL_.NOTES] = facturesFusionnerNote_(facture[FACTURES_COL_.NOTES], resultat.notes);
   if (!facturesTexte_(facture[FACTURES_COL_.PAIEMENT])) {
     patch[FACTURES_COL_.PAIEMENT] = STATUT_PAIEMENT.NON_PAYEE;
@@ -670,8 +753,10 @@ function facturesResume_(compteurs, total) {
       compteurs[STATUT_VERIF.DOUBLON]) {
     lignes.push('');
     lignes.push('Ouvrez l\'onglet Factures : la colonne Notes explique chaque anomalie, ' +
-      'montants à l\'appui. Vous pouvez corriger un statut à la main, le script ne le ' +
-      'réécrira pas.');
+      'montants à l\'appui. Corrigez ce qu\'elle indique (montant, période, bilan manquant) ' +
+      'puis relancez cette action : le script réexamine ces factures. Si vous passez vous-même ' +
+      `une facture à « ${STATUT_VERIF.CONFORME} » ou « ${STATUT_VERIF.REJETEE} », il ne la ` +
+      'touchera plus jamais.');
   }
   if (compteurs[STATUT_VERIF.CONFORME]) {
     lignes.push('');
@@ -695,7 +780,9 @@ function verifierFactures() {
   const aTraiter = facturesAVerifier_(factures);
   if (!aTraiter.length) {
     journalInfo_('verifierFactures', 'Aucune facture à vérifier.');
-    return `Aucune facture au statut « ${STATUT_VERIF.A_VERIFIER} » : il n'y a rien à vérifier.`;
+    return `Aucune facture à vérifier : toutes les factures sont déjà « ` +
+      `${STATUT_VERIF.CONFORME} » ou « ${STATUT_VERIF.REJETEE} », les deux statuts que le ` +
+      `script ne réécrit jamais.`;
   }
 
   // Copies de travail : on peut y noter les rattachements sans toucher au classeur.
@@ -873,37 +960,112 @@ function facturesNumeroSuggere_(texte) {
 }
 
 /**
- * Retrouve un dossier Drive par son nom, ou le crée s'il n'existe pas.
- * @param {Object|null} parent Dossier parent, ou null pour la racine du Drive.
- * @param {string} nom Nom du dossier.
- * @return {Object} Le dossier Drive.
+ * Dossiers Drive déjà résolus pendant l'exécution en cours (une seule
+ * résolution par dossier, quel que soit le nombre de pièces jointes).
  */
-function facturesDossierParNom_(parent, nom) {
-  const source = parent ? parent.getFoldersByName(nom) : DriveApp.getFoldersByName(nom);
-  if (source.hasNext()) return source.next();
-  return parent ? parent.createFolder(nom) : DriveApp.createFolder(nom);
+const FACTURES_CACHE_DRIVE_ = { racine: null, sous: {} };
+
+/**
+ * Le dossier racine où le script archive tout : pièces jointes et fichiers de
+ * lot. Il est identifié par son IDENTIFIANT Drive (paramètre DOSSIER_DRIVE_ID),
+ * jamais par son nom.
+ *
+ * Pourquoi : le manifeste ne demande que le scope `drive.file`, volontairement
+ * minimal — le script ne voit que ce qu'il a lui-même créé. DriveApp
+ * .getFoldersByName ne peut donc PAS retrouver un dossier créé à la main par
+ * l'utilisateur, et renverrait « rien trouvé » à chaque fois : le script
+ * créerait un dossier de plus à chaque exécution. On crée donc le dossier une
+ * seule fois, on retient son identifiant dans Paramètres, et on journalise son
+ * URL pour que l'utilisateur le retrouve.
+ *
+ * @param {Object} params Réglages lus par lireParametres_().
+ * @return {Object} Le dossier racine, garanti existant et hors corbeille.
+ */
+function facturesDossierRacineDrive_(params) {
+  if (FACTURES_CACHE_DRIVE_.racine) return FACTURES_CACHE_DRIVE_.racine;
+  const reglages = params || {};
+  const identifiant = facturesTexte_(reglages.DOSSIER_DRIVE_ID);
+  const nomVoulu = facturesTexte_(reglages.DOSSIER_DRIVE) || CONFIG.PARAMETRES_DEFAUT.DOSSIER_DRIVE;
+  if (identifiant) {
+    try {
+      const connu = DriveApp.getFolderById(identifiant);
+      if (!(typeof connu.isTrashed === 'function' && connu.isTrashed())) {
+        // Si l'utilisateur a changé DOSSIER_DRIVE, il s'attend à ce que
+        // l'archivage suive : on ne reste pas silencieusement sur l'ancien
+        // dossier, on en crée un au nouveau nom et on réenregistre son ID.
+        const nomActuel = typeof connu.getName === 'function' ? connu.getName() : nomVoulu;
+        if (texteNormalise_(nomActuel) === texteNormalise_(nomVoulu)) {
+          FACTURES_CACHE_DRIVE_.racine = connu;
+          return connu;
+        }
+        journalInfo_('resoudreDossierDrive_',
+          'Le réglage DOSSIER_DRIVE a changé : les prochaines pièces seront archivées ' +
+          `dans « ${nomVoulu} » au lieu de « ${nomActuel} ». L'ancien dossier est conservé.`,
+          `DOSSIER_DRIVE_ID = ${identifiant}`);
+      } else {
+        journalAvert_('resoudreDossierDrive_',
+          'Le dossier Drive enregistré est à la corbeille : un nouveau dossier va être créé.',
+          `DOSSIER_DRIVE_ID = ${identifiant}`);
+      }
+    } catch (e) {
+      journalAvert_('resoudreDossierDrive_',
+        'Le dossier Drive enregistré est introuvable : un nouveau dossier va être créé.',
+        `DOSSIER_DRIVE_ID = ${identifiant} — ${e.message}`);
+    }
+  }
+
+  const nom = nomVoulu;
+  const cree = DriveApp.createFolder(nom);
+  FACTURES_CACHE_DRIVE_.racine = cree;
+  try {
+    ecrireParametre_('DOSSIER_DRIVE_ID', cree.getId());
+  } catch (e) {
+    journalErreur_('resoudreDossierDrive_',
+      'Identifiant du dossier Drive non enregistré dans Paramètres : un dossier de plus ' +
+      'sera créé au prochain passage.', `${e.message}\n${e.stack}`);
+  }
+  journalInfo_('resoudreDossierDrive_',
+    `Dossier Drive « ${nom} » créé : c'est là que tout est archivé.`, cree.getUrl());
+  return cree;
 }
 
 /**
- * Renvoie le sous-dossier Drive du client, sous le dossier DOSSIER_DRIVE.
- * Les dossiers déjà ouverts sont gardés en mémoire le temps de l'exécution.
- * @param {Object} contexte Contexte d'import (params, dossiers, racine).
+ * Résout le dossier Drive de travail — la fonction UNIQUE utilisée par
+ * 05_Factures.gs et 06_Paiements.gs, pour que les pièces jointes et les
+ * fichiers de lot atterrissent toujours au même endroit.
+ * @param {Object} params Réglages lus par lireParametres_().
+ * @param {string} [sousDossierNom] Sous-dossier voulu (client). Vide = la racine.
+ * @return {Object} Le dossier Drive, garanti existant et hors corbeille.
+ */
+function resoudreDossierDrive_(params, sousDossierNom) {
+  const racine = facturesDossierRacineDrive_(params);
+  const nom = facturesTexte_(sousDossierNom);
+  if (!nom) return racine;
+  if (!FACTURES_CACHE_DRIVE_.sous[nom]) {
+    let choisi = null;
+    const existants = racine.getFoldersByName(nom);
+    while (existants.hasNext()) {
+      const dossier = existants.next();
+      if (typeof dossier.isTrashed === 'function' && dossier.isTrashed()) continue;
+      choisi = dossier;
+      break;
+    }
+    FACTURES_CACHE_DRIVE_.sous[nom] = choisi || racine.createFolder(nom);
+  }
+  return FACTURES_CACHE_DRIVE_.sous[nom];
+}
+
+/**
+ * Renvoie le sous-dossier Drive du client, sous le dossier racine.
+ * @param {Object} contexte Contexte d'import (params).
  * @param {Object} client Ligne de l'onglet Clients.
  * @return {Object} Le dossier Drive du client.
  */
 function facturesDossierClient_(contexte, client) {
-  if (!contexte.racine) {
-    const nomRacine = facturesTexte_(contexte.params.DOSSIER_DRIVE) ||
-      CONFIG.PARAMETRES_DEFAUT.DOSSIER_DRIVE;
-    contexte.racine = facturesDossierParNom_(null, nomRacine);
-  }
   const cle = facturesTexte_(client[FACTURES_COL_CLIENT_.ID]) || 'Client inconnu';
-  if (!contexte.dossiers[cle]) {
-    const nomClient = facturesTexte_(client[FACTURES_COL_CLIENT_.NOM]);
-    const nom = `${cle}${nomClient ? ' - ' + nomClient : ''}`.replace(/[\\/:*?"<>|]/g, '-');
-    contexte.dossiers[cle] = facturesDossierParNom_(contexte.racine, nom);
-  }
-  return contexte.dossiers[cle];
+  const nomClient = facturesTexte_(client[FACTURES_COL_CLIENT_.NOM]);
+  const nom = `${cle}${nomClient ? ' - ' + nomClient : ''}`.replace(/[\\/:*?"<>|]/g, '-');
+  return resoudreDossierDrive_(contexte.params, nom);
 }
 
 /**
@@ -1047,13 +1209,22 @@ function facturesLigneDepuisMessage_(message, permalien, client, contexte) {
 /**
  * Traite un fil Gmail : une ligne de facture par message encore non importé et
  * provenant d'une adresse connue dans l'onglet Clients.
+ * Le fil n'est déclaré « complet » que si TOUS ses messages ont été importés ou
+ * étaient déjà connus. Un seul message laissé de côté (expéditeur absent de
+ * l'onglet Clients, ou erreur de lecture) laisse le fil incomplet : l'appelant
+ * ne lui pose alors pas l'étiquette « …/Traité », sans quoi la requête de
+ * recherche l'exclurait à jamais et la facture serait perdue.
  * @param {Object} fil Fil Gmail.
  * @param {Object} contexte Contexte d'import.
- * @return {{lignes: Array<Object>, ignores: number}} Lignes créées, messages ignorés.
+ * @return {{lignes: Array<Object>, ignores: number, complet: boolean,
+ *           adresses: Array<string>}} Lignes créées, messages ignorés,
+ *     fil entièrement traité ou non, adresses inconnues rencontrées.
  */
 function facturesTraiterFil_(fil, contexte) {
   const lignes = [];
+  const adresses = [];
   let ignores = 0;
+  let complet = true;
   let messages = [];
   let permalien = '';
   try {
@@ -1062,22 +1233,43 @@ function facturesTraiterFil_(fil, contexte) {
   } catch (e) {
     journalErreur_('importerFacturesGmail', 'Fil Gmail illisible, il a été sauté.',
       `${e.message}\n${e.stack}`);
-    return { lignes: lignes, ignores: ignores };
+    return { lignes: lignes, ignores: ignores, complet: false, adresses: adresses };
   }
   messages.forEach((message) => {
     try {
       const identifiant = message.getId();
       if (contexte.importes[identifiant]) return;
       const client = facturesClientDuMessage_(message, contexte.clients);
-      if (!client) { ignores += 1; return; }
+      if (!client) {
+        ignores += 1;
+        complet = false;
+        const adresse = facturesAdresseExpediteur_(message);
+        if (adresse && adresses.indexOf(adresse) < 0) adresses.push(adresse);
+        return;
+      }
       lignes.push(facturesLigneDepuisMessage_(message, permalien, client, contexte));
       contexte.importes[identifiant] = true;
     } catch (e) {
+      complet = false;
       journalErreur_('importerFacturesGmail', 'Message Gmail non importé.',
         `${e.message}\n${e.stack}`);
     }
   });
-  return { lignes: lignes, ignores: ignores };
+  return { lignes: lignes, ignores: ignores, complet: complet, adresses: adresses };
+}
+
+/**
+ * Adresse de l'expéditeur d'un message, pour pouvoir la NOMMER à l'utilisateur
+ * quand elle ne figure dans aucune fiche client.
+ * @param {Object} message Message Gmail.
+ * @return {string} L'adresse en minuscules, ou chaîne vide.
+ */
+function facturesAdresseExpediteur_(message) {
+  try {
+    return facturesAdresse_(message.getFrom());
+  } catch (e) {
+    return '';
+  }
 }
 
 /**
@@ -1141,7 +1333,8 @@ function facturesAttribuerIds_(lignes) {
 
 /**
  * Rédige le message affiché à la fin de l'import Gmail.
- * @param {Object} bilanImport Compteurs {creees, ignores, fils, restants, arret}.
+ * @param {Object} bilanImport Compteurs {creees, ignores, fils, restants, arret,
+ *     adresses}.
  * @return {string} Message lisible.
  */
 function facturesResumeImport_(bilanImport) {
@@ -1151,8 +1344,13 @@ function facturesResumeImport_(bilanImport) {
       `à partir de ${bilanImport.fils} fil(s) de courriel.`
     : `Aucune nouvelle facture : les courriels de l'étiquette étaient déjà importés.`);
   if (bilanImport.ignores) {
+    const liste = (bilanImport.adresses || []).slice(0, 5).join(', ');
     lignes.push(`${bilanImport.ignores} message(s) ignoré(s) : l'adresse de l'expéditeur ` +
-      `ne figure dans aucune fiche de l'onglet Clients.`);
+      `ne figure dans aucune fiche de l'onglet Clients` +
+      `${liste ? ' (' + liste + ')' : ''}.`);
+    lignes.push('Ces courriels n\'ont PAS été marqués « Traité » : ajoutez la fiche du ' +
+      'client (onglet Clients, colonne Courriel), puis relancez cette action — la facture ' +
+      'sera importée.');
   }
   if (bilanImport.restants || bilanImport.arret) {
     lignes.push(`Il reste des courriels à traiter : relancez cette action pour les importer.`);
@@ -1170,10 +1368,33 @@ function facturesResumeImport_(bilanImport) {
  * archive les pièces jointes dans Drive et crée une ligne « À vérifier » avec
  * le lien Gmail, le lien Drive et un montant suggéré.
  * L'import est strictement idempotent : un message déjà importé est ignoré.
- * Point d'entrée du menu.
+ *
+ * Point d'entrée du menu ET cible du déclencheur horaire : c'est pourquoi
+ * l'enveloppe try/catch/finally est ici et non chez l'appelant. Sans le
+ * viderTamponJournal_() du finally, tout ce que l'import journalise resterait
+ * en mémoire et disparaîtrait avec le runtime — une panne d'import (étiquette
+ * renommée, quota Gmail, autorisation retirée) serait strictement invisible.
  * @return {string} Résumé lisible du traitement.
  */
 function importerFacturesGmail() {
+  try {
+    return facturesImporter_();
+  } catch (e) {
+    journalErreur_('importerFacturesGmail', 'Import des factures interrompu par une erreur.',
+      `${e.message}\n${e.stack}`);
+    return 'L\'import des factures a échoué : ' + e.message + '\n\n' +
+      'Le détail est dans l\'onglet Journal. Rien n\'a été perdu : les courriels non ' +
+      'importés n\'ont pas été marqués « Traité », relancez cette action après correction.';
+  } finally {
+    viderTamponJournal_();
+  }
+}
+
+/**
+ * Corps de l'import Gmail (voir importerFacturesGmail(), qui l'enveloppe).
+ * @return {string} Résumé lisible du traitement.
+ */
+function facturesImporter_() {
   const debut = new Date().getTime();
   const params = lireParametres_();
   const nomEtiquette = facturesTexte_(params.ETIQUETTE_GMAIL);
@@ -1194,12 +1415,16 @@ function importerFacturesGmail() {
     params: params,
     clients: facturesIndexCourriels_(lireTable_(CONFIG.ONGLETS.CLIENTS.nom)),
     importes: facturesMessagesImportes_(lireTable_(CONFIG.ONGLETS.FACTURES.nom)),
-    dossiers: {},
-    racine: null,
   };
   const nouvelles = [];
+  // `traites` = les fils qui recevront l'étiquette « …/Traité ». Un fil dont un
+  // message a été laissé de côté n'y entre PAS : la requête de recherche exclut
+  // les fils étiquetés, l'étiqueter reviendrait à perdre la facture pour de bon.
   const traites = [];
+  const adressesInconnues = [];
+  let examines = 0;
   let ignores = 0;
+  let incomplets = 0;
   let arret = false;
 
   for (let i = 0; i < fils.length && i < FACTURES_MAX_FILS_; i++) {
@@ -1207,14 +1432,33 @@ function importerFacturesGmail() {
     const resultat = facturesTraiterFil_(fils[i], contexte);
     resultat.lignes.forEach((ligne) => nouvelles.push(ligne));
     ignores += resultat.ignores;
-    traites.push(fils[i]);
+    examines += 1;
+    (resultat.adresses || []).forEach((adresse) => {
+      if (adressesInconnues.indexOf(adresse) < 0) adressesInconnues.push(adresse);
+    });
+    if (resultat.complet) traites.push(fils[i]);
+    else incomplets += 1;
   }
 
   facturesAttribuerIds_(nouvelles);
   ajouterLignes_(CONFIG.ONGLETS.FACTURES.nom, nouvelles);
   facturesMarquerTraites_(nomEtiquette, traites);
 
-  const restants = Math.max(0, fils.length - traites.length);
+  if (adressesInconnues.length) {
+    journalAvert_('importerFacturesGmail',
+      `${ignores} message(s) d'expéditeur inconnu : ajoutez ces adresses dans l'onglet ` +
+      `${CONFIG.ONGLETS.CLIENTS.nom}, puis relancez l'import.`,
+      `Adresses inconnues : ${adressesInconnues.join(', ')}`);
+  }
+  if (incomplets) {
+    journalAvert_('importerFacturesGmail',
+      `${incomplets} fil(s) laissé(s) sans l'étiquette « ${nomEtiquette}/Traité » : ` +
+      `ils seront relus au prochain passage.`,
+      'Un fil n\'est marqué traité que si TOUS ses messages ont été importés ou étaient ' +
+      'déjà connus.');
+  }
+
+  const restants = Math.max(0, fils.length - examines);
   if (restants || arret) {
     journalAvert_('importerFacturesGmail',
       `${restants || 'Des'} fil(s) de courriel restent à importer.`,
@@ -1222,10 +1466,11 @@ function importerFacturesGmail() {
             : `Limite de ${FACTURES_MAX_FILS_} fils par exécution.`);
   }
   journalInfo_('importerFacturesGmail',
-    `${nouvelles.length} facture(s) importée(s) depuis ${traites.length} fil(s).`,
+    `${nouvelles.length} facture(s) importée(s) depuis ${examines} fil(s) examiné(s).`,
+    `${traites.length} fil(s) marqué(s) traité(s) ; ` +
     `${ignores} message(s) d'expéditeurs inconnus ignorés.`);
   return facturesResumeImport_({
-    creees: nouvelles.length, ignores: ignores, fils: traites.length,
-    restants: restants, arret: arret,
+    creees: nouvelles.length, ignores: ignores, fils: examines,
+    restants: restants, arret: arret, adresses: adressesInconnues,
   });
 }

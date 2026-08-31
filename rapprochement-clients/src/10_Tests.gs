@@ -284,6 +284,19 @@ const TESTS_COL_ = {
     STATUT: CONFIG.ONGLETS.BILANS.colonnes[8].nom,
     FACTURE: CONFIG.ONGLETS.BILANS.colonnes[9].nom,
   },
+  SOLDE: {
+    CLIENT: CONFIG.ONGLETS.SOLDES_DECLARES.colonnes[1].nom,
+    NOM: CONFIG.ONGLETS.SOLDES_DECLARES.colonnes[2].nom,
+    PERIODE: CONFIG.ONGLETS.SOLDES_DECLARES.colonnes[3].nom,
+    DATE: CONFIG.ONGLETS.SOLDES_DECLARES.colonnes[4].nom,
+    MONTANT: CONFIG.ONGLETS.SOLDES_DECLARES.colonnes[5].nom,
+  },
+  RAPPRO: {
+    PERIODE: CONFIG.ONGLETS.RAPPROCHEMENT.colonnes[0].nom,
+    CLIENT: CONFIG.ONGLETS.RAPPROCHEMENT.colonnes[1].nom,
+    NOM: CONFIG.ONGLETS.RAPPROCHEMENT.colonnes[2].nom,
+    RELANCE: CONFIG.ONGLETS.RAPPROCHEMENT.colonnes[10].nom,
+  },
   LIGNE: {
     ID: CONFIG.ONGLETS.LIGNES_BILAN.colonnes[0].nom,
     CLIENT: CONFIG.ONGLETS.LIGNES_BILAN.colonnes[1].nom,
@@ -381,6 +394,40 @@ function testsLigneBilan_(champs) {
   ligne[c.PRIX] = s.prix === undefined ? '' : s.prix;
   ligne[c.MONTANT] = s.montant === undefined ? '' : s.montant;
   ligne[c.BILAN] = s.bilan || '';
+  return ligne;
+}
+
+/**
+ * Construit une ligne de l'onglet Soldes_declares pour les tests.
+ * @param {Object} champs {client, nom, periode, date, montant}.
+ * @return {Object} Ligne prête à passer au code testé.
+ */
+function testsSolde_(champs) {
+  const c = TESTS_COL_.SOLDE;
+  const s = champs || {};
+  const solde = {};
+  solde[c.CLIENT] = s.client || '';
+  solde[c.NOM] = s.nom || '';
+  solde[c.PERIODE] = s.periode || '';
+  solde[c.DATE] = s.date || '';
+  solde[c.MONTANT] = s.montant === undefined ? 0 : s.montant;
+  return solde;
+}
+
+/**
+ * Construit une ligne DÉJÀ écrite dans l'onglet Rapprochement, telle que la
+ * relirait rapprochementLireDonnees_ avant de réécrire la période.
+ * @param {Object} champs {periode, client, nom, relance}.
+ * @return {Object} Ligne prête à passer au code testé.
+ */
+function testsLigneRapprochement_(champs) {
+  const c = TESTS_COL_.RAPPRO;
+  const s = champs || {};
+  const ligne = {};
+  ligne[c.PERIODE] = s.periode || '';
+  ligne[c.CLIENT] = s.client || '';
+  ligne[c.NOM] = s.nom || '';
+  ligne[c.RELANCE] = s.relance === undefined ? '—' : s.relance;
   return ligne;
 }
 
@@ -531,20 +578,66 @@ function testsSousEnsembleRefus_() {
       'Une cible négative est refusée, pas contournée, même si un montant lui correspond.');
   });
 
-  test_('Sous-ensemble : liste plus longue que SOUS_ENSEMBLE_MAX_ELEMENTS', () => {
+  test_('Sous-ensemble : au-delà de SOUS_ENSEMBLE_MAX_ELEMENTS, seule la programmation ' +
+    'dynamique renonce', () => {
     const trop = [];
     for (let i = 0; i <= CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS; i++) trop.push(100);
     assertEgal_(trop.length, CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS + 1,
       'Le jeu d\'essai dépasse bien la borne de un élément.');
-    assertNull_(trouverSousEnsemble_(trop, 100),
-      'Au-delà de la borne, on abandonne proprement — même si une réponse évidente existe.');
+    assertEgal_(trouverSousEnsemble_(trop, 100), [0],
+      'La recherche exhaustive de taille 1 a TOUJOURS lieu (§4.4) : elle ne dépend pas du ' +
+      'nombre de pièces.');
+    assertEgal_(trouverSousEnsemble_(trop, 200).length, 2,
+      'La recherche exhaustive de taille 2 a lieu elle aussi.');
+    assertNull_(trouverSousEnsemble_(trop, 400),
+      'Quatre éléments relèvent de la programmation dynamique : elle, et elle seule, ' +
+      'renonce au-delà de la borne.');
   });
 
-  test_('Sous-ensemble : borne maxElements passée explicitement', () => {
-    assertNull_(trouverSousEnsemble_([100, 200], 300, 1),
-      'Deux montants pour une borne de un : la fonction renonce.');
-    assertEgal_(trouverSousEnsemble_([100, 200], 300, 2), [0, 1],
-      'La même recherche aboutit quand la borne le permet.');
+  test_('Sous-ensemble : la borne maxElements ne s\'applique qu\'à la programmation dynamique',
+    () => {
+      const montants = [100, 200, 400, 800, 1600];
+      assertEgal_(trouverSousEnsemble_(montants, 300, 1), [0, 1],
+        'Deux montants font la cible : la borne de un ne peut pas empêcher la recherche ' +
+        'exhaustive de les trouver.');
+      assertNull_(trouverSousEnsemble_(montants, 1500, 4),
+        'Seuls quatre éléments donnent 15,00 $ : avec cinq montants et une borne de quatre, ' +
+        'la programmation dynamique renonce.');
+      testsSousEnsembleValide_(trouverSousEnsemble_(montants, 1500, 5), montants, 1500,
+        'La même recherche aboutit quand la borne le permet');
+    });
+
+  test_('Sous-ensemble : 60 montants dont deux font la cible', () => {
+    const montants = [];
+    for (let i = 0; i < 60; i++) montants.push(100000 + i * 700);
+    assertVrai_(montants.length > CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS,
+      'Le jeu d\'essai dépasse largement la borne de la programmation dynamique.');
+    const cible = montants[3] + montants[47];
+    const indices = trouverSousEnsemble_(montants, cible, CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS);
+    testsSousEnsembleValide_(indices, montants, cible, '60 montants, deux font la cible');
+    assertEgal_(indices.length, 2,
+      'Deux pièces suffisent : abandonner ici reviendrait à déclarer « inexpliqué » un écart ' +
+      'que le rapport sait pourtant nommer.');
+  });
+
+  test_('Sous-ensemble : 60 montants dont TROIS font la cible', () => {
+    const montants = [];
+    for (let i = 0; i < 60; i++) montants.push(100000 + i * 700);
+    const cible = montants[3] + montants[20] + montants[47];
+    const indices = trouverSousEnsemble_(montants, cible, CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS);
+    testsSousEnsembleValide_(indices, montants, cible, '60 montants, trois font la cible');
+    assertEgal_(indices.length, 3,
+      'La recherche exhaustive de taille 3 doit avoir lieu même bien au-delà de la borne de ' +
+      'la programmation dynamique : trois pièces, c\'est encore vérifiable à la main.');
+  });
+
+  test_('Sous-ensemble : 500 montants, trois font la cible dans les 200 premiers', () => {
+    const montants = [];
+    for (let i = 0; i < 500; i++) montants.push(100000 + i * 700);
+    const cible = montants[3] + montants[20] + montants[47];
+    const indices = trouverSousEnsemble_(montants, cible, CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS);
+    testsSousEnsembleValide_(indices, montants, cible, '500 montants, trois font la cible');
+    assertEgal_(indices.length, 3, 'Un très gros trimestre reste diagnosticable.');
   });
 
   test_('Sous-ensemble : cible au-delà de SOUS_ENSEMBLE_MAX_CIBLE', () => {
@@ -640,6 +733,20 @@ function testsDiagnosticPaiements_() {
     assertEgal_(diag.paiementsNonDeduits, ['P-000010', 'P-000011'],
       'Les deux paiements sont nommés.');
   });
+
+  test_('Diagnostic 1 : un écart de signe opposé n\'accuse jamais un paiement non déduit', () => {
+    const paiement = testsPaiement_({
+      id: 'P-000042', client: 'C-001', date: '2026-05-12', montant: 1250, reference: 'VIR-8891',
+    });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 125000, declareCents: 0, paiements: [paiement],
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'déduit',
+      'Un paiement que le client n\'a pas déduit ÉLÈVE son solde au-dessus du vôtre ' +
+      '(écart < 0). Ici son solde est plus bas : l\'hypothèse 1 est impossible.');
+    assertEgal_(diag.paiementsNonDeduits, [],
+      'Aucun paiement n\'est marqué « Non » sur la foi d\'un écart de mauvais signe.');
+  });
 }
 
 /**
@@ -684,23 +791,55 @@ function testsDiagnosticPriorites_() {
 }
 
 /**
- * diagnostiquerEcart_ — hypothèse 3 : un paiement compté deux fois, ou deux
- * paiements de même montant dont un seul a été enregistré.
+ * diagnostiquerEcart_ — hypothèse 3 : un paiement DÉDUIT DEUX FOIS par le
+ * client. Signe imposé par le §4.4 : écart > 0, et l'écart vaut LE montant du
+ * paiement, pas son double — le paiement légitime est déjà déduit des deux
+ * côtés, seule la déduction en trop reste.
  * @return {void}
  */
 function testsDiagnosticPaiementDouble_() {
-  test_('Diagnostic 3 : un paiement compté deux fois par le client', () => {
+  test_('Diagnostic 3 : un paiement déduit deux fois par le client', () => {
+    // Factures 1 000 $, un paiement de 1 000 $ : le vrai solde est 0. Le client
+    // retranche le paiement deux fois, il déclare donc −1 000 $.
+    // écart = 0 − (−100 000) = +100 000 cents = LE montant du paiement.
+    const paiement = testsPaiement_({ id: 'P-000077', client: 'C-001', date: '2026-05-05',
+      montant: 1000, reference: 'CHQ-114' });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 0, declareCents: -100000, paiements: [paiement],
+    }));
+    assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'Le paiement déduit deux fois explique l\'écart.');
+    testsAssertContient_(diag.diagnostic, 'deux fois', 'Le diagnostic dit ce qui s\'est passé.');
+    testsAssertContient_(diag.detail, 'P-000077', 'Le détail nomme le paiement en cause.');
+    testsAssertContient_(diag.detail, 'CHQ-114', 'Le détail donne la référence du chèque.');
+    testsAssertContient_(diag.detail, '1 000,00 $',
+      'L\'écart vaut le montant du paiement, pas son double.');
+  });
+
+  test_('Diagnostic 3 : le double d\'un paiement n\'est PAS l\'hypothèse 3', () => {
     const paiement = testsPaiement_({ id: 'P-000077', client: 'C-001', date: '2026-05-05',
       montant: 500, reference: 'CHQ-114' });
     const diag = diagnostiquerEcart_(testsContexteEcart_({
       theoriqueCents: 100000, declareCents: 0, paiements: [paiement],
     }));
-    assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'Le double d\'un paiement explique l\'écart.');
-    testsAssertContient_(diag.diagnostic, 'deux fois', 'Le diagnostic dit ce qui s\'est passé.');
-    testsAssertContient_(diag.detail, 'P-000077', 'Le détail nomme le paiement compté deux fois.');
+    testsAssertNeContientPas_(diag.diagnostic, 'deux fois',
+      'Un écart valant deux fois le paiement ne correspond à aucune erreur du client : ' +
+      'déduire un paiement une fois de trop creuse l\'écart d\'UN montant, pas de deux.');
   });
 
-  test_('Diagnostic 3 : deux paiements identiques, un seul pris en compte', () => {
+  test_('Diagnostic 3 : un écart de signe opposé n\'est jamais « compté deux fois »', () => {
+    const paiement = testsPaiement_({ id: 'P-000077', client: 'C-001', date: '2026-05-05',
+      montant: 500, reference: 'CHQ-114' });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 0, declareCents: 100000, paiements: [paiement],
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'deux fois',
+      'Un paiement déduit deux fois ABAISSE le solde du client. Son solde étant ici plus ' +
+      'élevé que le vôtre, l\'hypothèse 3 est arithmétiquement impossible.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE,
+      'Mieux vaut un écart inexpliqué qu\'un diagnostic exactement inverse de la réalité.');
+  });
+
+  test_('Diagnostic 3 : deux paiements de même montant, un semble compté deux fois', () => {
     const paiements = [
       testsPaiement_({ id: 'P-000021', client: 'C-001', date: '2026-04-08', montant: 300 }),
       testsPaiement_({ id: 'P-000022', client: 'C-001', date: '2026-05-08', montant: 300 }),
@@ -708,9 +847,9 @@ function testsDiagnosticPaiementDouble_() {
     const diag = diagnostiquerEcart_(testsContexteEcart_({
       theoriqueCents: 30000, declareCents: 0, paiements: paiements,
     }));
-    assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'Le montant apparaît deux fois : c\'est la piste.');
-    testsAssertContient_(diag.detail, 'P-000021', 'Le détail nomme le premier paiement.');
-    testsAssertContient_(diag.detail, 'P-000022', 'Le détail nomme le second paiement.');
+    assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'Le client a retranché 300,00 $ de trop.');
+    testsAssertContient_(diag.diagnostic, 'deux fois', 'Le diagnostic dit ce qui s\'est passé.');
+    testsAssertContient_(diag.detail, 'P-000021', 'Le détail nomme un paiement de ce montant.');
   });
 }
 
@@ -758,11 +897,76 @@ function testsDiagnosticFactures_() {
     testsAssertContient_(diag.detail, '50,00 $', 'Le détail chiffre l\'écart de la facture.');
   });
 
+  test_('Diagnostic 2 : un écart de signe opposé n\'accuse jamais une facture non comptabilisée',
+    () => {
+      const facture = testsFacture_({
+        id: 'F-000031', client: 'C-001', numero: 'INV-501', periode: '2026-05', total: 1000,
+        verification: STATUT_VERIF.CONFORME,
+      });
+      const diag = diagnostiquerEcart_(testsContexteEcart_({
+        theoriqueCents: 0, declareCents: 100000, factures: [facture],
+      }));
+      testsAssertNeContientPas_(diag.diagnostic, 'comptabilisée',
+        'Une facture que le client a oubliée ABAISSE son solde sous le vôtre (écart > 0). ' +
+        'Ici son solde est plus élevé : l\'hypothèse 2 est impossible.');
+      assertEgal_(diag.verdict, VERDICT.INEXPLIQUE, 'Aucune hypothèse ne s\'applique.');
+    });
+
+  test_('Diagnostic 2 : une facture annulée n\'explique jamais un écart', () => {
+    const factures = [
+      testsFacture_({ id: 'F-000201', client: 'C-001', periode: '2026-04', total: 1000,
+        verification: STATUT_VERIF.CONFORME, paiement: STATUT_PAIEMENT.NON_PAYEE }),
+      testsFacture_({ id: 'F-000202', client: 'C-001', periode: '2026-05', total: 500,
+        verification: STATUT_VERIF.CONFORME, paiement: STATUT_PAIEMENT.ANNULEE }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 100000, declareCents: 50000, factures: factures,
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'comptabilisée',
+      'Une facture annulée n\'entre pas non plus dans VOTRE solde théorique (§4.2) : ' +
+      'le client a raison de ne pas la compter, elle ne peut pas expliquer l\'écart.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE,
+      'La vraie cause reste à chercher : on ne clôt pas le dossier sur une facture annulée.');
+  });
+
+  test_('Diagnostic 4 : un écart de facturation de sens contraire n\'explique rien', () => {
+    const facture = testsFacture_({
+      id: 'F-000010', client: 'C-001', numero: 'INV-778', periode: '2026-06', total: 900,
+      verification: STATUT_VERIF.ECART, ecart: -250,
+    });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 100000, declareCents: 75000, factures: [facture],
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'facturation',
+      'La somme des « Écart vs bilan » a un sens déterminé : un écart de −250 $ ne peut pas ' +
+      'expliquer un écart de +250 $. La comparer en valeur absolue retourne l\'explication.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE, 'Mieux vaut inexpliqué qu\'à l\'envers.');
+  });
+
+  test_('Diagnostic 4 : une facture annulée ne compte pas dans la somme des écarts', () => {
+    const factures = [
+      testsFacture_({ id: 'F-000401', client: 'C-001', periode: '2026-04', total: 1000,
+        verification: STATUT_VERIF.CONFORME }),
+      testsFacture_({ id: 'F-000403', client: 'C-001', periode: '2026-05', total: 900,
+        verification: STATUT_VERIF.ECART, ecart: 123.45,
+        paiement: STATUT_PAIEMENT.ANNULEE }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 100000, declareCents: 87655, factures: factures,
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'facturation',
+      'Une facture annulée ne contribue à aucun des deux soldes : son écart de vérification ' +
+      'tombe pourtant pile sur l\'écart, et ne l\'explique pas pour autant.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE,
+      'La coïncidence de montant ne vaut pas explication : la vraie cause reste à chercher.');
+  });
 }
 
 /**
  * diagnostiquerEcart_ — hypothèse 5 : le client comptabilise une facture que
  * vous avez écartée (Doublon ou Sans bilan), et qui n'est pas dans votre solde.
+ * Signe imposé par le §4.4 : écart < 0, puisque compter une facture de plus
+ * ÉLÈVE le solde du client au-dessus du vôtre.
  * @return {void}
  */
 function testsDiagnosticFactureEcartee_() {
@@ -771,13 +975,17 @@ function testsDiagnosticFactureEcartee_() {
       id: 'F-000055', client: 'C-001', numero: 'INV-900', periode: '2026-05', total: 750,
       verification: STATUT_VERIF.DOUBLON,
     });
+    // Vous n'inscrivez rien (la facture est écartée), le client inscrit 750 $ :
+    // son solde est plus ÉLEVÉ que le vôtre, écart = 0 − 75 000 = −75 000.
     const diag = diagnostiquerEcart_(testsContexteEcart_({
-      theoriqueCents: 75000, declareCents: 0, factures: [facture],
+      theoriqueCents: 0, declareCents: 75000, factures: [facture],
     }));
     assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'La facture écartée explique l\'écart.');
     testsAssertContient_(diag.diagnostic, STATUT_VERIF.DOUBLON,
       'Le diagnostic nomme le statut en cause.');
     testsAssertContient_(diag.detail, 'F-000055', 'Le détail nomme la facture doublon.');
+    testsAssertContient_(diag.detail, 'plus élevé',
+      'Le détail dit le bon sens : le solde du client est au-dessus du vôtre.');
     testsAssertContient_(diag.action, CONFIG.ONGLETS.FACTURES.nom,
       'L\'action dit dans quel onglet corriger si la facture est valable.');
   });
@@ -788,11 +996,26 @@ function testsDiagnosticFactureEcartee_() {
       verification: STATUT_VERIF.SANS_BILAN,
     });
     const diag = diagnostiquerEcart_(testsContexteEcart_({
-      theoriqueCents: 32000, declareCents: 0, factures: [facture],
+      theoriqueCents: 0, declareCents: 32000, factures: [facture],
     }));
     assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'Une facture sans bilan explique aussi un écart.');
     testsAssertContient_(diag.diagnostic, STATUT_VERIF.SANS_BILAN,
       'Le diagnostic nomme le statut « Sans bilan ».');
+  });
+
+  test_('Diagnostic 5 : un écart de signe opposé n\'accuse jamais une facture écartée', () => {
+    const facture = testsFacture_({
+      id: 'F-000055', client: 'C-001', numero: 'INV-900', periode: '2026-05', total: 750,
+      verification: STATUT_VERIF.DOUBLON,
+    });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 75000, declareCents: 0, factures: [facture],
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, STATUT_VERIF.DOUBLON,
+      'Si le client comptait cette facture, son solde serait plus ÉLEVÉ que le vôtre. ' +
+      'Ici il est plus bas : l\'explication se contredirait elle-même.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE,
+      'Sans explication valable, on le dit franchement plutôt que d\'en inventer une.');
   });
 }
 
@@ -843,6 +1066,100 @@ function testsDiagnosticDivers_() {
     testsAssertContient_(diag.detail, '2026-T3', 'Le détail dit à quel trimestre elle appartient.');
   });
 
+  test_('Diagnostic 2 : une facture « Écart de montant » compte comme non comptabilisée', () => {
+    // §4.2 : une facture « Écart de montant » entre dans le solde théorique.
+    // La restreindre aux « Conforme » rendait le rapport contradictoire avec
+    // son propre calcul : il comptait la facture, mais refusait de la nommer.
+    const facture = testsFacture_({
+      id: 'F-000210', client: 'C-001', numero: 'INV-810', periode: '2026-05', total: 1000,
+      verification: STATUT_VERIF.ECART, ecart: 0,
+    });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 100000, declareCents: 0, factures: [facture],
+    }));
+    assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'La facture reconnue explique l\'écart.');
+    testsAssertContient_(diag.diagnostic, 'comptabilisée',
+      'Une facture reconnue, même en écart de montant, peut être celle que le client a omise.');
+    testsAssertContient_(diag.detail, 'F-000210', 'Le détail la nomme.');
+  });
+
+  test_('Diagnostic 6 : une facture annulée n\'explique jamais un écart de taxes', () => {
+    // La facture annulée n'entre pas dans le solde théorique : l'accuser
+    // enverrait le client vérifier les taxes d'une pièce qu'aucun des deux
+    // ne compte, pendant que la vraie cause reste dans le classeur.
+    const factures = [
+      testsFacture_({ id: 'F-000220', client: 'C-001', periode: '2026-04', total: 1000, taxes: 0,
+        verification: STATUT_VERIF.CONFORME }),
+      testsFacture_({ id: 'F-000221', client: 'C-001', periode: '2026-05', total: 2000, taxes: 0,
+        verification: STATUT_VERIF.CONFORME, paiement: STATUT_PAIEMENT.ANNULEE }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 100000, declareCents: 90000, factures: factures,
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'taxes',
+      'L\'écart vaut pile la TPS de la facture ANNULÉE : c\'est une coïncidence, pas une cause.');
+    testsAssertNeContientPas_(diag.detail, 'F-000221',
+      'Une facture hors du solde théorique n\'est jamais nommée comme explication.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE, 'Mieux vaut « inexpliqué » qu\'un faux coupable.');
+  });
+
+  test_('Diagnostic 8 : une facture écartée du trimestre voisin n\'explique aucun décalage', () => {
+    const facture = testsFacture_({
+      id: 'F-000230', client: 'C-001', date: '2026-07-10', periode: '2026-07', total: 800,
+      verification: STATUT_VERIF.DOUBLON,
+    });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 80000, declareCents: 0, factures: [facture],
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'Décalage',
+      'Le décalage de période porte sur la DATE d\'une pièce reconnue, jamais sur son statut.');
+    testsAssertNeContientPas_(diag.detail, 'F-000230', 'La facture Doublon n\'est pas nommée.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE, 'Aucune hypothèse ne s\'applique.');
+  });
+
+  test_('Diagnostic 9 : les montants proches ne citent pas de pièce hors du solde', () => {
+    const factures = [
+      testsFacture_({ id: 'F-000240', client: 'C-001', periode: '2026-05', total: 1000, taxes: 0,
+        verification: STATUT_VERIF.CONFORME }),
+      testsFacture_({ id: 'F-000241', client: 'C-001', periode: '2026-05', total: 1234.6,
+        taxes: 0, verification: STATUT_VERIF.CONFORME, paiement: STATUT_PAIEMENT.ANNULEE }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 23334, declareCents: 0, factures: factures,
+    }));
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE, 'Aucune combinaison exacte.');
+    testsAssertNeContientPas_(diag.detail, 'F-000241',
+      'Proposer une facture annulée comme « montant proche » envoie vérifier à la main une ' +
+      'pièce que le solde ne compte pas.');
+  });
+
+  test_('Pièces sans date : une facture écartée n\'est pas annoncée comme comptant', () => {
+    const factures = [
+      testsFacture_({ id: 'F-000250', client: 'C-001', periode: '', date: '', total: 400,
+        verification: STATUT_VERIF.REJETEE }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 0, declareCents: 0, factures: factures,
+    }));
+    assertEgal_(diag.verdict, VERDICT.BALANCE, 'Une facture rejetée ne déséquilibre rien.');
+    testsAssertNeContientPas_(diag.detail, 'F-000250',
+      'Annoncer « cette pièce compte dans votre solde » d\'une facture rejetée est faux, et ' +
+      'laisse un avertissement que rien ne fera disparaître.');
+  });
+
+  test_('Pièces sans date : une facture reconnue, elle, est bien signalée', () => {
+    const factures = [
+      testsFacture_({ id: 'F-000251', client: 'C-001', periode: '', date: '', total: 400,
+        verification: STATUT_VERIF.CONFORME }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 40000, declareCents: 40000, factures: factures,
+    }));
+    testsAssertContient_(diag.detail, 'F-000251',
+      'Une pièce comptée dans le solde mais non datable doit être nommée, sans quoi son écart ' +
+      'serait un jour déclaré « inexpliqué » alors que la cause est dans le classeur.');
+  });
+
   test_('Diagnostic 9 : aucun montant n\'explique l\'écart', () => {
     const facture = testsFacture_({
       id: 'F-000099', client: 'C-001', periode: '2026-05', total: 900, taxes: 0,
@@ -859,6 +1176,136 @@ function testsDiagnosticDivers_() {
     testsAssertContient_(diag.detail, 'P-000099', 'Le détail propose les montants les plus proches.');
     assertEgal_(diag.paiementsNonDeduits, [],
       'Aucun paiement n\'est mis en cause quand rien n\'est démontré.');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// §4.4 — pièces sans date : comptées dans le solde, donc nommables
+// ---------------------------------------------------------------------------
+
+/**
+ * diagnostiquerEcart_ — une pièce sans date compte dans le solde théorique
+ * (§4.2) : elle est rattachée au trimestre traité pour que les hypothèses
+ * puissent la nommer, et le rapport signale la ligne à compléter (§4.4).
+ * @return {void}
+ */
+function testsDiagnosticSansDate_() {
+  test_('Pièces sans date : une facture sans date reste nommable', () => {
+    // Facture saisie à la main, sans « Date facture » NI « Période » : elle
+    // compte dans le solde théorique, elle doit donc rester visible du moteur.
+    const facture = testsFacture_({
+      id: 'F-000050', client: 'C-001', numero: 'INV-050', total: 500,
+      verification: STATUT_VERIF.CONFORME,
+    });
+    facture._ligne = 14;
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 50000, declareCents: 0, factures: [facture],
+    }));
+    assertEgal_(diag.verdict, VERDICT.EXPLIQUE,
+      'La seule pièce du dossier explique la totalité de l\'écart : la déclarer ' +
+      '« inexpliquée » serait faux.');
+    testsAssertContient_(diag.detail, 'F-000050', 'Le détail nomme la facture en cause.');
+    assertEgal_(diag.piecesSansDate, 1, 'La pièce sans date est comptée.');
+    testsAssertContient_(diag.detail, 'ligne 14',
+      'Le détail dit quelle ligne du classeur compléter.');
+    testsAssertContient_(diag.detail, CONFIG.ONGLETS.FACTURES.nom,
+      'Le détail nomme l\'onglet concerné.');
+  });
+
+  test_('Pièces sans date : un paiement sans date reste nommable', () => {
+    const facture = testsFacture_({
+      id: 'F-000060', client: 'C-001', periode: '2026-05', total: 1000,
+      verification: STATUT_VERIF.CONFORME,
+    });
+    const paiement = testsPaiement_({ id: 'P-000001', client: 'C-001', montant: 400 });
+    paiement._ligne = 27;
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 60000, declareCents: 100000,
+      factures: [facture], paiements: [paiement],
+    }));
+    assertEgal_(diag.verdict, VERDICT.EXPLIQUE,
+      'Le paiement sans date est bien celui qui crée l\'écart : il doit être nommé.');
+    testsAssertContient_(diag.detail, 'P-000001', 'Le détail nomme le paiement en cause.');
+    testsAssertContient_(diag.detail, CONFIG.ONGLETS.PAIEMENTS.nom,
+      'Le détail nomme l\'onglet où compléter la date.');
+  });
+
+  test_('Pièces sans date : le détail les énumère ligne par ligne', () => {
+    const premier = testsPaiement_({ id: 'P-000001', client: 'C-001', montant: 100 });
+    const second = testsPaiement_({ id: 'P-000002', client: 'C-001', montant: 250 });
+    premier._ligne = 14;
+    second._ligne = 27;
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 0, declareCents: 0, paiements: [premier, second],
+    }));
+    assertEgal_(diag.verdict, VERDICT.BALANCE,
+      'Même quand tout balance, les lignes à compléter sont signalées.');
+    assertEgal_(diag.piecesSansDate, 2, 'Les deux pièces sans date sont comptées.');
+    testsAssertContient_(diag.detail,
+      `2 pièce(s) sans date : lignes 14 et 27 de l'onglet ${CONFIG.ONGLETS.PAIEMENTS.nom}`,
+      'Le détail nomme les lignes exactes, comme l\'exige le §4.4.');
+    testsAssertContient_(diag.detail, 'complétez la colonne Date',
+      'Le détail dit quoi faire pour que la pièce redevienne datable.');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// §2 — idempotence : relancer un trimestre ne réarme pas les relances
+// ---------------------------------------------------------------------------
+
+/**
+ * rapprocherPeriode_ — la colonne « Relance » d'un trimestre déjà traité est
+ * reportée sur les nouvelles lignes : relancer deux fois le rapprochement du
+ * même trimestre ne doit pas provoquer un second courriel (§2).
+ * @return {void}
+ */
+function testsRapprochementRelance_() {
+  const dossier = (relanceExistante) => ({
+    clients: [],
+    bilans: [],
+    factures: [testsFacture_({ id: 'F-000501', client: 'C-001', nom: 'Boulangerie Petit',
+      periode: '2026-05', total: 1000, verification: STATUT_VERIF.CONFORME })],
+    paiements: [],
+    soldes: [testsSolde_({ client: 'C-001', nom: 'Boulangerie Petit', periode: '2026-T2',
+      date: '2026-06-30', montant: 0 })],
+    rapprochements: relanceExistante
+      ? [testsLigneRapprochement_({ periode: '2026-T2', client: 'C-001',
+        nom: 'Boulangerie Petit', relance: relanceExistante })]
+      : [],
+    params: {},
+    maintenant: new Date(2026, 5, 30, 12, 0, 0, 0),
+  });
+  const relanceDe = (resultat) =>
+    resultat.lignes[0][CONFIG.ONGLETS.RAPPROCHEMENT.colonnes[10].nom];
+
+  test_('Rapprochement : un client déjà relancé garde son état de relance', () => {
+    const resultat = rapprocherPeriode_('2026-T2', dossier('Envoyée'));
+    assertEgal_(resultat.total, 1, 'Le client en écart figure bien au rapport.');
+    assertEgal_(relanceDe(resultat), 'Envoyée',
+      'Remettre « — » ferait repartir un second courriel identique au premier.');
+  });
+
+  test_('Rapprochement : un brouillon déjà créé est reporté lui aussi', () => {
+    assertEgal_(relanceDe(rapprocherPeriode_('2026-T2', dossier('Brouillon créé'))),
+      'Brouillon créé', 'Le brouillon déjà préparé ne doit pas être recréé.');
+  });
+
+  test_('Rapprochement : un client nouvellement en écart part de « — »', () => {
+    assertEgal_(relanceDe(rapprocherPeriode_('2026-T2', dossier(''))), '—',
+      'Sans relance antérieure, la ligne est neuve : elle doit pouvoir être relancée.');
+  });
+
+  test_('Rapprochement : une relance en échec peut être retentée', () => {
+    assertEgal_(relanceDe(rapprocherPeriode_('2026-T2', dossier('Échec'))), '—',
+      'Un envoi manqué n\'est pas un envoi : il doit rester possible de réessayer.');
+  });
+
+  test_('Rapprochement : la relance d\'un AUTRE trimestre n\'est pas reprise', () => {
+    const donnees = dossier('');
+    donnees.rapprochements = [testsLigneRapprochement_({ periode: '2026-T1', client: 'C-001',
+      relance: 'Envoyée' })];
+    assertEgal_(relanceDe(rapprocherPeriode_('2026-T2', donnees)), '—',
+      'Un courriel envoyé pour 2026-T1 ne dispense pas de relancer 2026-T2.');
   });
 }
 
@@ -1410,6 +1857,8 @@ function testsSuites_() {
     { nom: 'Diagnostic — factures oubliées ou mal facturées', fn: testsDiagnosticFactures_ },
     { nom: 'Diagnostic — factures écartées', fn: testsDiagnosticFactureEcartee_ },
     { nom: 'Diagnostic — taxes, signe, période, inexpliqué', fn: testsDiagnosticDivers_ },
+    { nom: 'Diagnostic — pièces sans date', fn: testsDiagnosticSansDate_ },
+    { nom: 'Rapprochement — report des relances', fn: testsRapprochementRelance_ },
     { nom: 'Solde théorique — exclusions', fn: testsSoldeTheoriqueExclusions_ },
     { nom: 'Solde théorique — bornes de date', fn: testsSoldeTheoriqueBornes_ },
     { nom: 'Trimestres — période', fn: testsPeriodeTrimestre_ },

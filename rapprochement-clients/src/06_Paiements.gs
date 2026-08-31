@@ -296,9 +296,11 @@ function paiementsMessageLotEnCours_(enCours, index) {
     `Factures concernées : ${paiementsListeCourte_(ids)}.`,
     '',
     'Aucun nouveau lot ne peut être préparé tant que celui-là n\'est pas réglé. Deux choix :',
-    `• vous avez fait les virements → lancez « 6. Confirmer les paiements du lot » ;`,
-    `• vous ne les avez pas faits → annulez le lot (fonction annulerLot), les factures ` +
-      `reviendront à « ${STATUT_PAIEMENT.NON_PAYEE} ».`,
+    `• vous avez fait les virements → menu « 📋 Automatisation » → ` +
+      `« 6. Confirmer les paiements du lot » ;`,
+    `• vous ne les avez pas faits → menu « 📋 Automatisation » → ` +
+      `« Annuler le lot de paiements en cours » : les ${enCours.length} facture(s) ` +
+      `reviendront à « ${STATUT_PAIEMENT.NON_PAYEE} » et vous pourrez repréparer un lot.`,
     '',
     'Rien n\'a été modifié, aucun fichier n\'a été créé.',
   ].join('\n');
@@ -430,27 +432,13 @@ function paiementsReferenceSuggeree_(facture) {
  * @return {{nom: string, url: string, dossier: string}} Le fichier créé.
  */
 function paiementsCreerFichierCsv_(contenu, params) {
-  const dossier = paiementsDossierDrive_((params || {}).DOSSIER_DRIVE);
+  // Résolution du dossier Drive : une SEULE fonction pour tout le classeur
+  // (resoudreDossierDrive_, dans 05_Factures.gs), sans quoi les pièces jointes
+  // et les fichiers de lot finissent dans deux dossiers différents.
+  const dossier = resoudreDossierDrive_(params || {}, '');
   const nom = `Lot-de-paiements-${paiementsHorodatageFichier_(new Date())}.csv`;
   const fichier = dossier.createFile(nom, contenu, 'text/csv');
   return { nom: nom, url: fichier.getUrl(), dossier: dossier.getName() };
-}
-
-/**
- * Retrouve (ou crée) le dossier Drive où sont déposés les fichiers.
- * @param {string} nom Nom du dossier, réglage DOSSIER_DRIVE.
- * @return {Folder} Le dossier, garanti existant.
- */
-function paiementsDossierDrive_(nom) {
-  const cible = paiementsTexte_(nom) || CONFIG.PARAMETRES_DEFAUT.DOSSIER_DRIVE;
-  const existants = DriveApp.getFoldersByName(cible);
-  while (existants.hasNext()) {
-    const dossier = existants.next();
-    if (typeof dossier.isTrashed === 'function' && dossier.isTrashed()) continue;
-    return dossier;
-  }
-  journalInfo_('paiementsDossierDrive_', `Dossier Drive « ${cible} » créé.`);
-  return DriveApp.createFolder(cible);
 }
 
 /**
@@ -910,8 +898,10 @@ function paiementsSerieIds_(premierId, nombre) {
  * Rien n'est détruit — les factures déjà « Payée » ne sont pas touchées et aucun
  * paiement déjà enregistré n'est supprimé. À utiliser quand un lot a été préparé
  * par erreur, ou quand les virements n'ont finalement pas été faits.
- * Conçue pour être lancée à la main depuis l'éditeur de script : elle affiche
- * elle-même son résultat et écrit elle-même son journal.
+ * Accessible par le menu (« Annuler le lot de paiements en cours ») ou à la main
+ * depuis l'éditeur de script. Elle écrit elle-même son journal mais N'AFFICHE
+ * PAS son résultat : c'est executer_() qui présente la chaîne renvoyée, sans
+ * quoi l'utilisateur recevrait deux fenêtres successives portant le même texte.
  * @return {string} Résumé lisible.
  */
 function annulerLot() {
@@ -933,7 +923,6 @@ function annulerLot() {
   } finally {
     viderTamponJournal_();
   }
-  menuAlerte_('Annuler le lot de paiements', resume);
   return resume;
 }
 

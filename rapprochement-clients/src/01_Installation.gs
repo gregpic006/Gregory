@@ -507,10 +507,14 @@ function installationRecapitulatif_(rapport, parametres, deplaces) {
 
 /**
  * Met l'automatisation en marche. Les anciens déclencheurs sont d'abord retirés
- * pour éviter les doublons, puis quatre sont créés : le menu à l'ouverture,
- * l'import Gmail toutes les heures, la préparation des bilans une fois par mois
- * (déclencheur quotidien qui ne fait rien les autres jours) et le rapprochement
- * au premier jour de chaque trimestre (même principe).
+ * pour éviter les doublons, puis trois sont créés : l'import Gmail toutes les
+ * heures, la préparation des bilans une fois par mois (déclencheur quotidien qui
+ * ne fait rien les autres jours) et le rapprochement au premier jour de chaque
+ * trimestre (même principe).
+ *
+ * Aucun déclencheur n'est posé sur onOpen : c'est déjà un déclencheur SIMPLE
+ * (02_Menu.gs), et en ajouter un installable ferait construire le menu deux fois
+ * à chaque ouverture du classeur.
  * @return {string} Le récapitulatif affiché à l'utilisateur.
  */
 function installerDeclencheurs() {
@@ -518,15 +522,15 @@ function installerDeclencheurs() {
   let message = '';
   try {
     const supprimes = supprimerDeclencheurs();
-    const jour = installationJourEnvoiBilan_(lireParametres_());
-    ScriptApp.newTrigger('onOpen').forSpreadsheet(feuillesClasseur_()).onOpen().create();
+    const params = lireParametres_();
+    const jour = installationJourEnvoiBilan_(params);
     ScriptApp.newTrigger('importerFacturesGmail').timeBased().everyHours(1).create();
     ScriptApp.newTrigger('genererEtEnvoyerBilansAuto').timeBased().everyDays(1)
       .atHour(INSTALLATION_HEURE_BILANS_).inTimezone(CONFIG.FUSEAU).create();
     ScriptApp.newTrigger('rapprochementAutoSiDebutTrimestre').timeBased().everyDays(1)
       .atHour(INSTALLATION_HEURE_RAPPROCHEMENT_).inTimezone(CONFIG.FUSEAU).create();
-    message = installationTexteAutomatisation_(jour, supprimes);
-    journalInfo_(nomFonction, 'Automatisation activée (4 déclencheurs).', message);
+    message = installationTexteAutomatisation_(jour, supprimes, installationPeriodeBilansAuto_(params));
+    journalInfo_(nomFonction, 'Automatisation activée (3 déclencheurs).', message);
   } catch (e) {
     message = `L'automatisation n'a pas pu être activée :\n\n${e.message}\n\n` +
       `Le détail est dans l'onglet « ${CONFIG.ONGLETS.JOURNAL.nom} ».`;
@@ -542,20 +546,23 @@ function installerDeclencheurs() {
  * Rédige, en français clair, ce que l'automatisation fera désormais.
  * @param {number} jour Jour du mois où les bilans partent.
  * @param {number} supprimes Nombre d'anciens déclencheurs retirés.
+ * @param {string} periode Période 'AAAA-MM' que le prochain passage mensuel visera.
  * @return {string} Texte lisible.
  */
-function installationTexteAutomatisation_(jour, supprimes) {
+function installationTexteAutomatisation_(jour, supprimes, periode) {
   const heureBilans = `${INSTALLATION_HEURE_BILANS_} h`;
   const heureRapprochement = `${INSTALLATION_HEURE_RAPPROCHEMENT_} h`;
+  const cible = periode ? ` (période visée aujourd'hui : ${periode})` : '';
   return [
     "L'automatisation est active.",
     '',
     '• Toutes les heures : les nouvelles factures de votre étiquette Gmail sont importées.',
     `• Chaque jour vers ${heureBilans} : si on est le ${jour} du mois, les bilans sont ` +
-      'générés puis préparés (en brouillon tant que MODE_ENVOI reste « Brouillon »).',
+      `générés puis préparés${cible} (en brouillon tant que MODE_ENVOI reste « Brouillon »).`,
     `• Chaque jour vers ${heureRapprochement} : si on est le premier jour d'un trimestre, ` +
       'le rapprochement complet est lancé.',
-    "• À chaque ouverture du classeur : le menu " + CONFIG.MENU + ' est ajouté.',
+    "• À chaque ouverture du classeur : le menu " + CONFIG.MENU + ' est ajouté (déclencheur ' +
+      'simple, aucun réglage nécessaire).',
     '',
     supprimes
       ? `${supprimes} ancien(s) déclencheur(s) ont été retirés pour éviter les doublons.`
@@ -623,15 +630,85 @@ function genererEtEnvoyerBilansAuto() {
 /**
  * Enchaîne la génération puis l'envoi des bilans, en isolant les erreurs :
  * si la génération échoue, on le sait, et l'envoi est quand même tenté.
+ *
+ * La période visée est explicite (réglage PERIODE_BILAN_AUTO) : avec le réglage
+ * par défaut (« Mois précédent », jour d'envoi = 1), le passage du 1er juillet
+ * doit produire les bilans de juin, pas ceux d'un mois de juillet encore vide.
  * @return {string} Résumé des deux étapes.
  */
 function installationExecuterBilans_() {
+  const periode = installationPeriodeBilansAuto_(lireParametres_());
   const etapes = [];
-  etapes.push(installationLancer_('genererBilans',
-    typeof genererBilans === 'function' ? genererBilans : null));
+  etapes.push(installationLancer_(`genererBilans (${periode})`,
+    typeof genererBilans === 'function' ? () => genererBilans(periode) : null));
+  installationVerifierBilansGeneres_(periode);
   etapes.push(installationLancer_('envoyerBilans',
     typeof envoyerBilans === 'function' ? envoyerBilans : null));
   return etapes.join(' ; ');
+}
+
+/**
+ * Période 'AAAA-MM' que le passage mensuel automatique doit traiter, d'après le
+ * réglage PERIODE_BILAN_AUTO (« Mois précédent » par défaut, ou « Mois courant »).
+ * @param {Object} params Réglages lus par lireParametres_().
+ * @return {string} Période visée, ex. '2026-06'.
+ */
+function installationPeriodeBilansAuto_(params) {
+  if (typeof periodeCourante_ !== 'function') return '';
+  const reglage = texteNormalise_(
+    (params || {}).PERIODE_BILAN_AUTO || CONFIG.PARAMETRES_DEFAUT.PERIODE_BILAN_AUTO);
+  if (reglage === texteNormalise_('Mois courant')) return periodeCourante_();
+  if (typeof periodePrecedente_ !== 'function') return periodeCourante_();
+  return periodePrecedente_() || periodeCourante_();
+}
+
+/**
+ * Signale au Journal le cas le plus trompeur du passage automatique : des lignes
+ * existent bien pour la période visée, mais aucun bilan n'a été produit. Sans
+ * cet AVERT, l'automatisation ne fait rien et ne le dit nulle part.
+ * @param {string} periode Période 'AAAA-MM' que la génération vient de traiter.
+ * @return {void}
+ */
+function installationVerifierBilansGeneres_(periode) {
+  if (!periode) return;
+  try {
+    const colLignes = CONFIG.ONGLETS.LIGNES_BILAN.colonnes[2].nom; // Période
+    const colBilans = CONFIG.ONGLETS.BILANS.colonnes[3].nom;       // Période
+    const lignes = installationCompterPeriode_(
+      lireTable_(CONFIG.ONGLETS.LIGNES_BILAN.nom), colLignes, periode);
+    if (!lignes) return;
+    const bilans = installationCompterPeriode_(
+      lireTable_(CONFIG.ONGLETS.BILANS.nom), colBilans, periode);
+    if (bilans) return;
+    journalAvert_('genererEtEnvoyerBilansAuto',
+      `Aucun bilan produit pour la période ${periode}, alors que ` +
+      `${lignes} ligne(s) y figurent dans l'onglet ${CONFIG.ONGLETS.LIGNES_BILAN.nom}.`,
+      "Vérifiez le réglage PERIODE_BILAN_AUTO, la colonne « ID client » de ces lignes, " +
+      `et la colonne « Actif » de l'onglet ${CONFIG.ONGLETS.CLIENTS.nom}.`);
+  } catch (e) {
+    journalErreur_('installationVerifierBilansGeneres_',
+      "Le contrôle « zéro bilan produit » n'a pas pu être fait.",
+      installationDetailErreur_(e));
+  }
+}
+
+/**
+ * Compte les lignes d'une table dont la colonne de période vaut la période visée.
+ * @param {Array<Object>} objets Lignes lues par lireTable_().
+ * @param {string} champ Nom de la colonne de période.
+ * @param {string} periode Période 'AAAA-MM' recherchée.
+ * @return {number} Nombre de lignes correspondantes.
+ */
+function installationCompterPeriode_(objets, champ, periode) {
+  let n = 0;
+  (objets || []).forEach((objet) => {
+    const valeur = objet ? objet[champ] : '';
+    const normalisee = (typeof bilansPeriodeValide_ === 'function')
+      ? bilansPeriodeValide_(valeur)
+      : String(valeur === null || valeur === undefined ? '' : valeur).trim();
+    if (normalisee === periode) n++;
+  });
+  return n;
 }
 
 /**
@@ -789,6 +866,8 @@ function installationHabillerTableauDeBord_(nom, lignes, colonnes) {
     poids.push(rangeePoids);
     fonds.push(rangeeFonds);
   });
+  feuillesGarantirLignes_(feuille, 1 + lignes.length);
+  feuillesGarantirColonnes_(feuille, nbColonnes);
   const plage = feuille.getRange(2, 1, lignes.length, nbColonnes);
   plage.setFontWeights(poids);
   plage.setBackgrounds(fonds);
@@ -1153,21 +1232,43 @@ function installationHorodatage_(date) {
  * Affiche un message à l'utilisateur, s'il y a bien quelqu'un devant l'écran.
  *
  * Deux cas où l'on n'ouvre pas de fenêtre, et ce n'est pas une erreur :
- *   - appelé par le menu, c'est executer_() (02_Menu.gs) qui affiche déjà le
- *     texte renvoyé : une deuxième fenêtre identique n'apporterait rien ;
- *   - appelé par un déclencheur, il n'y a tout simplement pas d'interface.
+ *   - l'appel vient du menu : c'est executer_() (02_Menu.gs) qui affiche déjà le
+ *     texte renvoyé, une deuxième fenêtre identique n'apporterait rien ;
+ *   - l'appel vient d'un déclencheur : il n'y a tout simplement pas d'interface,
+ *     et SpreadsheetApp.getUi() lève, ce que le catch absorbe.
  * Dans les deux cas le récapitulatif reste renvoyé par la fonction et écrit
- * dans le Journal.
+ * dans le Journal. Reste le cas visé ici : installer() lancé À LA MAIN depuis
+ * l'éditeur Apps Script, comme le README l'indique au premier démarrage. Là,
+ * la fenêtre s'ouvre bel et bien.
  * @param {string} titre Titre de la fenêtre.
  * @param {string} message Texte affiché.
  * @return {void}
  */
 function installationAlerte_(titre, message) {
-  if (typeof executer_ === 'function') return;
+  if (installationAppelDepuisMenu_()) return;
   try {
     const ui = SpreadsheetApp.getUi();
     ui.alert(titre, message, ui.ButtonSet.OK);
   } catch (e) {
     journalSecours_('installationAlerte_', `${titre}\n${message}`);
+  }
+}
+
+/**
+ * Vrai si l'exécution en cours passe par le menu, c'est-à-dire si executer_()
+ * (02_Menu.gs) est présent dans la pile d'appels — c'est lui qui affichera le
+ * résultat. Tester `typeof executer_ === 'function'` ne dit rien : la fonction
+ * est globale et donc toujours présente dans un projet complet.
+ *
+ * Si la pile n'est pas lisible, on considère qu'on n'est PAS dans le menu :
+ * mieux vaut une fenêtre de trop qu'un utilisateur qui ne voit rien.
+ * @return {boolean} Vrai quand une action du menu est en cours.
+ */
+function installationAppelDepuisMenu_() {
+  try {
+    const pile = String(new Error().stack || '');
+    return pile.indexOf('executer_') >= 0 || pile.indexOf('menuAppeler_') >= 0;
+  } catch (e) {
+    return false;
   }
 }

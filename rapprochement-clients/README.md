@@ -96,8 +96,10 @@ Onglet **`Paramètres`** — modifiez uniquement la colonne **Valeur**.
 | `TOLERANCE_CENTS` | écart accepté avant de crier à l'erreur (`1` = un cent) |
 | `SIGNE_SOLDE_CLIENT` | `Inversé` si vos clients vous envoient leur solde en négatif |
 | `JOUR_ENVOI_BILAN` | jour du mois (1 à 28) où les bilans partent |
+| `PERIODE_BILAN_AUTO` | quelle période l'envoi automatique vise : **`Mois précédent`** (défaut, si vous facturez le mois écoulé) ou `Mois courant` |
 | `ETIQUETTE_GMAIL` | l'étiquette Gmail où vous classez les factures reçues |
-| `DOSSIER_DRIVE` | le dossier Drive où les pièces jointes sont archivées |
+| `DOSSIER_DRIVE` | le nom du dossier Drive où les pièces jointes sont archivées. **Le script le crée lui-même** — n'en créez pas un à la main, il ne pourrait pas le retrouver (il n'a accès qu'aux fichiers qu'il a créés, c'est volontaire). Le renommer ici fait basculer l'archivage vers un nouveau dossier ; l'ancien est conservé. |
+| `DOSSIER_DRIVE_ID` | rempli tout seul. N'y touchez pas. |
 | `SIGNATURE` | le texte ajouté au bas de vos courriels |
 | `RELANCE_AUTO` | `Oui` pour que les relances d'écart partent sans validation |
 
@@ -216,7 +218,8 @@ S'il ne trouve pas, il le dit plutôt que d'inventer.
 |---|---|
 | Le menu 📋 n'apparaît pas | rechargez la page (F5). Sinon, le code n'est pas enregistré : retournez dans Apps Script et cliquez sur 💾. |
 | « Autorisation requise » | normal la première fois : *Autoriser → Paramètres avancés → Accéder à…* |
-| Les bilans ne partent pas tous | quota Gmail atteint (100/jour en compte gratuit, 1 500 en Workspace). Le script s'arrête proprement et reprend au passage suivant. |
+| Les bilans ne partent pas tous | quota Gmail atteint (100/jour en compte gratuit, 1 500 en Workspace). Le script s'arrête proprement et reprend au passage suivant. En mode `Brouillon`, ce quota ne s'applique pas. |
+| L'envoi mensuel automatique ne produit rien | vérifiez `PERIODE_BILAN_AUTO` : avec `Mois courant` et un envoi le 1er, le mois visé vient tout juste de commencer et ne contient aucune ligne. |
 | Une facture reste « À vérifier » | le montant n'a pas pu être lu dans le courriel. Saisissez-le, puis relancez **4. Vérifier les factures**. |
 | Un client apparaît « Solde non déclaré » | aucune ligne dans `Soldes_declares` pour ce client et ce trimestre. |
 | Tous les soldes sont à l'envers | passez `SIGNE_SOLDE_CLIENT` à `Inversé` et relancez le rapprochement. |

@@ -843,10 +843,14 @@ function installationRecapitulatif_(rapport, parametres, deplaces) {
 
 /**
  * Met l'automatisation en marche. Les anciens déclencheurs sont d'abord retirés
- * pour éviter les doublons, puis quatre sont créés : le menu à l'ouverture,
- * l'import Gmail toutes les heures, la préparation des bilans une fois par mois
- * (déclencheur quotidien qui ne fait rien les autres jours) et le rapprochement
- * au premier jour de chaque trimestre (même principe).
+ * pour éviter les doublons, puis trois sont créés : l'import Gmail toutes les
+ * heures, la préparation des bilans une fois par mois (déclencheur quotidien qui
+ * ne fait rien les autres jours) et le rapprochement au premier jour de chaque
+ * trimestre (même principe).
+ *
+ * Aucun déclencheur n'est posé sur onOpen : c'est déjà un déclencheur SIMPLE
+ * (02_Menu.gs), et en ajouter un installable ferait construire le menu deux fois
+ * à chaque ouverture du classeur.
  * @return {string} Le récapitulatif affiché à l'utilisateur.
  */
 function installerDeclencheurs() {
@@ -854,15 +858,15 @@ function installerDeclencheurs() {
   let message = '';
   try {
     const supprimes = supprimerDeclencheurs();
-    const jour = installationJourEnvoiBilan_(lireParametres_());
-    ScriptApp.newTrigger('onOpen').forSpreadsheet(feuillesClasseur_()).onOpen().create();
+    const params = lireParametres_();
+    const jour = installationJourEnvoiBilan_(params);
     ScriptApp.newTrigger('importerFacturesGmail').timeBased().everyHours(1).create();
     ScriptApp.newTrigger('genererEtEnvoyerBilansAuto').timeBased().everyDays(1)
       .atHour(INSTALLATION_HEURE_BILANS_).inTimezone(CONFIG.FUSEAU).create();
     ScriptApp.newTrigger('rapprochementAutoSiDebutTrimestre').timeBased().everyDays(1)
       .atHour(INSTALLATION_HEURE_RAPPROCHEMENT_).inTimezone(CONFIG.FUSEAU).create();
-    message = installationTexteAutomatisation_(jour, supprimes);
-    journalInfo_(nomFonction, 'Automatisation activée (4 déclencheurs).', message);
+    message = installationTexteAutomatisation_(jour, supprimes, installationPeriodeBilansAuto_(params));
+    journalInfo_(nomFonction, 'Automatisation activée (3 déclencheurs).', message);
   } catch (e) {
     message = `L'automatisation n'a pas pu être activée :\n\n${e.message}\n\n` +
       `Le détail est dans l'onglet « ${CONFIG.ONGLETS.JOURNAL.nom} ».`;
@@ -878,20 +882,23 @@ function installerDeclencheurs() {
  * Rédige, en français clair, ce que l'automatisation fera désormais.
  * @param {number} jour Jour du mois où les bilans partent.
  * @param {number} supprimes Nombre d'anciens déclencheurs retirés.
+ * @param {string} periode Période 'AAAA-MM' que le prochain passage mensuel visera.
  * @return {string} Texte lisible.
  */
-function installationTexteAutomatisation_(jour, supprimes) {
+function installationTexteAutomatisation_(jour, supprimes, periode) {
   const heureBilans = `${INSTALLATION_HEURE_BILANS_} h`;
   const heureRapprochement = `${INSTALLATION_HEURE_RAPPROCHEMENT_} h`;
+  const cible = periode ? ` (période visée aujourd'hui : ${periode})` : '';
   return [
     "L'automatisation est active.",
     '',
     '• Toutes les heures : les nouvelles factures de votre étiquette Gmail sont importées.',
     `• Chaque jour vers ${heureBilans} : si on est le ${jour} du mois, les bilans sont ` +
-      'générés puis préparés (en brouillon tant que MODE_ENVOI reste « Brouillon »).',
+      `générés puis préparés${cible} (en brouillon tant que MODE_ENVOI reste « Brouillon »).`,
     `• Chaque jour vers ${heureRapprochement} : si on est le premier jour d'un trimestre, ` +
       'le rapprochement complet est lancé.',
-    "• À chaque ouverture du classeur : le menu " + CONFIG.MENU + ' est ajouté.',
+    "• À chaque ouverture du classeur : le menu " + CONFIG.MENU + ' est ajouté (déclencheur ' +
+      'simple, aucun réglage nécessaire).',
     '',
     supprimes
       ? `${supprimes} ancien(s) déclencheur(s) ont été retirés pour éviter les doublons.`
@@ -959,15 +966,85 @@ function genererEtEnvoyerBilansAuto() {
 /**
  * Enchaîne la génération puis l'envoi des bilans, en isolant les erreurs :
  * si la génération échoue, on le sait, et l'envoi est quand même tenté.
+ *
+ * La période visée est explicite (réglage PERIODE_BILAN_AUTO) : avec le réglage
+ * par défaut (« Mois précédent », jour d'envoi = 1), le passage du 1er juillet
+ * doit produire les bilans de juin, pas ceux d'un mois de juillet encore vide.
  * @return {string} Résumé des deux étapes.
  */
 function installationExecuterBilans_() {
+  const periode = installationPeriodeBilansAuto_(lireParametres_());
   const etapes = [];
-  etapes.push(installationLancer_('genererBilans',
-    typeof genererBilans === 'function' ? genererBilans : null));
+  etapes.push(installationLancer_(`genererBilans (${periode})`,
+    typeof genererBilans === 'function' ? () => genererBilans(periode) : null));
+  installationVerifierBilansGeneres_(periode);
   etapes.push(installationLancer_('envoyerBilans',
     typeof envoyerBilans === 'function' ? envoyerBilans : null));
   return etapes.join(' ; ');
+}
+
+/**
+ * Période 'AAAA-MM' que le passage mensuel automatique doit traiter, d'après le
+ * réglage PERIODE_BILAN_AUTO (« Mois précédent » par défaut, ou « Mois courant »).
+ * @param {Object} params Réglages lus par lireParametres_().
+ * @return {string} Période visée, ex. '2026-06'.
+ */
+function installationPeriodeBilansAuto_(params) {
+  if (typeof periodeCourante_ !== 'function') return '';
+  const reglage = texteNormalise_(
+    (params || {}).PERIODE_BILAN_AUTO || CONFIG.PARAMETRES_DEFAUT.PERIODE_BILAN_AUTO);
+  if (reglage === texteNormalise_('Mois courant')) return periodeCourante_();
+  if (typeof periodePrecedente_ !== 'function') return periodeCourante_();
+  return periodePrecedente_() || periodeCourante_();
+}
+
+/**
+ * Signale au Journal le cas le plus trompeur du passage automatique : des lignes
+ * existent bien pour la période visée, mais aucun bilan n'a été produit. Sans
+ * cet AVERT, l'automatisation ne fait rien et ne le dit nulle part.
+ * @param {string} periode Période 'AAAA-MM' que la génération vient de traiter.
+ * @return {void}
+ */
+function installationVerifierBilansGeneres_(periode) {
+  if (!periode) return;
+  try {
+    const colLignes = CONFIG.ONGLETS.LIGNES_BILAN.colonnes[2].nom; // Période
+    const colBilans = CONFIG.ONGLETS.BILANS.colonnes[3].nom;       // Période
+    const lignes = installationCompterPeriode_(
+      lireTable_(CONFIG.ONGLETS.LIGNES_BILAN.nom), colLignes, periode);
+    if (!lignes) return;
+    const bilans = installationCompterPeriode_(
+      lireTable_(CONFIG.ONGLETS.BILANS.nom), colBilans, periode);
+    if (bilans) return;
+    journalAvert_('genererEtEnvoyerBilansAuto',
+      `Aucun bilan produit pour la période ${periode}, alors que ` +
+      `${lignes} ligne(s) y figurent dans l'onglet ${CONFIG.ONGLETS.LIGNES_BILAN.nom}.`,
+      "Vérifiez le réglage PERIODE_BILAN_AUTO, la colonne « ID client » de ces lignes, " +
+      `et la colonne « Actif » de l'onglet ${CONFIG.ONGLETS.CLIENTS.nom}.`);
+  } catch (e) {
+    journalErreur_('installationVerifierBilansGeneres_',
+      "Le contrôle « zéro bilan produit » n'a pas pu être fait.",
+      installationDetailErreur_(e));
+  }
+}
+
+/**
+ * Compte les lignes d'une table dont la colonne de période vaut la période visée.
+ * @param {Array<Object>} objets Lignes lues par lireTable_().
+ * @param {string} champ Nom de la colonne de période.
+ * @param {string} periode Période 'AAAA-MM' recherchée.
+ * @return {number} Nombre de lignes correspondantes.
+ */
+function installationCompterPeriode_(objets, champ, periode) {
+  let n = 0;
+  (objets || []).forEach((objet) => {
+    const valeur = objet ? objet[champ] : '';
+    const normalisee = (typeof bilansPeriodeValide_ === 'function')
+      ? bilansPeriodeValide_(valeur)
+      : String(valeur === null || valeur === undefined ? '' : valeur).trim();
+    if (normalisee === periode) n++;
+  });
+  return n;
 }
 
 /**
@@ -1125,6 +1202,8 @@ function installationHabillerTableauDeBord_(nom, lignes, colonnes) {
     poids.push(rangeePoids);
     fonds.push(rangeeFonds);
   });
+  feuillesGarantirLignes_(feuille, 1 + lignes.length);
+  feuillesGarantirColonnes_(feuille, nbColonnes);
   const plage = feuille.getRange(2, 1, lignes.length, nbColonnes);
   plage.setFontWeights(poids);
   plage.setBackgrounds(fonds);
@@ -1489,22 +1568,44 @@ function installationHorodatage_(date) {
  * Affiche un message à l'utilisateur, s'il y a bien quelqu'un devant l'écran.
  *
  * Deux cas où l'on n'ouvre pas de fenêtre, et ce n'est pas une erreur :
- *   - appelé par le menu, c'est executer_() (02_Menu.gs) qui affiche déjà le
- *     texte renvoyé : une deuxième fenêtre identique n'apporterait rien ;
- *   - appelé par un déclencheur, il n'y a tout simplement pas d'interface.
+ *   - l'appel vient du menu : c'est executer_() (02_Menu.gs) qui affiche déjà le
+ *     texte renvoyé, une deuxième fenêtre identique n'apporterait rien ;
+ *   - l'appel vient d'un déclencheur : il n'y a tout simplement pas d'interface,
+ *     et SpreadsheetApp.getUi() lève, ce que le catch absorbe.
  * Dans les deux cas le récapitulatif reste renvoyé par la fonction et écrit
- * dans le Journal.
+ * dans le Journal. Reste le cas visé ici : installer() lancé À LA MAIN depuis
+ * l'éditeur Apps Script, comme le README l'indique au premier démarrage. Là,
+ * la fenêtre s'ouvre bel et bien.
  * @param {string} titre Titre de la fenêtre.
  * @param {string} message Texte affiché.
  * @return {void}
  */
 function installationAlerte_(titre, message) {
-  if (typeof executer_ === 'function') return;
+  if (installationAppelDepuisMenu_()) return;
   try {
     const ui = SpreadsheetApp.getUi();
     ui.alert(titre, message, ui.ButtonSet.OK);
   } catch (e) {
     journalSecours_('installationAlerte_', `${titre}\n${message}`);
+  }
+}
+
+/**
+ * Vrai si l'exécution en cours passe par le menu, c'est-à-dire si executer_()
+ * (02_Menu.gs) est présent dans la pile d'appels — c'est lui qui affichera le
+ * résultat. Tester `typeof executer_ === 'function'` ne dit rien : la fonction
+ * est globale et donc toujours présente dans un projet complet.
+ *
+ * Si la pile n'est pas lisible, on considère qu'on n'est PAS dans le menu :
+ * mieux vaut une fenêtre de trop qu'un utilisateur qui ne voit rien.
+ * @return {boolean} Vrai quand une action du menu est en cours.
+ */
+function installationAppelDepuisMenu_() {
+  try {
+    const pile = String(new Error().stack || '');
+    return pile.indexOf('executer_') >= 0 || pile.indexOf('menuAppeler_') >= 0;
+  } catch (e) {
+    return false;
   }
 }
 
@@ -1532,6 +1633,8 @@ function installationAlerte_(titre, message) {
 const MENU_COL_ = {
   BILAN_STATUT: CONFIG.ONGLETS.BILANS.colonnes[8].nom,              // Statut
   BILAN_MONTANT: CONFIG.ONGLETS.BILANS.colonnes[6].nom,             // Montant du bilan
+  FACTURE_ID: CONFIG.ONGLETS.FACTURES.colonnes[0].nom,              // ID facture
+  FACTURE_CLIENT: CONFIG.ONGLETS.FACTURES.colonnes[1].nom,          // ID client
   FACTURE_VERIFICATION: CONFIG.ONGLETS.FACTURES.colonnes[10].nom,   // Statut vérification
   FACTURE_PAIEMENT: CONFIG.ONGLETS.FACTURES.colonnes[12].nom,       // Statut paiement
   FACTURE_TOTAL: CONFIG.ONGLETS.FACTURES.colonnes[8].nom,           // Montant total
@@ -1576,6 +1679,7 @@ function menuConstruire_(ui) {
   menu.addItem('4. Vérifier les factures', 'menuVerifierFactures');
   menu.addItem('5. Préparer le lot de paiements', 'menuPreparerLotPaiements');
   menu.addItem('6. Confirmer les paiements du lot', 'menuConfirmerLotPaiements');
+  menu.addItem('Annuler le lot de paiements en cours', 'menuAnnulerLotPaiements');
   menu.addSeparator();
   menu.addItem('7. Rapprochement trimestriel', 'menuRapprochementTrimestriel');
   menu.addItem('8. Relancer les clients en écart', 'menuRelancerEcarts');
@@ -1846,6 +1950,25 @@ function menuLignesFiltrees_(nomOnglet, criteres) {
 }
 
 /**
+ * Factures que la vérification va réellement traiter. On délègue à
+ * facturesAVerifier_ (05_Factures.gs) pour que le compteur annoncé à
+ * l'utilisateur ne puisse jamais diverger de ce que fait le moteur. Si le
+ * module des factures n'a pas été copié, on retombe sur le filtre par statut.
+ * @return {Array<Object>} Les factures à vérifier.
+ */
+function menuFacturesAVerifier_() {
+  const factures = lireTable_(CONFIG.ONGLETS.FACTURES.nom);
+  if (typeof facturesAVerifier_ === 'function') return facturesAVerifier_(factures);
+  const acceptes = ['', STATUT_VERIF.A_VERIFIER, STATUT_VERIF.SANS_BILAN,
+    STATUT_VERIF.ECART, STATUT_VERIF.DOUBLON].map((valeur) => texteNormalise_(valeur));
+  return factures.filter((ligne) => {
+    if (!String(ligne[MENU_COL_.FACTURE_ID] || '').trim() &&
+        !String(ligne[MENU_COL_.FACTURE_CLIENT] || '').trim()) return false;
+    return acceptes.indexOf(texteNormalise_(ligne[MENU_COL_.FACTURE_VERIFICATION])) >= 0;
+  });
+}
+
+/**
  * Additionne une colonne de montants, en cents entiers.
  * @param {Array<Object>} lignes Lignes lues par lireTable_.
  * @param {string} colonne Nom de la colonne de montants.
@@ -1953,11 +2076,14 @@ function menuImporterFactures() {
 function menuVerifierFactures() {
   executer_('4. Vérifier les factures', () => {
     menuExigerInstallation_();
-    const factures = menuLignesFiltrees_(CONFIG.ONGLETS.FACTURES.nom, [
-      { colonne: MENU_COL_.FACTURE_VERIFICATION, valeurs: [STATUT_VERIF.A_VERIFIER] },
-    ]);
+    // Exactement le même critère que le moteur (facturesAVerifier_ de
+    // 05_Factures.gs) : une facture saisie à la main dont le statut de
+    // vérification est resté vide doit être comptée, sinon le menu affirmerait
+    // « tout est déjà vérifié » alors que le travail n'a pas été fait.
+    const factures = menuFacturesAVerifier_();
     if (!factures.length) {
-      return 'Aucune facture au statut « ' + STATUT_VERIF.A_VERIFIER + ' » : tout est déjà vérifié.';
+      return 'Aucune facture à vérifier : tout est déjà vérifié ou tranché à la main ' +
+        `(« ${STATUT_VERIF.CONFORME} », « ${STATUT_VERIF.REJETEE} »).`;
     }
     const question = `${factures.length} facture(s) vont être comparées à leur bilan, et leur ` +
       'statut de vérification sera mis à jour automatiquement.\n\n' +
@@ -2023,6 +2149,39 @@ function menuConfirmerLotPaiements() {
       return 'Confirmation annulée : aucun paiement n\'a été enregistré.';
     }
     return menuAppeler_('confirmerLotDePaiements');
+  });
+}
+
+/**
+ * Annule le lot de paiements en cours : les factures « À payer » qui n'ont pas
+ * encore été réglées reviennent à « Non payée », de sorte qu'un lot préparé par
+ * erreur puisse être défait sans passer par l'éditeur de script et sans
+ * confirmer des virements qui n'ont pas eu lieu.
+ * @return {void}
+ */
+function menuAnnulerLotPaiements() {
+  executer_('Annuler le lot de paiements en cours', () => {
+    menuExigerInstallation_();
+    const factures = menuLignesFiltrees_(CONFIG.ONGLETS.FACTURES.nom, [
+      { colonne: MENU_COL_.FACTURE_PAIEMENT, valeurs: [STATUT_PAIEMENT.A_PAYER] },
+    ]);
+    if (!factures.length) {
+      return 'Aucun lot en cours : aucune facture n\'est au statut « ' +
+        STATUT_PAIEMENT.A_PAYER + ' ». Il n\'y a rien à annuler.';
+    }
+    const total = formaterMontant_(menuTotalCents_(factures, MENU_COL_.FACTURE_TOTAL), menuDevise_());
+    const question = `${factures.length} facture(s) sont actuellement au statut ` +
+      `« ${STATUT_PAIEMENT.A_PAYER} », pour un total de ${total}.\n\n` +
+      `Elles reviendront toutes au statut « ${STATUT_PAIEMENT.NON_PAYEE} », et vous pourrez ` +
+      'préparer un nouveau lot.\n\n' +
+      'Aucun paiement déjà enregistré n\'est supprimé, aucune facture déjà ' +
+      `« ${STATUT_PAIEMENT.PAYEE} » n'est touchée, et aucun courriel n'est envoyé.\n\n` +
+      'Répondez Non si vous avez déjà fait ces virements : dans ce cas, utilisez plutôt ' +
+      '« 6. Confirmer les paiements du lot ».\n\nVoulez-vous annuler le lot ?';
+    if (!menuConfirmer_('Annuler le lot de paiements en cours', question)) {
+      return 'Annulation abandonnée : le lot reste en cours, aucun statut n\'a changé.';
+    }
+    return menuAppeler_('annulerLot');
   });
 }
 
@@ -2288,6 +2447,9 @@ function menuModeEmploiFin_() {
       <li>Vous pouvez relancer n'importe quelle étape autant de fois que vous voulez : elle ne
         crée pas de doublon.</li>
       <li>Le script ne paie jamais rien tout seul et ne supprime jamais ce que vous avez saisi.</li>
+      <li>Vous avez préparé un lot de paiements par erreur ? <i>Annuler le lot de paiements en
+        cours</i> remet les factures « ${STATUT_PAIEMENT.A_PAYER} » à
+        « ${STATUT_PAIEMENT.NON_PAYEE} », sans toucher aux paiements déjà enregistrés.</li>
       <li>Avant tout envoi de courriel ou tout changement de statut en masse, une fenêtre vous
         annonce combien d'éléments sont concernés et si vous êtes en mode Brouillon ou Direct.</li>
       <li>Si quelque chose se passe mal, le message reste en français et le détail technique est
@@ -2402,6 +2564,7 @@ function feuille_(nom) {
   }
   const nouvelle = classeur.insertSheet(nom);
   const noms = schema.colonnes.map((c) => c.nom);
+  feuillesGarantirColonnes_(nouvelle, noms.length);
   const plage = nouvelle.getRange(1, 1, 1, noms.length);
   plage.setValues([noms]);
   plage.setFontWeight('bold');
@@ -2444,6 +2607,7 @@ function feuillesEntetes_(feuille, valeurs) {
   const schema = feuillesSchema_(feuille.getName());
   if (!schema) return entetes;
   const noms = schema.colonnes.map((c) => c.nom);
+  feuillesGarantirColonnes_(feuille, noms.length);
   feuille.getRange(1, 1, 1, noms.length).setValues([noms]);
   feuille.getRange(1, 1, 1, noms.length).setFontWeight('bold');
   feuille.setFrozenRows(1);
@@ -2514,21 +2678,52 @@ function entetesTable_(nom) {
 
 /**
  * Indexe une liste d'objets par la valeur d'un champ (le dernier gagne).
+ *
+ * Une clé présente sur plusieurs lignes est une faute de saisie qui fait
+ * silencieusement disparaître une ligne (le bilan part alors à la mauvaise
+ * adresse) : chaque doublon est donc signalé au Journal, en nommant les lignes.
  * @param {Array<Object>} objets Lignes à indexer.
  * @param {string} champ Nom du champ servant de clé.
  * @return {Map<string, Object>} Clé (texte, nettoyée) vers objet.
  */
 function indexerPar_(objets, champ) {
   const index = new Map();
+  const lignesParCle = new Map();
   (objets || []).forEach((objet) => {
     if (!objet) return;
     const brut = objet[champ];
     if (brut === null || brut === undefined) return;
     const cle = String(brut).trim();
     if (cle === '') return;
+    if (!lignesParCle.has(cle)) lignesParCle.set(cle, []);
+    lignesParCle.get(cle).push(objet._ligne === undefined ? '?' : objet._ligne);
     index.set(cle, objet);
   });
+  feuillesSignalerDoublons_(champ, lignesParCle);
   return index;
+}
+
+/**
+ * Journalise un AVERT par clé présente plus d'une fois, en nommant toutes les
+ * lignes concernées et celle qui l'emporte réellement.
+ * @param {string} champ Nom du champ servant de clé.
+ * @param {Map<string, Array<*>>} lignesParCle Clé vers numéros de ligne rencontrés.
+ * @return {number} Nombre de clés en double.
+ */
+function feuillesSignalerDoublons_(champ, lignesParCle) {
+  let doublons = 0;
+  lignesParCle.forEach((lignes, cle) => {
+    if (lignes.length < 2) return;
+    doublons++;
+    const retenue = lignes[lignes.length - 1];
+    const debut = lignes.slice(0, lignes.length - 1).join(', ');
+    journalAvert_('indexerPar_',
+      `${champ} ${cle} présent en lignes ${debut} et ${retenue} : ` +
+      `seule la ligne ${retenue} est utilisée.`,
+      'Supprimez ou corrigez la ligne en trop : tant que le doublon existe, les lignes ' +
+      'précédentes sont ignorées partout (bilans, envois, rapprochement).');
+  });
+  return doublons;
 }
 
 /**
@@ -2555,6 +2750,37 @@ function indexerGroupesPar_(objets, champ) {
 // ---------------------------------------------------------------------------
 // Écriture
 // ---------------------------------------------------------------------------
+
+/**
+ * Agrandit la grille de l'onglet si l'écriture prévue dépasse sa dernière ligne.
+ * Une feuille neuve n'a que 1000 lignes : sans cela, setValues() lève
+ * « The coordinates or dimensions of the range are invalid » et l'écriture est
+ * perdue (journal muet, rapport de trimestre effacé puis non réécrit).
+ * @param {Sheet} feuille Onglet concerné.
+ * @param {number} derniereLigne Numéro de la dernière ligne qui sera écrite.
+ * @return {number} Nombre de lignes ajoutées à la grille.
+ */
+function feuillesGarantirLignes_(feuille, derniereLigne) {
+  const maximum = feuille.getMaxRows();
+  const manquantes = Math.ceil(Number(derniereLigne) || 0) - maximum;
+  if (manquantes <= 0) return 0;
+  feuille.insertRowsAfter(maximum, manquantes);
+  return manquantes;
+}
+
+/**
+ * Agrandit la grille de l'onglet si l'écriture prévue dépasse sa dernière colonne.
+ * @param {Sheet} feuille Onglet concerné.
+ * @param {number} derniereColonne Numéro de la dernière colonne qui sera écrite.
+ * @return {number} Nombre de colonnes ajoutées à la grille.
+ */
+function feuillesGarantirColonnes_(feuille, derniereColonne) {
+  const maximum = feuille.getMaxColumns();
+  const manquantes = Math.ceil(Number(derniereColonne) || 0) - maximum;
+  if (manquantes <= 0) return 0;
+  feuille.insertColumnsAfter(maximum, manquantes);
+  return manquantes;
+}
 
 /**
  * Prépare une valeur avant écriture dans une cellule.
@@ -2592,6 +2818,7 @@ function ajouterLignes_(nom, objets) {
     return entetes.map((entete) => feuillesValeurSortie_((objet || {})[entete]));
   });
   const premiereLigne = Math.max(feuille.getLastRow(), 1) + 1;
+  feuillesGarantirLignes_(feuille, premiereLigne + matrice.length - 1);
   feuille.getRange(premiereLigne, 1, matrice.length, entetes.length).setValues(matrice);
   invaliderCacheFeuille_(nom);
 
@@ -3607,7 +3834,7 @@ function envoyerBilans() {
     majs: [],
     resume: bilansNouveauResumeEnvoi_(enAttente.length),
   };
-  const disponible = bilansQuotaDisponible_(enAttente.length, contexte.resume);
+  const disponible = bilansQuotaDisponible_(enAttente.length, contexte.resume, contexte.params);
   try {
     for (let i = 0; i < enAttente.length; i++) {
       if (contexte.resume.traites >= disponible) {
@@ -3659,11 +3886,17 @@ function bilansNouveauResumeEnvoi_(total) {
 /**
  * Nombre de courriels que l'on s'autorise aujourd'hui : le quota Gmail restant,
  * moins une marge de sécurité. Un quota illisible vaut zéro (on ne risque rien).
+ *
+ * En mode Brouillon — le mode par défaut — rien ne part : GmailApp.createDraft
+ * ne consomme pas le quota d'envoi, donc on ne bride rien (même règle que
+ * courrielsContexte_ dans 08_Courriels.gs).
  * @param {number} total Nombre de bilans à envoyer.
  * @param {Object} resume Compteur de résultats, complété au passage.
+ * @param {Object} params Réglages lus par lireParametres_().
  * @return {number} Nombre maximal d'envois pour ce passage.
  */
-function bilansQuotaDisponible_(total, resume) {
+function bilansQuotaDisponible_(total, resume, params) {
+  if (texteNormalise_((params || {}).MODE_ENVOI) !== 'DIRECT') return total;
   let quota = 0;
   try {
     quota = Number(quotaCourrielRestant_());
@@ -3994,8 +4227,11 @@ function bilansHtmlReference_(bilan, nombreLignes, devise) {
  *   1. LE SCRIPT NE DÉCIDE JAMAIS DU MONTANT À PAYER. Un montant lu dans un
  *      courriel est une SUGGESTION : la facture reste « À vérifier » et la
  *      colonne Notes le dit en toutes lettres.
- *   2. LA DÉCISION HUMAINE EST RESPECTÉE. Une facture que vous avez passée à
- *      « Conforme », « Rejetée » ou « Doublon » n'est jamais réécrite.
+ *   2. LA DÉCISION HUMAINE EST RESPECTÉE. Une facture passée à « Conforme » ou
+ *      « Rejetée » n'est jamais réécrite (§4.3) — ce sont les deux seuls verdicts
+ *      que le script vous laisse. À l'inverse, « Sans bilan », « Écart de montant »
+ *      et « Doublon » sont SES propres verdicts : il les réexamine à chaque
+ *      passage, pour que « corrigez puis relancez la vérification » fonctionne.
  *
  * verifierUneFacture_(), rattacherBilan_() et expliquerEcartFacture_() sont des
  * fonctions PURES : elles ne touchent ni au classeur, ni à Gmail, ni à Drive.
@@ -4077,11 +4313,17 @@ const FACTURES_ECART_RELATIF_MAX_ = 0.02;
 const FACTURES_TOLERANCE_TAXES_ = 2;
 
 /**
- * Le commentaire automatique de vérification commence toujours par cet en-tête.
- * Tout ce que VOUS écrivez avant est conservé : le script ne réécrit que sa
- * propre partie de la colonne Notes.
+ * Le commentaire automatique de vérification est encadré par ces deux
+ * marqueurs. Le script ne réécrit QUE ce qui se trouve strictement entre eux :
+ * tout ce que VOUS écrivez avant ⟦auto⟧ ou après ⟦/auto⟧ est conservé tel quel.
  */
+const FACTURES_MARQUEUR_DEBUT_ = '⟦auto⟧';
+const FACTURES_MARQUEUR_FIN_ = '⟦/auto⟧';
+
+/** En-tête du commentaire automatique, à l'intérieur des marqueurs. */
 const FACTURES_ENTETE_NOTE_ = 'Vérification : ';
+
+/** Ancien délimiteur, d'avant les marqueurs : encore lu, jamais réécrit. */
 const FACTURES_SEPARATEUR_NOTE_ = ' | ' + FACTURES_ENTETE_NOTE_;
 
 /** Un montant écrit à la québécoise : 1 234,56 / 1,234.56 / 1234.56 / 1234. */
@@ -4291,20 +4533,14 @@ function facturesLignesDuBilan_(bilan, lignes) {
     facturesTexte_(ligne[FACTURES_COL_LIGNE_.PERIODE]) === periode);
 }
 
-/**
- * Montant d'une ligne de bilan, en cents (Quantité × Prix unitaire si le
- * montant n'est pas saisi).
- * @param {Object} ligne Ligne de l'onglet Lignes_bilan.
- * @return {number} Montant en cents.
+/*
+ * Le montant d'une ligne de Lignes_bilan est calculé PAR bilansMontantLigneCents_
+ * (04_Bilans.gs), et par elle seule : c'est la fonction qui a servi à écrire la
+ * colonne « Montant du bilan ». Recalculer ici avec d'autres règles (cellule vide
+ * confondue avec un zéro saisi, quantité « 2,5 » lue par Number(), quantité vide
+ * traitée comme 0) ferait porter l'explication de l'écart sur des montants que le
+ * bilan n'a jamais comptés.
  */
-function facturesMontantLigne_(ligne) {
-  const montant = enCents_(ligne[FACTURES_COL_LIGNE_.MONTANT]);
-  if (montant !== 0) return montant;
-  const quantite = Number(ligne[FACTURES_COL_LIGNE_.QUANTITE]);
-  const prix = enCents_(ligne[FACTURES_COL_LIGNE_.PRIX]);
-  if (!isFinite(quantite) || !quantite || !prix) return 0;
-  return Math.round(quantite * prix);
-}
 
 /**
  * Teste si l'écart s'explique par les taxes : TPS (5 %), TVQ (9,975 %),
@@ -4357,7 +4593,7 @@ function facturesExplicationLigne_(ecartCents, lignes, tolerance, devise) {
   const absolu = Math.abs(ecartCents);
   const liste = lignes || [];
   for (let i = 0; i < liste.length; i++) {
-    const montant = facturesMontantLigne_(liste[i]);
+    const montant = bilansMontantLigneCents_(liste[i]);
     if (montant === 0 || Math.abs(Math.abs(montant) - absolu) > tolerance) continue;
     const description =
       facturesTexte_(liste[i][FACTURES_COL_LIGNE_.DESCRIPTION]) || '(ligne sans description)';
@@ -4530,38 +4766,116 @@ function verifierUneFacture_(facture, contexte) {
 // ---------------------------------------------------------------------------
 
 /**
- * Ne garde que les factures que le script a le droit de traiter : celles dont
- * le statut de vérification est « À vérifier » ou vide. Une facture passée à la
- * main à Conforme, Rejetée ou Doublon n'est jamais réécrite.
+ * Statuts de vérification que le SCRIPT a lui-même posés : il a donc le droit
+ * de les remettre en question au passage suivant. C'est ce qui rend l'invite
+ * « corrigez puis relancez la vérification » (notes « Sans bilan » et « Écart de
+ * montant ») réellement opérante.
+ * Les deux seules décisions HUMAINES protégées par le §4.3 — « Conforme » et
+ * « Rejetée » — n'y figurent pas : le script ne les réécrit jamais.
+ */
+const FACTURES_STATUTS_REJOUABLES_ = [
+  '',
+  STATUT_VERIF.A_VERIFIER,
+  STATUT_VERIF.SANS_BILAN,
+  STATUT_VERIF.ECART,
+  STATUT_VERIF.DOUBLON,
+].map(texteNormalise_);
+
+/**
+ * Ne garde que les factures que le script a le droit de traiter : statut vide,
+ * « À vérifier », « Sans bilan », « Écart de montant » ou « Doublon ». Une
+ * facture passée à « Conforme » ou « Rejetée » n'est jamais réécrite (§4.3).
  * @param {Array<Object>} factures Toutes les lignes de l'onglet Factures.
  * @return {Array<Object>} Les factures à retraiter.
  */
 function facturesAVerifier_(factures) {
-  const aVerifier = texteNormalise_(STATUT_VERIF.A_VERIFIER);
   return (factures || []).filter((facture) => {
+    if (!facture) return false;
     if (!facturesTexte_(facture[FACTURES_COL_.ID]) &&
         !facturesTexte_(facture[FACTURES_COL_.CLIENT])) return false;
     const statut = texteNormalise_(facture[FACTURES_COL_.VERIFICATION]);
-    return statut === '' || statut === aVerifier;
+    return FACTURES_STATUTS_REJOUABLES_.indexOf(statut) >= 0;
   });
 }
 
 /**
- * Assemble la nouvelle colonne Notes : ce que l'utilisateur a écrit est
- * conservé, seul le commentaire automatique précédent est remplacé.
+ * Découpe la colonne Notes en trois : ce qui précède le bloc automatique, le
+ * bloc automatique lui-même, et ce qui le suit. Une annotation écrite à la main
+ * APRÈS le commentaire du script est ainsi reconnue et conservée.
+ * @param {*} existantes Contenu actuel de la colonne Notes.
+ * @return {{avant: string, apres: string, herite: boolean, ancien: string}}
+ *     `herite` signale l'ancien format (sans marqueurs), dont on ne peut pas
+ *     deviner la fin : `ancien` porte alors le texte qui va être remplacé.
+ */
+function facturesDecouperNote_(existantes) {
+  // Le « | » qui séparait les morceaux appartient à la mise en forme, pas au
+  // texte de l'utilisateur : on ne le reporte pas, sinon il se dédouble à
+  // chaque vérification.
+  const nettoyer = (texte) => String(texte).replace(/^[\s|]+/, '').replace(/[\s|]+$/, '');
+  const brut = existantes === null || existantes === undefined ? '' : String(existantes);
+  const debut = brut.indexOf(FACTURES_MARQUEUR_DEBUT_);
+  const fin = debut < 0 ? -1
+    : brut.indexOf(FACTURES_MARQUEUR_FIN_, debut + FACTURES_MARQUEUR_DEBUT_.length);
+  if (debut >= 0 && fin > debut) {
+    return {
+      avant: nettoyer(brut.slice(0, debut)),
+      apres: nettoyer(brut.slice(fin + FACTURES_MARQUEUR_FIN_.length)),
+      herite: false,
+      ancien: '',
+    };
+  }
+  // Format hérité : le bloc automatique commençait à « Vérification : » et
+  // courait jusqu'au bout de la cellule, sans marqueur de fin.
+  let position = brut.indexOf(FACTURES_SEPARATEUR_NOTE_);
+  if (position < 0 && brut.indexOf(FACTURES_ENTETE_NOTE_) === 0) position = 0;
+  if (position >= 0) {
+    return {
+      avant: nettoyer(brut.slice(0, position)),
+      apres: '',
+      herite: true,
+      ancien: nettoyer(brut.slice(position)),
+    };
+  }
+  return { avant: nettoyer(brut), apres: '', herite: false, ancien: '' };
+}
+
+/**
+ * Assemble la nouvelle colonne Notes : ce que l'utilisateur a écrit avant ET
+ * après le bloc ⟦auto⟧…⟦/auto⟧ est conservé, seul l'intérieur du bloc est
+ * remplacé.
  * @param {*} existantes Contenu actuel de la colonne Notes.
  * @param {string} note Nouveau commentaire de vérification.
  * @return {string} Notes complètes.
  */
 function facturesFusionnerNote_(existantes, note) {
-  const brut = existantes === null || existantes === undefined ? '' : String(existantes);
-  let position = brut.indexOf(FACTURES_SEPARATEUR_NOTE_);
-  if (position < 0 && brut.indexOf(FACTURES_ENTETE_NOTE_) === 0) position = 0;
-  const conserve = (position >= 0 ? brut.slice(0, position) : brut).trim();
-  if (!note) return conserve;
-  return conserve
-    ? conserve + FACTURES_SEPARATEUR_NOTE_ + note
-    : FACTURES_ENTETE_NOTE_ + note;
+  const parties = facturesDecouperNote_(existantes);
+  const morceaux = [];
+  if (parties.avant) morceaux.push(parties.avant);
+  if (note) {
+    morceaux.push(`${FACTURES_MARQUEUR_DEBUT_} ${FACTURES_ENTETE_NOTE_}${note} ` +
+      FACTURES_MARQUEUR_FIN_);
+  }
+  if (parties.apres) morceaux.push(parties.apres);
+  return morceaux.join(' | ');
+}
+
+/**
+ * Journalise le texte d'un ancien bloc automatique (format sans marqueur de
+ * fin) avant de le remplacer : si une annotation manuelle y avait été ajoutée à
+ * la suite, elle reste retrouvable dans le Journal. Ne se produit qu'une fois
+ * par facture — la note réécrite porte désormais ses marqueurs.
+ * @param {Object} facture Facture vérifiée.
+ * @param {{herite: boolean, ancien: string}} parties Découpage de la note.
+ * @param {string} note Nouveau commentaire de vérification.
+ * @return {void}
+ */
+function facturesSignalerNoteHeritee_(facture, parties, note) {
+  if (!parties.herite || !parties.ancien) return;
+  if (parties.ancien === (FACTURES_ENTETE_NOTE_ + note).trim()) return;
+  const reference = facturesTexte_(facture[FACTURES_COL_.ID]) || `ligne ${facture._ligne}`;
+  journalAvert_('verifierFactures',
+    `Facture ${reference} : ancien commentaire de la colonne Notes remplacé.`,
+    `Texte remplacé (recopiez-en ce qui était de votre main) : ${parties.ancien}`);
 }
 
 /**
@@ -4576,6 +4890,8 @@ function facturesPatchFacture_(facture, resultat, bilan) {
   patch[FACTURES_COL_.VERIFICATION] = resultat.statut;
   patch[FACTURES_COL_.BILAN] = resultat.idBilan || '';
   patch[FACTURES_COL_.ECART] = resultat.idBilan ? enDollars_(resultat.ecartCents) : '';
+  facturesSignalerNoteHeritee_(
+    facture, facturesDecouperNote_(facture[FACTURES_COL_.NOTES]), resultat.notes);
   patch[FACTURES_COL_.NOTES] = facturesFusionnerNote_(facture[FACTURES_COL_.NOTES], resultat.notes);
   if (!facturesTexte_(facture[FACTURES_COL_.PAIEMENT])) {
     patch[FACTURES_COL_.PAIEMENT] = STATUT_PAIEMENT.NON_PAYEE;
@@ -4653,8 +4969,10 @@ function facturesResume_(compteurs, total) {
       compteurs[STATUT_VERIF.DOUBLON]) {
     lignes.push('');
     lignes.push('Ouvrez l\'onglet Factures : la colonne Notes explique chaque anomalie, ' +
-      'montants à l\'appui. Vous pouvez corriger un statut à la main, le script ne le ' +
-      'réécrira pas.');
+      'montants à l\'appui. Corrigez ce qu\'elle indique (montant, période, bilan manquant) ' +
+      'puis relancez cette action : le script réexamine ces factures. Si vous passez vous-même ' +
+      `une facture à « ${STATUT_VERIF.CONFORME} » ou « ${STATUT_VERIF.REJETEE} », il ne la ` +
+      'touchera plus jamais.');
   }
   if (compteurs[STATUT_VERIF.CONFORME]) {
     lignes.push('');
@@ -4678,7 +4996,9 @@ function verifierFactures() {
   const aTraiter = facturesAVerifier_(factures);
   if (!aTraiter.length) {
     journalInfo_('verifierFactures', 'Aucune facture à vérifier.');
-    return `Aucune facture au statut « ${STATUT_VERIF.A_VERIFIER} » : il n'y a rien à vérifier.`;
+    return `Aucune facture à vérifier : toutes les factures sont déjà « ` +
+      `${STATUT_VERIF.CONFORME} » ou « ${STATUT_VERIF.REJETEE} », les deux statuts que le ` +
+      `script ne réécrit jamais.`;
   }
 
   // Copies de travail : on peut y noter les rattachements sans toucher au classeur.
@@ -4856,37 +5176,112 @@ function facturesNumeroSuggere_(texte) {
 }
 
 /**
- * Retrouve un dossier Drive par son nom, ou le crée s'il n'existe pas.
- * @param {Object|null} parent Dossier parent, ou null pour la racine du Drive.
- * @param {string} nom Nom du dossier.
- * @return {Object} Le dossier Drive.
+ * Dossiers Drive déjà résolus pendant l'exécution en cours (une seule
+ * résolution par dossier, quel que soit le nombre de pièces jointes).
  */
-function facturesDossierParNom_(parent, nom) {
-  const source = parent ? parent.getFoldersByName(nom) : DriveApp.getFoldersByName(nom);
-  if (source.hasNext()) return source.next();
-  return parent ? parent.createFolder(nom) : DriveApp.createFolder(nom);
+const FACTURES_CACHE_DRIVE_ = { racine: null, sous: {} };
+
+/**
+ * Le dossier racine où le script archive tout : pièces jointes et fichiers de
+ * lot. Il est identifié par son IDENTIFIANT Drive (paramètre DOSSIER_DRIVE_ID),
+ * jamais par son nom.
+ *
+ * Pourquoi : le manifeste ne demande que le scope `drive.file`, volontairement
+ * minimal — le script ne voit que ce qu'il a lui-même créé. DriveApp
+ * .getFoldersByName ne peut donc PAS retrouver un dossier créé à la main par
+ * l'utilisateur, et renverrait « rien trouvé » à chaque fois : le script
+ * créerait un dossier de plus à chaque exécution. On crée donc le dossier une
+ * seule fois, on retient son identifiant dans Paramètres, et on journalise son
+ * URL pour que l'utilisateur le retrouve.
+ *
+ * @param {Object} params Réglages lus par lireParametres_().
+ * @return {Object} Le dossier racine, garanti existant et hors corbeille.
+ */
+function facturesDossierRacineDrive_(params) {
+  if (FACTURES_CACHE_DRIVE_.racine) return FACTURES_CACHE_DRIVE_.racine;
+  const reglages = params || {};
+  const identifiant = facturesTexte_(reglages.DOSSIER_DRIVE_ID);
+  const nomVoulu = facturesTexte_(reglages.DOSSIER_DRIVE) || CONFIG.PARAMETRES_DEFAUT.DOSSIER_DRIVE;
+  if (identifiant) {
+    try {
+      const connu = DriveApp.getFolderById(identifiant);
+      if (!(typeof connu.isTrashed === 'function' && connu.isTrashed())) {
+        // Si l'utilisateur a changé DOSSIER_DRIVE, il s'attend à ce que
+        // l'archivage suive : on ne reste pas silencieusement sur l'ancien
+        // dossier, on en crée un au nouveau nom et on réenregistre son ID.
+        const nomActuel = typeof connu.getName === 'function' ? connu.getName() : nomVoulu;
+        if (texteNormalise_(nomActuel) === texteNormalise_(nomVoulu)) {
+          FACTURES_CACHE_DRIVE_.racine = connu;
+          return connu;
+        }
+        journalInfo_('resoudreDossierDrive_',
+          'Le réglage DOSSIER_DRIVE a changé : les prochaines pièces seront archivées ' +
+          `dans « ${nomVoulu} » au lieu de « ${nomActuel} ». L'ancien dossier est conservé.`,
+          `DOSSIER_DRIVE_ID = ${identifiant}`);
+      } else {
+        journalAvert_('resoudreDossierDrive_',
+          'Le dossier Drive enregistré est à la corbeille : un nouveau dossier va être créé.',
+          `DOSSIER_DRIVE_ID = ${identifiant}`);
+      }
+    } catch (e) {
+      journalAvert_('resoudreDossierDrive_',
+        'Le dossier Drive enregistré est introuvable : un nouveau dossier va être créé.',
+        `DOSSIER_DRIVE_ID = ${identifiant} — ${e.message}`);
+    }
+  }
+
+  const nom = nomVoulu;
+  const cree = DriveApp.createFolder(nom);
+  FACTURES_CACHE_DRIVE_.racine = cree;
+  try {
+    ecrireParametre_('DOSSIER_DRIVE_ID', cree.getId());
+  } catch (e) {
+    journalErreur_('resoudreDossierDrive_',
+      'Identifiant du dossier Drive non enregistré dans Paramètres : un dossier de plus ' +
+      'sera créé au prochain passage.', `${e.message}\n${e.stack}`);
+  }
+  journalInfo_('resoudreDossierDrive_',
+    `Dossier Drive « ${nom} » créé : c'est là que tout est archivé.`, cree.getUrl());
+  return cree;
 }
 
 /**
- * Renvoie le sous-dossier Drive du client, sous le dossier DOSSIER_DRIVE.
- * Les dossiers déjà ouverts sont gardés en mémoire le temps de l'exécution.
- * @param {Object} contexte Contexte d'import (params, dossiers, racine).
+ * Résout le dossier Drive de travail — la fonction UNIQUE utilisée par
+ * 05_Factures.gs et 06_Paiements.gs, pour que les pièces jointes et les
+ * fichiers de lot atterrissent toujours au même endroit.
+ * @param {Object} params Réglages lus par lireParametres_().
+ * @param {string} [sousDossierNom] Sous-dossier voulu (client). Vide = la racine.
+ * @return {Object} Le dossier Drive, garanti existant et hors corbeille.
+ */
+function resoudreDossierDrive_(params, sousDossierNom) {
+  const racine = facturesDossierRacineDrive_(params);
+  const nom = facturesTexte_(sousDossierNom);
+  if (!nom) return racine;
+  if (!FACTURES_CACHE_DRIVE_.sous[nom]) {
+    let choisi = null;
+    const existants = racine.getFoldersByName(nom);
+    while (existants.hasNext()) {
+      const dossier = existants.next();
+      if (typeof dossier.isTrashed === 'function' && dossier.isTrashed()) continue;
+      choisi = dossier;
+      break;
+    }
+    FACTURES_CACHE_DRIVE_.sous[nom] = choisi || racine.createFolder(nom);
+  }
+  return FACTURES_CACHE_DRIVE_.sous[nom];
+}
+
+/**
+ * Renvoie le sous-dossier Drive du client, sous le dossier racine.
+ * @param {Object} contexte Contexte d'import (params).
  * @param {Object} client Ligne de l'onglet Clients.
  * @return {Object} Le dossier Drive du client.
  */
 function facturesDossierClient_(contexte, client) {
-  if (!contexte.racine) {
-    const nomRacine = facturesTexte_(contexte.params.DOSSIER_DRIVE) ||
-      CONFIG.PARAMETRES_DEFAUT.DOSSIER_DRIVE;
-    contexte.racine = facturesDossierParNom_(null, nomRacine);
-  }
   const cle = facturesTexte_(client[FACTURES_COL_CLIENT_.ID]) || 'Client inconnu';
-  if (!contexte.dossiers[cle]) {
-    const nomClient = facturesTexte_(client[FACTURES_COL_CLIENT_.NOM]);
-    const nom = `${cle}${nomClient ? ' - ' + nomClient : ''}`.replace(/[\\/:*?"<>|]/g, '-');
-    contexte.dossiers[cle] = facturesDossierParNom_(contexte.racine, nom);
-  }
-  return contexte.dossiers[cle];
+  const nomClient = facturesTexte_(client[FACTURES_COL_CLIENT_.NOM]);
+  const nom = `${cle}${nomClient ? ' - ' + nomClient : ''}`.replace(/[\\/:*?"<>|]/g, '-');
+  return resoudreDossierDrive_(contexte.params, nom);
 }
 
 /**
@@ -5030,13 +5425,22 @@ function facturesLigneDepuisMessage_(message, permalien, client, contexte) {
 /**
  * Traite un fil Gmail : une ligne de facture par message encore non importé et
  * provenant d'une adresse connue dans l'onglet Clients.
+ * Le fil n'est déclaré « complet » que si TOUS ses messages ont été importés ou
+ * étaient déjà connus. Un seul message laissé de côté (expéditeur absent de
+ * l'onglet Clients, ou erreur de lecture) laisse le fil incomplet : l'appelant
+ * ne lui pose alors pas l'étiquette « …/Traité », sans quoi la requête de
+ * recherche l'exclurait à jamais et la facture serait perdue.
  * @param {Object} fil Fil Gmail.
  * @param {Object} contexte Contexte d'import.
- * @return {{lignes: Array<Object>, ignores: number}} Lignes créées, messages ignorés.
+ * @return {{lignes: Array<Object>, ignores: number, complet: boolean,
+ *           adresses: Array<string>}} Lignes créées, messages ignorés,
+ *     fil entièrement traité ou non, adresses inconnues rencontrées.
  */
 function facturesTraiterFil_(fil, contexte) {
   const lignes = [];
+  const adresses = [];
   let ignores = 0;
+  let complet = true;
   let messages = [];
   let permalien = '';
   try {
@@ -5045,22 +5449,43 @@ function facturesTraiterFil_(fil, contexte) {
   } catch (e) {
     journalErreur_('importerFacturesGmail', 'Fil Gmail illisible, il a été sauté.',
       `${e.message}\n${e.stack}`);
-    return { lignes: lignes, ignores: ignores };
+    return { lignes: lignes, ignores: ignores, complet: false, adresses: adresses };
   }
   messages.forEach((message) => {
     try {
       const identifiant = message.getId();
       if (contexte.importes[identifiant]) return;
       const client = facturesClientDuMessage_(message, contexte.clients);
-      if (!client) { ignores += 1; return; }
+      if (!client) {
+        ignores += 1;
+        complet = false;
+        const adresse = facturesAdresseExpediteur_(message);
+        if (adresse && adresses.indexOf(adresse) < 0) adresses.push(adresse);
+        return;
+      }
       lignes.push(facturesLigneDepuisMessage_(message, permalien, client, contexte));
       contexte.importes[identifiant] = true;
     } catch (e) {
+      complet = false;
       journalErreur_('importerFacturesGmail', 'Message Gmail non importé.',
         `${e.message}\n${e.stack}`);
     }
   });
-  return { lignes: lignes, ignores: ignores };
+  return { lignes: lignes, ignores: ignores, complet: complet, adresses: adresses };
+}
+
+/**
+ * Adresse de l'expéditeur d'un message, pour pouvoir la NOMMER à l'utilisateur
+ * quand elle ne figure dans aucune fiche client.
+ * @param {Object} message Message Gmail.
+ * @return {string} L'adresse en minuscules, ou chaîne vide.
+ */
+function facturesAdresseExpediteur_(message) {
+  try {
+    return facturesAdresse_(message.getFrom());
+  } catch (e) {
+    return '';
+  }
 }
 
 /**
@@ -5124,7 +5549,8 @@ function facturesAttribuerIds_(lignes) {
 
 /**
  * Rédige le message affiché à la fin de l'import Gmail.
- * @param {Object} bilanImport Compteurs {creees, ignores, fils, restants, arret}.
+ * @param {Object} bilanImport Compteurs {creees, ignores, fils, restants, arret,
+ *     adresses}.
  * @return {string} Message lisible.
  */
 function facturesResumeImport_(bilanImport) {
@@ -5134,8 +5560,13 @@ function facturesResumeImport_(bilanImport) {
       `à partir de ${bilanImport.fils} fil(s) de courriel.`
     : `Aucune nouvelle facture : les courriels de l'étiquette étaient déjà importés.`);
   if (bilanImport.ignores) {
+    const liste = (bilanImport.adresses || []).slice(0, 5).join(', ');
     lignes.push(`${bilanImport.ignores} message(s) ignoré(s) : l'adresse de l'expéditeur ` +
-      `ne figure dans aucune fiche de l'onglet Clients.`);
+      `ne figure dans aucune fiche de l'onglet Clients` +
+      `${liste ? ' (' + liste + ')' : ''}.`);
+    lignes.push('Ces courriels n\'ont PAS été marqués « Traité » : ajoutez la fiche du ' +
+      'client (onglet Clients, colonne Courriel), puis relancez cette action — la facture ' +
+      'sera importée.');
   }
   if (bilanImport.restants || bilanImport.arret) {
     lignes.push(`Il reste des courriels à traiter : relancez cette action pour les importer.`);
@@ -5153,10 +5584,33 @@ function facturesResumeImport_(bilanImport) {
  * archive les pièces jointes dans Drive et crée une ligne « À vérifier » avec
  * le lien Gmail, le lien Drive et un montant suggéré.
  * L'import est strictement idempotent : un message déjà importé est ignoré.
- * Point d'entrée du menu.
+ *
+ * Point d'entrée du menu ET cible du déclencheur horaire : c'est pourquoi
+ * l'enveloppe try/catch/finally est ici et non chez l'appelant. Sans le
+ * viderTamponJournal_() du finally, tout ce que l'import journalise resterait
+ * en mémoire et disparaîtrait avec le runtime — une panne d'import (étiquette
+ * renommée, quota Gmail, autorisation retirée) serait strictement invisible.
  * @return {string} Résumé lisible du traitement.
  */
 function importerFacturesGmail() {
+  try {
+    return facturesImporter_();
+  } catch (e) {
+    journalErreur_('importerFacturesGmail', 'Import des factures interrompu par une erreur.',
+      `${e.message}\n${e.stack}`);
+    return 'L\'import des factures a échoué : ' + e.message + '\n\n' +
+      'Le détail est dans l\'onglet Journal. Rien n\'a été perdu : les courriels non ' +
+      'importés n\'ont pas été marqués « Traité », relancez cette action après correction.';
+  } finally {
+    viderTamponJournal_();
+  }
+}
+
+/**
+ * Corps de l'import Gmail (voir importerFacturesGmail(), qui l'enveloppe).
+ * @return {string} Résumé lisible du traitement.
+ */
+function facturesImporter_() {
   const debut = new Date().getTime();
   const params = lireParametres_();
   const nomEtiquette = facturesTexte_(params.ETIQUETTE_GMAIL);
@@ -5177,12 +5631,16 @@ function importerFacturesGmail() {
     params: params,
     clients: facturesIndexCourriels_(lireTable_(CONFIG.ONGLETS.CLIENTS.nom)),
     importes: facturesMessagesImportes_(lireTable_(CONFIG.ONGLETS.FACTURES.nom)),
-    dossiers: {},
-    racine: null,
   };
   const nouvelles = [];
+  // `traites` = les fils qui recevront l'étiquette « …/Traité ». Un fil dont un
+  // message a été laissé de côté n'y entre PAS : la requête de recherche exclut
+  // les fils étiquetés, l'étiqueter reviendrait à perdre la facture pour de bon.
   const traites = [];
+  const adressesInconnues = [];
+  let examines = 0;
   let ignores = 0;
+  let incomplets = 0;
   let arret = false;
 
   for (let i = 0; i < fils.length && i < FACTURES_MAX_FILS_; i++) {
@@ -5190,14 +5648,33 @@ function importerFacturesGmail() {
     const resultat = facturesTraiterFil_(fils[i], contexte);
     resultat.lignes.forEach((ligne) => nouvelles.push(ligne));
     ignores += resultat.ignores;
-    traites.push(fils[i]);
+    examines += 1;
+    (resultat.adresses || []).forEach((adresse) => {
+      if (adressesInconnues.indexOf(adresse) < 0) adressesInconnues.push(adresse);
+    });
+    if (resultat.complet) traites.push(fils[i]);
+    else incomplets += 1;
   }
 
   facturesAttribuerIds_(nouvelles);
   ajouterLignes_(CONFIG.ONGLETS.FACTURES.nom, nouvelles);
   facturesMarquerTraites_(nomEtiquette, traites);
 
-  const restants = Math.max(0, fils.length - traites.length);
+  if (adressesInconnues.length) {
+    journalAvert_('importerFacturesGmail',
+      `${ignores} message(s) d'expéditeur inconnu : ajoutez ces adresses dans l'onglet ` +
+      `${CONFIG.ONGLETS.CLIENTS.nom}, puis relancez l'import.`,
+      `Adresses inconnues : ${adressesInconnues.join(', ')}`);
+  }
+  if (incomplets) {
+    journalAvert_('importerFacturesGmail',
+      `${incomplets} fil(s) laissé(s) sans l'étiquette « ${nomEtiquette}/Traité » : ` +
+      `ils seront relus au prochain passage.`,
+      'Un fil n\'est marqué traité que si TOUS ses messages ont été importés ou étaient ' +
+      'déjà connus.');
+  }
+
+  const restants = Math.max(0, fils.length - examines);
   if (restants || arret) {
     journalAvert_('importerFacturesGmail',
       `${restants || 'Des'} fil(s) de courriel restent à importer.`,
@@ -5205,11 +5682,12 @@ function importerFacturesGmail() {
             : `Limite de ${FACTURES_MAX_FILS_} fils par exécution.`);
   }
   journalInfo_('importerFacturesGmail',
-    `${nouvelles.length} facture(s) importée(s) depuis ${traites.length} fil(s).`,
+    `${nouvelles.length} facture(s) importée(s) depuis ${examines} fil(s) examiné(s).`,
+    `${traites.length} fil(s) marqué(s) traité(s) ; ` +
     `${ignores} message(s) d'expéditeurs inconnus ignorés.`);
   return facturesResumeImport_({
-    creees: nouvelles.length, ignores: ignores, fils: traites.length,
-    restants: restants, arret: arret,
+    creees: nouvelles.length, ignores: ignores, fils: examines,
+    restants: restants, arret: arret, adresses: adressesInconnues,
   });
 }
 
@@ -5514,9 +5992,11 @@ function paiementsMessageLotEnCours_(enCours, index) {
     `Factures concernées : ${paiementsListeCourte_(ids)}.`,
     '',
     'Aucun nouveau lot ne peut être préparé tant que celui-là n\'est pas réglé. Deux choix :',
-    `• vous avez fait les virements → lancez « 6. Confirmer les paiements du lot » ;`,
-    `• vous ne les avez pas faits → annulez le lot (fonction annulerLot), les factures ` +
-      `reviendront à « ${STATUT_PAIEMENT.NON_PAYEE} ».`,
+    `• vous avez fait les virements → menu « 📋 Automatisation » → ` +
+      `« 6. Confirmer les paiements du lot » ;`,
+    `• vous ne les avez pas faits → menu « 📋 Automatisation » → ` +
+      `« Annuler le lot de paiements en cours » : les ${enCours.length} facture(s) ` +
+      `reviendront à « ${STATUT_PAIEMENT.NON_PAYEE} » et vous pourrez repréparer un lot.`,
     '',
     'Rien n\'a été modifié, aucun fichier n\'a été créé.',
   ].join('\n');
@@ -5648,27 +6128,13 @@ function paiementsReferenceSuggeree_(facture) {
  * @return {{nom: string, url: string, dossier: string}} Le fichier créé.
  */
 function paiementsCreerFichierCsv_(contenu, params) {
-  const dossier = paiementsDossierDrive_((params || {}).DOSSIER_DRIVE);
+  // Résolution du dossier Drive : une SEULE fonction pour tout le classeur
+  // (resoudreDossierDrive_, dans 05_Factures.gs), sans quoi les pièces jointes
+  // et les fichiers de lot finissent dans deux dossiers différents.
+  const dossier = resoudreDossierDrive_(params || {}, '');
   const nom = `Lot-de-paiements-${paiementsHorodatageFichier_(new Date())}.csv`;
   const fichier = dossier.createFile(nom, contenu, 'text/csv');
   return { nom: nom, url: fichier.getUrl(), dossier: dossier.getName() };
-}
-
-/**
- * Retrouve (ou crée) le dossier Drive où sont déposés les fichiers.
- * @param {string} nom Nom du dossier, réglage DOSSIER_DRIVE.
- * @return {Folder} Le dossier, garanti existant.
- */
-function paiementsDossierDrive_(nom) {
-  const cible = paiementsTexte_(nom) || CONFIG.PARAMETRES_DEFAUT.DOSSIER_DRIVE;
-  const existants = DriveApp.getFoldersByName(cible);
-  while (existants.hasNext()) {
-    const dossier = existants.next();
-    if (typeof dossier.isTrashed === 'function' && dossier.isTrashed()) continue;
-    return dossier;
-  }
-  journalInfo_('paiementsDossierDrive_', `Dossier Drive « ${cible} » créé.`);
-  return DriveApp.createFolder(cible);
 }
 
 /**
@@ -6128,8 +6594,10 @@ function paiementsSerieIds_(premierId, nombre) {
  * Rien n'est détruit — les factures déjà « Payée » ne sont pas touchées et aucun
  * paiement déjà enregistré n'est supprimé. À utiliser quand un lot a été préparé
  * par erreur, ou quand les virements n'ont finalement pas été faits.
- * Conçue pour être lancée à la main depuis l'éditeur de script : elle affiche
- * elle-même son résultat et écrit elle-même son journal.
+ * Accessible par le menu (« Annuler le lot de paiements en cours ») ou à la main
+ * depuis l'éditeur de script. Elle écrit elle-même son journal mais N'AFFICHE
+ * PAS son résultat : c'est executer_() qui présente la chaîne renvoyée, sans
+ * quoi l'utilisateur recevrait deux fenêtres successives portant le même texte.
  * @return {string} Résumé lisible.
  */
 function annulerLot() {
@@ -6151,7 +6619,6 @@ function annulerLot() {
   } finally {
     viderTamponJournal_();
   }
-  menuAlerte_('Annuler le lot de paiements', resume);
   return resume;
 }
 
@@ -6294,6 +6761,14 @@ const RAPPROCHEMENT_MAX_RESUME_ = 5;
 /** Texte de la colonne « Relance » tant qu'aucun courriel n'a été préparé. */
 const RAPPROCHEMENT_SANS_RELANCE_ = '—';
 
+/**
+ * Valeurs de la colonne « Relance » qui signifient qu'un courriel a DÉJÀ été
+ * préparé pour ce client sur ce trimestre (§3.7). Relancer le rapprochement du
+ * même trimestre doit les reporter telles quelles : sans cela, la colonne
+ * repasserait à « — » et le client recevrait une seconde relance identique.
+ */
+const RAPPROCHEMENT_RELANCES_FAITES_ = ['Envoyée', 'Brouillon créé'];
+
 // ---------------------------------------------------------------------------
 // Point d'entrée : la seule fonction de ce fichier qui touche aux feuilles
 // ---------------------------------------------------------------------------
@@ -6346,6 +6821,9 @@ function rapprochementLireDonnees_(params) {
     paiements: lireTable_(CONFIG.ONGLETS.PAIEMENTS.nom),
     soldes: lireTable_(CONFIG.ONGLETS.SOLDES_DECLARES.nom),
     bilans: lireTable_(CONFIG.ONGLETS.BILANS.nom),
+    // Lu AVANT remplacerPeriode_ : c'est là que se trouve l'état des relances
+    // déjà envoyées pour ce trimestre.
+    rapprochements: lireTable_(CONFIG.ONGLETS.RAPPROCHEMENT.nom),
     params: params || {},
     maintenant: new Date(),
   };
@@ -6373,7 +6851,8 @@ function rapprochementEcrireResultat_(resultat) {
 
 /**
  * Prépare les relances si le réglage RELANCE_AUTO est à « Oui » et qu'au moins
- * un client est en écart. Un échec de relance ne fait jamais perdre le rapport.
+ * un client est en écart. La relance porte sur LE trimestre qui vient d'être
+ * calculé, jamais sur un autre. Un échec de relance ne fait jamais perdre le rapport.
  * @param {Object} params Réglages lus par lireParametres_().
  * @param {Object} resultat Ce que renvoie rapprocherPeriode_().
  * @return {string} Phrase à ajouter au résumé, ou chaîne vide.
@@ -6388,7 +6867,7 @@ function rapprochementRelanceAuto_(params, resultat) {
     return '';
   }
   try {
-    const retour = relancerClientsEnEcart();
+    const retour = relancerClientsEnEcart(resultat.periode);
     return typeof retour === 'string' && retour ? retour : 'Les relances ont été préparées.';
   } catch (e) {
     journalErreur_('rapprochementRelanceAuto_',
@@ -6435,7 +6914,8 @@ function rapprochementPeriodeChoisie_(demande, donnees) {
  * @param {Object} donnees {clients, factures, paiements, soldes, bilans,
  *     params, maintenant} — tel que le renvoie rapprochementLireDonnees_().
  * @return {Object} {periode, debut, fin, lignes, majPaiements, compteurs,
- *     total, inexpliques, paiementsConfirmes, paiementsRefuses, messages}.
+ *     total, inexpliques, paiementsConfirmes, paiementsRefuses, piecesSansDate,
+ *     clientsSansDate, messages}.
  */
 function rapprocherPeriode_(periode, donnees) {
   const base = rapprochementPreparer_(periode, donnees);
@@ -6456,6 +6936,10 @@ function rapprocherPeriode_(periode, donnees) {
     fiche.majPaiements.forEach((maj) => resultat.majPaiements.push(maj));
     resultat.paiementsConfirmes += fiche.confirmes;
     resultat.paiementsRefuses += fiche.refuses;
+    if (fiche.sansDate) {
+      resultat.piecesSansDate += fiche.sansDate;
+      resultat.clientsSansDate.push(`${fiche.nom || fiche.id} (${fiche.id})`);
+    }
   });
   resultat.total = fiches.length;
   resultat.inexpliques = fiches
@@ -6473,7 +6957,7 @@ function rapprocherPeriode_(periode, donnees) {
  * @param {string} periode Trimestre demandé.
  * @param {Object} donnees Jeu de données complet.
  * @return {Object} {periode, bornes, params, decalage, toleranceCents,
- *     deviseDefaut, maintenant, dossiers}.
+ *     deviseDefaut, maintenant, dossiers, relances}.
  */
 function rapprochementPreparer_(periode, donnees) {
   const jeu = donnees || {};
@@ -6489,7 +6973,34 @@ function rapprochementPreparer_(periode, donnees) {
     deviseDefaut: params.DEVISE || CONFIG.PARAMETRES_DEFAUT.DEVISE,
     maintenant: versDate_(jeu.maintenant) || new Date(),
     dossiers: rapprochementDossiers_(jeu),
+    relances: rapprochementRelancesExistantes_(jeu.rapprochements, canonique),
   };
+}
+
+/**
+ * Relit la colonne « Relance » des lignes déjà écrites pour ce trimestre, afin
+ * de la reporter sur les nouvelles lignes. Seuls les états qui prouvent qu'un
+ * courriel a été préparé sont repris ; « — » et « Échec » ne le sont pas, pour
+ * qu'un envoi manqué puisse être retenté.
+ * @param {Array<Object>} lignes Lignes de l'onglet Rapprochement, lues avant
+ *     la réécriture de la période.
+ * @param {string} periode Trimestre traité, au format canonique.
+ * @return {Map<string, string>} Clé du client vers l'état de relance à reprendre.
+ */
+function rapprochementRelancesExistantes_(lignes, periode) {
+  const reprises = new Map();
+  if (!periode) return reprises;
+  (lignes || []).forEach((ligne) => {
+    if (!ligne) return;
+    if (rapprochementPeriodeValide_(ligne[RAPPROCHEMENT_COL_.RAP_PERIODE]) !== periode) return;
+    const cle = rapprochementCle_(ligne[RAPPROCHEMENT_COL_.RAP_CLIENT]);
+    if (!cle) return;
+    const valeur = rapprochementTexte_(ligne[RAPPROCHEMENT_COL_.RAP_RELANCE]);
+    const faite = RAPPROCHEMENT_RELANCES_FAITES_
+      .some((etat) => texteNormalise_(etat) === texteNormalise_(valeur));
+    if (faite) reprises.set(cle, valeur);
+  });
+  return reprises;
 }
 
 /**
@@ -6510,6 +7021,8 @@ function rapprochementResultatVide_(periode, bornes) {
     inexpliques: [],
     paiementsConfirmes: 0,
     paiementsRefuses: 0,
+    piecesSansDate: 0,
+    clientsSansDate: [],
     messages: [],
   };
 }
@@ -6572,9 +7085,9 @@ function rapprochementTraiterClient_(dossier, base) {
   const theorique = calculerSoldeTheorique_(dossier.cle, base.bornes.fin, donneesClient);
   const declaration = rapprochementDeclaration_(dossier, base);
   const paiementsPeriode = rapprochementPiecesPeriode_(
-    dossier.paiements.map(rapprochementPiecePaiement_), base.bornes);
+    dossier.paiements.map(rapprochementPiecePaiement_), base.bornes, true);
   const facturesPeriode = rapprochementPiecesPeriode_(
-    dossier.factures.map(rapprochementPieceFacture_), base.bornes);
+    dossier.factures.map(rapprochementPieceFacture_), base.bornes, true);
   if (!declaration.connu && theorique === 0 && !paiementsPeriode.length && !facturesPeriode.length) {
     return null; // Client sans activité et sans solde déclaré : aucune ligne, aucun bruit.
   }
@@ -6592,6 +7105,7 @@ function rapprochementTraiterClient_(dossier, base) {
     theoriqueCents: theorique, declareCents: declaration.cents, declareConnu: declaration.connu,
     ecartCents: declaration.connu ? theorique - declaration.cents : 0,
     verdict: diag.verdict, diag: diag, paiementsPeriode: paiementsPeriode,
+    sansDate: Number(diag.piecesSansDate) || 0,
     majPaiements: [], confirmes: 0, refuses: 0,
   };
   rapprochementMajPaiements_(fiche, base);
@@ -6692,7 +7206,8 @@ function rapprochementLigneFeuille_(fiche, base) {
   ligne[col.RAP_DIAGNOSTIC] = fiche.diag.diagnostic;
   ligne[col.RAP_DETAIL] = fiche.diag.detail;
   ligne[col.RAP_ACTION] = fiche.diag.action;
-  ligne[col.RAP_RELANCE] = RAPPROCHEMENT_SANS_RELANCE_;
+  const dejaRelance = base.relances ? base.relances.get(fiche.cle) : '';
+  ligne[col.RAP_RELANCE] = dejaRelance || RAPPROCHEMENT_SANS_RELANCE_;
   ligne[col.RAP_EXECUTE] = base.maintenant;
   return ligne;
 }
@@ -6849,11 +7364,22 @@ function rapprochementAvantOuEgal_(date, borne) {
  *     decalageMois, toleranceCents, soldeDeclareConnu, soldeTheoriqueCents,
  *     soldeDeclareCents, ecartCents (facultatif), factures, paiements, bilans}.
  * @return {{verdict: string, diagnostic: string, detail: string, action: string,
- *     paiementsNonDeduits: Array<string>, sourcesNonDeduites: Array<Object>}}
+ *     paiementsNonDeduits: Array<string>, sourcesNonDeduites: Array<Object>,
+ *     piecesSansDate: number}}
  *     Verdict, explication nommant les pièces, et geste à faire ensuite.
  */
 function diagnostiquerEcart_(contexte) {
   const c = rapprochementContexte_(contexte);
+  return rapprochementSignalerSansDate_(rapprochementChoisirHypothese_(c), c);
+}
+
+/**
+ * Déroule les hypothèses du §4.4 dans l'ordre et renvoie la première qui
+ * explique EXACTEMENT l'écart.
+ * @param {Object} c Contexte complété par rapprochementContexte_().
+ * @return {Object} Résultat de diagnostic.
+ */
+function rapprochementChoisirHypothese_(c) {
   if (!c.soldeDeclareConnu) return rapprochementNonDeclare_(c);
   if (Math.abs(c.ecartCents) <= c.toleranceCents) return rapprochementBalance_(c);
   const atelier = rapprochementAtelier_(c);
@@ -6872,6 +7398,22 @@ function diagnostiquerEcart_(contexte) {
     if (trouve) return trouve;
   }
   return rapprochementHypInexplique_(c, atelier);   // 9
+}
+
+/**
+ * Ajoute au « Détail » la phrase qui nomme les pièces sans date (§4.4). Ces
+ * pièces comptent dans le solde théorique : les taire reviendrait à déclarer
+ * « inexpliqué » un écart dont la cause est dans le classeur.
+ * @param {Object} resultat Résultat de diagnostic, complété sur place.
+ * @param {Object} c Contexte complété.
+ * @return {Object} Le même résultat, enrichi.
+ */
+function rapprochementSignalerSansDate_(resultat, c) {
+  const phrase = rapprochementPhraseSansDate_(c);
+  resultat.piecesSansDate = rapprochementPiecesSansDate_(c).length;
+  if (!phrase) return resultat;
+  resultat.detail = resultat.detail ? `${resultat.detail} ${phrase}` : phrase;
+  return resultat;
 }
 
 /**
@@ -6913,12 +7455,22 @@ function rapprochementAtelier_(c) {
   const paiements = c.paiements.map(rapprochementPiecePaiement_);
   const bilans = c.bilans.map(rapprochementPieceBilan_);
   const fin = c.bornes ? c.bornes.fin : null;
+  // §4.4 : une hypothèse ne raisonne que sur les pièces qui composent RÉELLEMENT
+  // le solde théorique (§4.2). Une facture Annulée, Rejetée, Doublon ou Sans
+  // bilan n'y entre pas : l'accuser d'expliquer un écart est une contradiction,
+  // et le courriel qui en découlerait enverrait le client vérifier une pièce
+  // qu'aucun des deux ne compte. Le filtre est posé ICI, une fois, plutôt que
+  // répété dans chaque hypothèse — c'est l'oubli d'un de ces filtres qui a
+  // produit les faux diagnostics des hypothèses 6, 8 et 9.
+  // Seule l'hypothèse 5, dont c'est précisément l'objet, regarde les factures
+  // écartées : elle passe par facturesAvant, volontairement non filtrée.
+  const reconnues = factures.filter((piece) => rapprochementFactureReconnue_(piece.source));
   return {
-    facturesPeriode: rapprochementPiecesPeriode_(factures, c.bornes),
-    paiementsPeriode: rapprochementPiecesPeriode_(paiements, c.bornes),
+    facturesPeriode: rapprochementPiecesPeriode_(reconnues, c.bornes, true),
+    paiementsPeriode: rapprochementPiecesPeriode_(paiements, c.bornes, true),
     bilansPeriode: rapprochementPiecesPeriode_(bilans, c.bornes),
     facturesAvant: factures.filter((piece) => rapprochementAvantOuEgal_(piece.date, fin)),
-    voisines: rapprochementPiecesVoisines_(c, factures.concat(paiements)),
+    voisines: rapprochementPiecesVoisines_(c, reconnues.concat(paiements)),
   };
 }
 
@@ -6976,13 +7528,15 @@ function rapprochementSousEnsemblePaiements_(paiements, cibleCents) {
  * @return {?Object} Résultat de diagnostic, ou null.
  */
 function rapprochementHypFactureNonComptabilisee_(c, atelier) {
-  const conformes = atelier.facturesPeriode.filter((piece) =>
-    texteNormalise_(piece.source[RAPPROCHEMENT_COL_.FACTURE_VERIFICATION]) ===
-      texteNormalise_(STATUT_VERIF.CONFORME));
-  const indices = trouverSousEnsemble_(conformes.map((piece) => piece.cents), c.ecartCents,
+  // Toutes les factures RECONNUES, pas seulement les « Conforme » : une facture
+  // « Écart de montant » compte dans le solde théorique (§4.2), donc le client
+  // peut tout aussi bien avoir omis de la comptabiliser. La restreindre aux
+  // « Conforme » rendait le rapport contradictoire avec son propre calcul.
+  const reconnues = atelier.facturesPeriode;
+  const indices = trouverSousEnsemble_(reconnues.map((piece) => piece.cents), c.ecartCents,
     CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS);
   if (!indices) return null;
-  const trouves = indices.map((position) => conformes[position]);
+  const trouves = indices.map((position) => reconnues[position]);
   return rapprochementResultat_(VERDICT.EXPLIQUE,
     `${trouves.length} facture(s) que le client n'a pas comptabilisée(s).`,
     `${rapprochementSens_(c)} ${formaterMontant_(c.ecartCents, c.devise)}, ` +
@@ -6992,33 +7546,29 @@ function rapprochementHypFactureNonComptabilisee_(c, atelier) {
 }
 
 /**
- * Hypothèse 3 — un paiement compté deux fois par le client.
+ * Hypothèse 3 — un paiement déduit deux fois par le client (§4.4).
+ *
+ * SIGNE IMPOSÉ : écart > 0. Retrancher un paiement une fois de trop ABAISSE le
+ * solde du client ; son solde est donc plus bas que le vôtre, exactement du
+ * montant de ce paiement (et non du double : le paiement légitime est déjà
+ * déduit des deux côtés). Un écart négatif ne peut pas venir de là.
+ *
  * @param {Object} c Contexte complété.
  * @param {Object} atelier Pièces préparées.
  * @return {?Object} Résultat de diagnostic, ou null.
  */
 function rapprochementHypPaiementDouble_(c, atelier) {
+  if (c.ecartCents <= 0) return null;
   const paiements = atelier.paiementsPeriode;
-  const absolu = Math.abs(c.ecartCents);
-  const proche = (valeur) => valeur !== 0 && Math.abs(absolu - Math.abs(valeur)) <= c.toleranceCents;
   for (let i = 0; i < paiements.length; i++) {
     const piece = paiements[i];
-    if (proche(2 * piece.cents)) {
-      return rapprochementResultat_(VERDICT.EXPLIQUE, 'Un paiement semble compté deux fois.',
-        `${rapprochementSens_(c)} ${formaterMontant_(absolu, c.devise)}, soit exactement ` +
-        `le double ${rapprochementDe_(piece)}${rapprochementDecrire_(piece, c.devise)}.`,
-        'Demandez-lui de vérifier qu\'il n\'a pas enregistré ce paiement deux fois.');
-    }
-    const jumeau = paiements.filter((autre) => autre !== piece && autre.cents === piece.cents);
-    if (jumeau.length && proche(piece.cents)) {
-      return rapprochementResultat_(VERDICT.EXPLIQUE,
-        'Deux paiements de même montant : un seul semble avoir été pris en compte.',
-        `${rapprochementSens_(c)} ${formaterMontant_(absolu, c.devise)}. Or ce montant ` +
-        `apparaît deux fois dans vos paiements : ${rapprochementDecrire_(piece, c.devise)} ` +
-        `et ${rapprochementDecrire_(jumeau[0], c.devise)}.`,
-        'Demandez-lui lequel des deux paiements il a enregistré : le second est probablement ' +
-        'resté de côté (ou a été compté deux fois).');
-    }
+    if (piece.cents <= 0) continue;
+    if (Math.abs(piece.cents - c.ecartCents) > c.toleranceCents) continue;
+    return rapprochementResultat_(VERDICT.EXPLIQUE, 'Un paiement semble compté deux fois.',
+      `${rapprochementSens_(c)} ${formaterMontant_(c.ecartCents, c.devise)}, soit exactement ` +
+      `le montant ${rapprochementDe_(piece)}${rapprochementDecrire_(piece, c.devise)} : ` +
+      'il l\'a vraisemblablement retranché une fois de trop de son solde.',
+      'Demandez-lui de vérifier qu\'il n\'a pas enregistré ce paiement deux fois.');
   }
   return null;
 }
@@ -7037,7 +7587,10 @@ function rapprochementHypEcartFacturation_(c, atelier) {
   if (!enEcart.length) return null;
   const somme = enEcart.reduce((total, piece) =>
     total + enCents_(piece.source[RAPPROCHEMENT_COL_.FACTURE_ECART]), 0);
-  if (somme === 0 || Math.abs(Math.abs(somme) - Math.abs(c.ecartCents)) > c.toleranceCents) {
+  // La somme des « Écart vs bilan » a un sens déterminé : on la compare SIGNÉE
+  // à l'écart signé. En valeur absolue, un écart de sens contraire serait
+  // présenté comme l'explication exacte, ce qu'il n'est pas.
+  if (somme === 0 || Math.abs(somme - c.ecartCents) > c.toleranceCents) {
     return null;
   }
   const details = enEcart.map((piece) => `${rapprochementDecrire_(piece, c.devise)} — écart de ` +
@@ -7060,13 +7613,16 @@ function rapprochementHypEcartFacturation_(c, atelier) {
  * @return {?Object} Résultat de diagnostic, ou null.
  */
 function rapprochementHypFactureEcartee_(c, atelier) {
-  const absolu = Math.abs(c.ecartCents);
+  // SIGNE IMPOSÉ : écart < 0. Si le client compte une facture que vous avez
+  // écartée, son solde est plus ÉLEVÉ que le vôtre, jamais plus bas.
+  if (c.ecartCents >= 0) return null;
+  const absolu = -c.ecartCents;
   const ecartees = atelier.facturesAvant.filter((piece) => {
     const statut = texteNormalise_(piece.source[RAPPROCHEMENT_COL_.FACTURE_VERIFICATION]);
     return RAPPROCHEMENT_STATUTS_ECARTES_.some((v) => texteNormalise_(v) === statut);
   });
   const trouvee = ecartees.filter((piece) =>
-    piece.cents !== 0 && Math.abs(Math.abs(piece.cents) - absolu) <= c.toleranceCents)[0];
+    piece.cents !== 0 && Math.abs(piece.cents - absolu) <= c.toleranceCents)[0];
   if (!trouvee) return null;
   const statut = rapprochementTexte_(trouvee.source[RAPPROCHEMENT_COL_.FACTURE_VERIFICATION]);
   return rapprochementResultat_(VERDICT.EXPLIQUE,
@@ -7238,6 +7794,7 @@ function rapprochementResultat_(verdict, diagnostic, detail, action) {
     action: action,
     paiementsNonDeduits: [],
     sourcesNonDeduites: [],
+    piecesSansDate: 0,
   };
 }
 
@@ -7306,16 +7863,101 @@ function rapprochementPieceBilan_(bilan) {
 
 /**
  * Ne garde que les pièces dont la date tombe dans le trimestre.
+ *
+ * Une pièce SANS DATE compte dans le solde théorique (§4.2) : elle est donc
+ * rattachée au trimestre traité (§4.4, « Pièces sans date ») pour que les
+ * hypothèses puissent la nommer. Ce rattachement ne vaut que pour le trimestre
+ * examiné : les trimestres voisins (hypothèse 8) ne l'appliquent pas, sans quoi
+ * la même pièce appartiendrait à trois trimestres à la fois.
+ *
  * @param {Array<Object>} pieces Pièces normalisées.
  * @param {?Object} bornes {debut, fin} du trimestre.
+ * @param {boolean} [inclureSansDate] Vrai pour le trimestre traité.
  * @return {Array<Object>} Pièces du trimestre.
  */
-function rapprochementPiecesPeriode_(pieces, bornes) {
+function rapprochementPiecesPeriode_(pieces, bornes, inclureSansDate) {
   if (!bornes) return [];
   const debut = bornes.debut.getTime();
   const fin = bornes.fin.getTime();
-  return (pieces || []).filter((piece) =>
-    piece.date && piece.date.getTime() >= debut && piece.date.getTime() <= fin);
+  return (pieces || []).filter((piece) => {
+    if (!piece.date) return inclureSansDate === true;
+    return piece.date.getTime() >= debut && piece.date.getTime() <= fin;
+  });
+}
+
+/**
+ * Pièces (factures et paiements) d'un client dont la date est vide ou illisible.
+ * Elles comptent dans le solde théorique : le rapport doit les nommer, sinon
+ * l'écart qu'elles créent serait déclaré inexpliqué alors que sa cause est dans
+ * le classeur (§4.4).
+ * @param {Object} c Contexte complété.
+ * @return {Array<Object>} Pièces sans date, factures d'abord.
+ */
+function rapprochementPiecesSansDate_(c) {
+  const sansDate = (piece) => !piece.date;
+  // Seules les factures reconnues sont annoncées : la phrase dit « ces pièces
+  // comptent dans votre solde », ce qui serait faux d'une facture Rejetée ou
+  // Doublon — et enverrait Grégory compléter la date d'une facture qu'il a
+  // lui-même écartée, avec un avertissement qui ne disparaîtrait jamais.
+  return c.factures.map(rapprochementPieceFacture_)
+    .filter((piece) => sansDate(piece) && rapprochementFactureReconnue_(piece.source))
+    .concat(c.paiements.map(rapprochementPiecePaiement_).filter(sansDate));
+}
+
+/**
+ * Phrase qui nomme les lignes du classeur dont la date manque.
+ * Exemple : « 2 pièce(s) sans date : lignes 14 et 27 de l'onglet Paiements —
+ * complétez la colonne Date. »
+ * @param {Object} c Contexte complété.
+ * @return {string} Phrase à ajouter au « Détail », ou chaîne vide.
+ */
+function rapprochementPhraseSansDate_(c) {
+  const pieces = rapprochementPiecesSansDate_(c);
+  if (!pieces.length) return '';
+  const groupes = [
+    { onglet: CONFIG.ONGLETS.FACTURES.nom, genre: 'facture' },
+    { onglet: CONFIG.ONGLETS.PAIEMENTS.nom, genre: 'paiement' },
+  ].map((groupe) => rapprochementGroupeSansDate_(
+    pieces.filter((piece) => piece.genre === groupe.genre), groupe.onglet))
+    .filter((texte) => texte !== '');
+  return `${pieces.length} pièce(s) sans date : ${groupes.join(' ; ')} — complétez la ` +
+    'colonne Date : ces pièces comptent dans votre solde mais ne peuvent pas être rattachées ' +
+    'à un trimestre.';
+}
+
+/**
+ * Désigne les pièces sans date d'un onglet : « lignes 14 et 27 de l'onglet
+ * Paiements ». Une pièce lue hors du classeur (tests) est nommée par son
+ * identifiant, faute de numéro de ligne.
+ * @param {Array<Object>} pieces Pièces sans date de cet onglet.
+ * @param {string} onglet Nom de l'onglet.
+ * @return {string} Désignation lisible, ou chaîne vide.
+ */
+function rapprochementGroupeSansDate_(pieces, onglet) {
+  if (!pieces.length) return '';
+  const numeros = [];
+  const nommees = [];
+  pieces.forEach((piece) => {
+    const numero = piece.source ? piece.source._ligne : null;
+    if (numero) numeros.push(String(numero));
+    else nommees.push(piece.id || '(sans identifiant)');
+  });
+  const morceaux = [];
+  if (numeros.length) {
+    morceaux.push(`${numeros.length > 1 ? 'lignes' : 'ligne'} ${rapprochementEnumererEt_(numeros)}`);
+  }
+  if (nommees.length) morceaux.push(rapprochementEnumererEt_(nommees));
+  return `${morceaux.join(', ')} de l'onglet ${onglet}`;
+}
+
+/**
+ * Énumère des textes avec « et » avant le dernier.
+ * @param {Array<string>} textes Textes à énumérer.
+ * @return {string} Énumération lisible.
+ */
+function rapprochementEnumererEt_(textes) {
+  if (textes.length <= 1) return textes.join('');
+  return `${textes.slice(0, -1).join(', ')} et ${textes[textes.length - 1]}`;
 }
 
 /**
@@ -7398,63 +8040,88 @@ function rapprochementJoindre_(textes) {
  * Cherche un sous-ensemble dont la somme vaut EXACTEMENT la cible (§4.4).
  *
  * Stratégie, dans cet ordre :
- *   1. toutes les combinaisons de 1, 2 puis 3 éléments (exhaustif) — ce sont
- *      les seules explications qu'un humain accepte de vérifier à la main ;
- *   2. au-delà, programmation dynamique sur les cents, avec reconstruction de
- *      la solution, bornée par CONFIG.SOUS_ENSEMBLE_MAX_CIBLE.
+ *   1. la recherche exhaustive des combinaisons de 1, 2 puis 3 éléments a
+ *      TOUJOURS lieu, quel que soit le nombre de pièces : ce sont les seules
+ *      explications qu'un humain accepte de vérifier à la main, et ce sont les
+ *      plus fréquentes (taille 1 en O(n), tailles 2 et 3 par table de hachage,
+ *      la taille 3 étant plafonnée à CONFIG.SOUS_ENSEMBLE_MAX_TAILLE3 pièces) ;
+ *   2. ensuite seulement, si la liste ne dépasse pas la borne demandée,
+ *      programmation dynamique sur les cents, avec reconstruction de la
+ *      solution, bornée par CONFIG.SOUS_ENSEMBLE_MAX_CIBLE.
  *
  * Jamais d'à-peu-près : sans correspondance exacte, la réponse est null.
  *
  * @param {Array<number>} montantsCents Montants en cents entiers (les valeurs
  *     négatives et les doublons sont acceptés).
  * @param {number} cibleCents Somme recherchée, en cents. Doit être > 0.
- * @param {number} [maxElements] Taille maximale de la liste d'entrée ;
- *     CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS par défaut.
+ * @param {number} [maxElements] Taille maximale de la liste ACCEPTÉE PAR LA
+ *     PROGRAMMATION DYNAMIQUE ; CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS par défaut.
+ *     Elle ne borne jamais la recherche exhaustive de 1, 2 ou 3 éléments.
  * @return {?Array<number>} Indices (croissants) des montants retenus, ou null.
  */
 function trouverSousEnsemble_(montantsCents, cibleCents, maxElements) {
   if (!Array.isArray(montantsCents) || !montantsCents.length) return null;
   const cible = Math.round(Number(cibleCents));
   if (!isFinite(cible) || cible <= 0) return null;
-  const plafond = (maxElements === null || maxElements === undefined || !isFinite(maxElements))
-    ? Number(CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS)
-    : Math.floor(Number(maxElements));
-  if (!(plafond >= 1) || montantsCents.length > plafond) return null;
   const montants = montantsCents.map((valeur) => {
     const entier = Math.round(Number(valeur));
     return isFinite(entier) ? entier : 0;
   });
+  let totalPositif = 0;
+  for (let i = 0; i < montants.length; i++) {
+    if (montants[i] > 0) totalPositif += montants[i];
+  }
+  if (cible > totalPositif) return null;
   const petit = rapprochementSousEnsembleExhaustif_(montants, cible);
   if (petit) return petit;
+  const plafond = (maxElements === null || maxElements === undefined || !isFinite(maxElements))
+    ? Number(CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS)
+    : Math.floor(Number(maxElements));
+  if (!(plafond >= 1) || montants.length > plafond) return null;
   if (montants.length <= 3) return null;
   return rapprochementSousEnsembleDynamique_(montants, cible);
 }
 
 /**
- * Recherche exhaustive des combinaisons de 1, 2 puis 3 éléments.
+ * Recherche exhaustive des combinaisons de 1, 2 puis 3 éléments. Elle a
+ * toujours lieu, quelle que soit la taille de la liste (§4.4) : taille 1 en
+ * O(n), taille 2 en O(n) par table de hachage, taille 3 en O(n²) par table de
+ * hachage, plafonnée à CONFIG.SOUS_ENSEMBLE_MAX_TAILLE3 éléments.
  * @param {Array<number>} montants Montants en cents entiers.
  * @param {number} cible Somme recherchée.
- * @return {?Array<number>} Indices retenus, ou null.
+ * @return {?Array<number>} Indices retenus (croissants), ou null.
  */
 function rapprochementSousEnsembleExhaustif_(montants, cible) {
   const n = montants.length;
   for (let i = 0; i < n; i++) {
     if (montants[i] === cible) return [i];
   }
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      if (montants[i] + montants[j] === cible) return [i, j];
-    }
+  const vus = new Map();
+  for (let j = 0; j < n; j++) {
+    const complement = cible - montants[j];
+    if (vus.has(complement)) return [vus.get(complement), j];
+    if (!vus.has(montants[j])) vus.set(montants[j], j);
   }
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      const partiel = montants[i] + montants[j];
-      for (let k = j + 1; k < n; k++) {
-        if (partiel + montants[k] === cible) return [i, j, k];
-      }
+  const limite = Math.min(n, rapprochementPlafondTaille3_());
+  for (let i = 0; i < limite; i++) {
+    const restant = cible - montants[i];
+    const paires = new Map();
+    for (let k = i + 1; k < limite; k++) {
+      const complement = restant - montants[k];
+      if (paires.has(complement)) return [i, paires.get(complement), k];
+      if (!paires.has(montants[k])) paires.set(montants[k], k);
     }
   }
   return null;
+}
+
+/**
+ * Nombre maximal de pièces examinées par la recherche de taille 3 (O(n²)).
+ * @return {number} Plafond, au moins 3.
+ */
+function rapprochementPlafondTaille3_() {
+  const brut = Math.floor(Number(CONFIG.SOUS_ENSEMBLE_MAX_TAILLE3));
+  return isFinite(brut) && brut >= 3 ? brut : 3;
 }
 
 /**
@@ -7636,6 +8303,13 @@ function rapprochementResume_(resultat, relance) {
       lignes.push(`• ${ecart.nom || ecart.id} (${ecart.id}) : ${ecart.montant}`);
     });
   }
+  if (resultat.piecesSansDate) {
+    lignes.push('');
+    lignes.push(`${resultat.piecesSansDate} pièce(s) sans date comptée(s) dans le solde de ` +
+      `${resultat.clientsSansDate.join(', ')} : complétez la colonne Date des onglets ` +
+      `${CONFIG.ONGLETS.FACTURES.nom} et ${CONFIG.ONGLETS.PAIEMENTS.nom}. La colonne ` +
+      '« Détail » du rapport nomme les lignes concernées.');
+  }
   if (resultat.paiementsConfirmes || resultat.paiementsRefuses) {
     lignes.push('');
     lignes.push(`${resultat.paiementsConfirmes} paiement(s) confirmé(s) comme déduits, ` +
@@ -7767,6 +8441,16 @@ const COURRIELS_MARGE_QUOTA_ = 5;
 
 /** Nombre maximal de pièces détaillées dans un courriel de relance. */
 const COURRIELS_MAX_PIECES_ = 30;
+
+/**
+ * Durée au-delà de laquelle la relance s'arrête proprement (4 min 30 s).
+ * Apps Script tue une exécution à 6 minutes : sans cette marge, des brouillons
+ * existeraient dans Gmail sans que la colonne « Relance » ait pu être écrite.
+ */
+const COURRIELS_DUREE_MAX_MS_ = 270000;
+
+/** Nombre de clients traités entre deux écritures de la colonne « Relance ». */
+const COURRIELS_LOT_MAJ_ = 10;
 
 /** Noms des mois, pour écrire une période en toutes lettres. */
 const COURRIELS_MOIS_ = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
@@ -8084,9 +8768,13 @@ function courrielsSignatureHtml_(params) {
 function courrielsBornesPeriode_(periode, params) {
   const texte = courrielsTexte_(periode).toUpperCase();
   if (!texte) return null;
+  const decalage = params ? Math.round(parametreNombre_(params, 'TRIMESTRE_DECALAGE_MOIS', 0)) : 0;
   if (typeof bornesTrimestre_ === 'function' && /^\d{4}-T[1-4]$/.test(texte)) {
     try {
-      const bornes = bornesTrimestre_(texte);
+      // Le décalage doit être transmis : sans lui, la relance bornerait le
+      // trimestre autrement que le rapprochement, et le courriel annoncerait au
+      // client la mauvaise période avec les pièces d'un autre trimestre.
+      const bornes = bornesTrimestre_(texte, decalage);
       if (bornes && bornes.debut && bornes.fin) return bornes;
     } catch (e) {
       journalAvert_('courrielsBornesPeriode_',
@@ -8094,7 +8782,6 @@ function courrielsBornesPeriode_(periode, params) {
         `${e.message}\n${e.stack}`);
     }
   }
-  const decalage = params ? Math.round(parametreNombre_(params, 'TRIMESTRE_DECALAGE_MOIS', 0)) : 0;
   const trimestre = /^(\d{4})-T([1-4])$/.exec(texte);
   if (trimestre) {
     const premierMois = (Number(trimestre[2]) - 1) * 3 + decalage;
@@ -8504,41 +9191,90 @@ function courrielsPieceFacture_(facture) {
 // ---------------------------------------------------------------------------
 
 /**
- * Prépare un courriel de relance par client en écart, à partir de la période la
- * plus récente de l'onglet Rapprochement. Les lignes déjà relancées sont
+ * Prépare un courriel de relance par client en écart. La période traitée est
+ * celle que l'appelant transmet — 07_Rapprochement.gs passe la période qu'il
+ * vient de calculer, pour ne jamais relancer un autre trimestre que celui-là.
+ * Sans argument (appel depuis le menu), c'est la période la plus récente de
+ * l'onglet Rapprochement qui est retenue. Les lignes déjà relancées sont
  * sautées : videz la cellule « Relance » pour en refaire une.
+ * @param {string} [periode] Période 'AAAA-TN' à relancer.
  * @return {string} Résumé lisible, affiché par le menu.
  */
-function relancerClientsEnEcart() {
+function relancerClientsEnEcart(periode) {
+  const debut = new Date().getTime();
   const nomOnglet = CONFIG.ONGLETS.RAPPROCHEMENT.nom;
   const params = lireParametres_();
   const lignes = lireTable_(nomOnglet);
-  const periode = courrielsPeriodeLaPlusRecente_(lignes);
-  if (!periode) {
+  const periodeTraitee = courrielsTexte_(periode) || courrielsPeriodeLaPlusRecente_(lignes);
+  if (!periodeTraitee) {
     return `Aucune période à relancer : l'onglet « ${nomOnglet} » est vide. ` +
       'Lancez d\'abord « 7. Rapprochement trimestriel ».';
   }
-  const selection = courrielsSelectionner_(lignes, periode);
-  const resume = courrielsNouveauResume_(periode, selection);
+  const selection = courrielsSelectionner_(lignes, periodeTraitee);
+  const resume = courrielsNouveauResume_(periodeTraitee, selection);
   if (!selection.aTraiter.length) {
     return courrielsResume_(resume);
   }
-  const contexte = courrielsContexte_(periode, params);
+  const contexte = courrielsContexte_(periodeTraitee, params);
   const groupes = indexerGroupesPar_(selection.aTraiter, COURRIELS_COL_.RAPPRO_CLIENT);
-  const majs = [];
-  groupes.forEach((lignesClient, idClient) => {
+  const entrees = [];
+  groupes.forEach((lignesClient, idClient) => entrees.push({ id: idClient, lignes: lignesClient }));
+
+  // Les brouillons sont créés un par un dans Gmail : la colonne « Relance » est
+  // écrite au fil de l'eau (tous les COURRIELS_LOT_MAJ_ clients) et l'exécution
+  // s'arrête d'elle-même avant les 6 minutes. Ainsi un courriel qui existe déjà
+  // dans Gmail est toujours marqué, et le passage suivant ne le refait pas.
+  let majs = [];
+  let traites = 0;
+  let arretTemps = false;
+  for (let i = 0; i < entrees.length; i++) {
+    const entree = entrees[i];
+    if (arretTemps) { resume.interrompus += entree.lignes.length; continue; }
     if (resume.envoyes + resume.brouillons >= contexte.disponible) {
-      resume.restants += lignesClient.length;
-      return;
+      resume.restants += entree.lignes.length;
+      continue;
     }
-    const statut = courrielsTraiterClient_(contexte, idClient, lignesClient, resume);
+    if (new Date().getTime() - debut > COURRIELS_DUREE_MAX_MS_) {
+      arretTemps = true;
+      resume.interrompus += entree.lignes.length;
+      continue;
+    }
+    const statut = courrielsTraiterClient_(contexte, entree.id, entree.lignes, resume);
     const patch = {};
     patch[COURRIELS_COL_.RAPPRO_RELANCE] = statut;
-    lignesClient.forEach((ligne) => majs.push({ ligne: ligne._ligne, patch: patch }));
-  });
-  majLignes_(nomOnglet, majs);
+    entree.lignes.forEach((ligne) => majs.push({ ligne: ligne._ligne, patch: patch }));
+    traites++;
+    if (traites % COURRIELS_LOT_MAJ_ === 0) {
+      courrielsEcrireRelances_(nomOnglet, majs);
+      majs = [];
+    }
+  }
+  courrielsEcrireRelances_(nomOnglet, majs);
   courrielsJournaliserRelance_(resume);
   return courrielsResume_(resume);
+}
+
+/**
+ * Écrit un lot de valeurs dans la colonne « Relance ». Un échec d'écriture est
+ * journalisé sans interrompre la relance : les courriels déjà préparés restent
+ * tracés dans le Journal, et l'utilisateur sait quoi regarder.
+ * @param {string} nomOnglet Onglet Rapprochement.
+ * @param {Array<{ligne: number, patch: Object}>} majs Mises à jour à écrire.
+ * @return {boolean} Vrai si le lot a bien été écrit.
+ */
+function courrielsEcrireRelances_(nomOnglet, majs) {
+  if (!majs || !majs.length) return true;
+  try {
+    majLignes_(nomOnglet, majs);
+    return true;
+  } catch (e) {
+    journalErreur_('relancerClientsEnEcart',
+      `${majs.length} ligne(s) de l'onglet ${nomOnglet} n'ont pas pu être marquées dans la ` +
+      `colonne « ${COURRIELS_COL_.RAPPRO_RELANCE} » : leurs courriels ont pourtant été ` +
+      'préparés. Vérifiez Gmail avant de relancer cette action.',
+      `${e.message}\n${e.stack}`);
+    return false;
+  }
 }
 
 /**
@@ -8722,6 +9458,7 @@ function courrielsNouveauResume_(periode, selection) {
     envoyes: 0,
     brouillons: 0,
     restants: 0,
+    interrompus: 0,
     echecs: [],
     sansCourriel: [],
   };
@@ -8743,6 +9480,14 @@ function courrielsJournaliserRelance_(resume) {
       `Quota de courriels atteint : ${resume.restants} ligne(s) restent à relancer.`,
       'Leur colonne « Relance » n\'a pas été touchée : le prochain passage reprendra ' +
       'exactement là où celui-ci s\'est arrêté.');
+  }
+  if (resume.interrompus > 0) {
+    journalAvert_('relancerClientsEnEcart',
+      `Arrêt volontaire avant la limite des 6 minutes : ${resume.interrompus} ligne(s) ` +
+      'restent à relancer.',
+      `Les relances déjà préparées sont marquées dans la colonne ` +
+      `« ${COURRIELS_COL_.RAPPRO_RELANCE} » : relancez la même action pour reprendre ` +
+      'exactement là où celle-ci s\'est arrêtée, sans créer de doublon dans Gmail.');
   }
 }
 
@@ -8786,6 +9531,12 @@ function courrielsResume_(resume) {
   if (resume.restants) {
     lignes.push(`${resume.restants} ligne(s) n'ont pas pu être traitées aujourd'hui ` +
       '(quota de courriels atteint) : relancez cette action demain.');
+  }
+  if (resume.interrompus) {
+    lignes.push(`${resume.interrompus} ligne(s) n'ont pas pu être traitées dans le temps ` +
+      'imparti (Google coupe une exécution au bout de 6 minutes). Relancez simplement la ' +
+      'même action : elle reprendra où elle s\'est arrêtée et ne renverra pas les courriels ' +
+      'déjà préparés.');
   }
   lignes.push(`La colonne « ${COURRIELS_COL_.RAPPRO_RELANCE} » de l'onglet ` +
     `${CONFIG.ONGLETS.RAPPROCHEMENT.nom} indique le résultat, client par client.`);
@@ -9278,6 +10029,19 @@ const TESTS_COL_ = {
     STATUT: CONFIG.ONGLETS.BILANS.colonnes[8].nom,
     FACTURE: CONFIG.ONGLETS.BILANS.colonnes[9].nom,
   },
+  SOLDE: {
+    CLIENT: CONFIG.ONGLETS.SOLDES_DECLARES.colonnes[1].nom,
+    NOM: CONFIG.ONGLETS.SOLDES_DECLARES.colonnes[2].nom,
+    PERIODE: CONFIG.ONGLETS.SOLDES_DECLARES.colonnes[3].nom,
+    DATE: CONFIG.ONGLETS.SOLDES_DECLARES.colonnes[4].nom,
+    MONTANT: CONFIG.ONGLETS.SOLDES_DECLARES.colonnes[5].nom,
+  },
+  RAPPRO: {
+    PERIODE: CONFIG.ONGLETS.RAPPROCHEMENT.colonnes[0].nom,
+    CLIENT: CONFIG.ONGLETS.RAPPROCHEMENT.colonnes[1].nom,
+    NOM: CONFIG.ONGLETS.RAPPROCHEMENT.colonnes[2].nom,
+    RELANCE: CONFIG.ONGLETS.RAPPROCHEMENT.colonnes[10].nom,
+  },
   LIGNE: {
     ID: CONFIG.ONGLETS.LIGNES_BILAN.colonnes[0].nom,
     CLIENT: CONFIG.ONGLETS.LIGNES_BILAN.colonnes[1].nom,
@@ -9375,6 +10139,40 @@ function testsLigneBilan_(champs) {
   ligne[c.PRIX] = s.prix === undefined ? '' : s.prix;
   ligne[c.MONTANT] = s.montant === undefined ? '' : s.montant;
   ligne[c.BILAN] = s.bilan || '';
+  return ligne;
+}
+
+/**
+ * Construit une ligne de l'onglet Soldes_declares pour les tests.
+ * @param {Object} champs {client, nom, periode, date, montant}.
+ * @return {Object} Ligne prête à passer au code testé.
+ */
+function testsSolde_(champs) {
+  const c = TESTS_COL_.SOLDE;
+  const s = champs || {};
+  const solde = {};
+  solde[c.CLIENT] = s.client || '';
+  solde[c.NOM] = s.nom || '';
+  solde[c.PERIODE] = s.periode || '';
+  solde[c.DATE] = s.date || '';
+  solde[c.MONTANT] = s.montant === undefined ? 0 : s.montant;
+  return solde;
+}
+
+/**
+ * Construit une ligne DÉJÀ écrite dans l'onglet Rapprochement, telle que la
+ * relirait rapprochementLireDonnees_ avant de réécrire la période.
+ * @param {Object} champs {periode, client, nom, relance}.
+ * @return {Object} Ligne prête à passer au code testé.
+ */
+function testsLigneRapprochement_(champs) {
+  const c = TESTS_COL_.RAPPRO;
+  const s = champs || {};
+  const ligne = {};
+  ligne[c.PERIODE] = s.periode || '';
+  ligne[c.CLIENT] = s.client || '';
+  ligne[c.NOM] = s.nom || '';
+  ligne[c.RELANCE] = s.relance === undefined ? '—' : s.relance;
   return ligne;
 }
 
@@ -9525,20 +10323,66 @@ function testsSousEnsembleRefus_() {
       'Une cible négative est refusée, pas contournée, même si un montant lui correspond.');
   });
 
-  test_('Sous-ensemble : liste plus longue que SOUS_ENSEMBLE_MAX_ELEMENTS', () => {
+  test_('Sous-ensemble : au-delà de SOUS_ENSEMBLE_MAX_ELEMENTS, seule la programmation ' +
+    'dynamique renonce', () => {
     const trop = [];
     for (let i = 0; i <= CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS; i++) trop.push(100);
     assertEgal_(trop.length, CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS + 1,
       'Le jeu d\'essai dépasse bien la borne de un élément.');
-    assertNull_(trouverSousEnsemble_(trop, 100),
-      'Au-delà de la borne, on abandonne proprement — même si une réponse évidente existe.');
+    assertEgal_(trouverSousEnsemble_(trop, 100), [0],
+      'La recherche exhaustive de taille 1 a TOUJOURS lieu (§4.4) : elle ne dépend pas du ' +
+      'nombre de pièces.');
+    assertEgal_(trouverSousEnsemble_(trop, 200).length, 2,
+      'La recherche exhaustive de taille 2 a lieu elle aussi.');
+    assertNull_(trouverSousEnsemble_(trop, 400),
+      'Quatre éléments relèvent de la programmation dynamique : elle, et elle seule, ' +
+      'renonce au-delà de la borne.');
   });
 
-  test_('Sous-ensemble : borne maxElements passée explicitement', () => {
-    assertNull_(trouverSousEnsemble_([100, 200], 300, 1),
-      'Deux montants pour une borne de un : la fonction renonce.');
-    assertEgal_(trouverSousEnsemble_([100, 200], 300, 2), [0, 1],
-      'La même recherche aboutit quand la borne le permet.');
+  test_('Sous-ensemble : la borne maxElements ne s\'applique qu\'à la programmation dynamique',
+    () => {
+      const montants = [100, 200, 400, 800, 1600];
+      assertEgal_(trouverSousEnsemble_(montants, 300, 1), [0, 1],
+        'Deux montants font la cible : la borne de un ne peut pas empêcher la recherche ' +
+        'exhaustive de les trouver.');
+      assertNull_(trouverSousEnsemble_(montants, 1500, 4),
+        'Seuls quatre éléments donnent 15,00 $ : avec cinq montants et une borne de quatre, ' +
+        'la programmation dynamique renonce.');
+      testsSousEnsembleValide_(trouverSousEnsemble_(montants, 1500, 5), montants, 1500,
+        'La même recherche aboutit quand la borne le permet');
+    });
+
+  test_('Sous-ensemble : 60 montants dont deux font la cible', () => {
+    const montants = [];
+    for (let i = 0; i < 60; i++) montants.push(100000 + i * 700);
+    assertVrai_(montants.length > CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS,
+      'Le jeu d\'essai dépasse largement la borne de la programmation dynamique.');
+    const cible = montants[3] + montants[47];
+    const indices = trouverSousEnsemble_(montants, cible, CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS);
+    testsSousEnsembleValide_(indices, montants, cible, '60 montants, deux font la cible');
+    assertEgal_(indices.length, 2,
+      'Deux pièces suffisent : abandonner ici reviendrait à déclarer « inexpliqué » un écart ' +
+      'que le rapport sait pourtant nommer.');
+  });
+
+  test_('Sous-ensemble : 60 montants dont TROIS font la cible', () => {
+    const montants = [];
+    for (let i = 0; i < 60; i++) montants.push(100000 + i * 700);
+    const cible = montants[3] + montants[20] + montants[47];
+    const indices = trouverSousEnsemble_(montants, cible, CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS);
+    testsSousEnsembleValide_(indices, montants, cible, '60 montants, trois font la cible');
+    assertEgal_(indices.length, 3,
+      'La recherche exhaustive de taille 3 doit avoir lieu même bien au-delà de la borne de ' +
+      'la programmation dynamique : trois pièces, c\'est encore vérifiable à la main.');
+  });
+
+  test_('Sous-ensemble : 500 montants, trois font la cible dans les 200 premiers', () => {
+    const montants = [];
+    for (let i = 0; i < 500; i++) montants.push(100000 + i * 700);
+    const cible = montants[3] + montants[20] + montants[47];
+    const indices = trouverSousEnsemble_(montants, cible, CONFIG.SOUS_ENSEMBLE_MAX_ELEMENTS);
+    testsSousEnsembleValide_(indices, montants, cible, '500 montants, trois font la cible');
+    assertEgal_(indices.length, 3, 'Un très gros trimestre reste diagnosticable.');
   });
 
   test_('Sous-ensemble : cible au-delà de SOUS_ENSEMBLE_MAX_CIBLE', () => {
@@ -9634,6 +10478,20 @@ function testsDiagnosticPaiements_() {
     assertEgal_(diag.paiementsNonDeduits, ['P-000010', 'P-000011'],
       'Les deux paiements sont nommés.');
   });
+
+  test_('Diagnostic 1 : un écart de signe opposé n\'accuse jamais un paiement non déduit', () => {
+    const paiement = testsPaiement_({
+      id: 'P-000042', client: 'C-001', date: '2026-05-12', montant: 1250, reference: 'VIR-8891',
+    });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 125000, declareCents: 0, paiements: [paiement],
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'déduit',
+      'Un paiement que le client n\'a pas déduit ÉLÈVE son solde au-dessus du vôtre ' +
+      '(écart < 0). Ici son solde est plus bas : l\'hypothèse 1 est impossible.');
+    assertEgal_(diag.paiementsNonDeduits, [],
+      'Aucun paiement n\'est marqué « Non » sur la foi d\'un écart de mauvais signe.');
+  });
 }
 
 /**
@@ -9678,23 +10536,55 @@ function testsDiagnosticPriorites_() {
 }
 
 /**
- * diagnostiquerEcart_ — hypothèse 3 : un paiement compté deux fois, ou deux
- * paiements de même montant dont un seul a été enregistré.
+ * diagnostiquerEcart_ — hypothèse 3 : un paiement DÉDUIT DEUX FOIS par le
+ * client. Signe imposé par le §4.4 : écart > 0, et l'écart vaut LE montant du
+ * paiement, pas son double — le paiement légitime est déjà déduit des deux
+ * côtés, seule la déduction en trop reste.
  * @return {void}
  */
 function testsDiagnosticPaiementDouble_() {
-  test_('Diagnostic 3 : un paiement compté deux fois par le client', () => {
+  test_('Diagnostic 3 : un paiement déduit deux fois par le client', () => {
+    // Factures 1 000 $, un paiement de 1 000 $ : le vrai solde est 0. Le client
+    // retranche le paiement deux fois, il déclare donc −1 000 $.
+    // écart = 0 − (−100 000) = +100 000 cents = LE montant du paiement.
+    const paiement = testsPaiement_({ id: 'P-000077', client: 'C-001', date: '2026-05-05',
+      montant: 1000, reference: 'CHQ-114' });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 0, declareCents: -100000, paiements: [paiement],
+    }));
+    assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'Le paiement déduit deux fois explique l\'écart.');
+    testsAssertContient_(diag.diagnostic, 'deux fois', 'Le diagnostic dit ce qui s\'est passé.');
+    testsAssertContient_(diag.detail, 'P-000077', 'Le détail nomme le paiement en cause.');
+    testsAssertContient_(diag.detail, 'CHQ-114', 'Le détail donne la référence du chèque.');
+    testsAssertContient_(diag.detail, '1 000,00 $',
+      'L\'écart vaut le montant du paiement, pas son double.');
+  });
+
+  test_('Diagnostic 3 : le double d\'un paiement n\'est PAS l\'hypothèse 3', () => {
     const paiement = testsPaiement_({ id: 'P-000077', client: 'C-001', date: '2026-05-05',
       montant: 500, reference: 'CHQ-114' });
     const diag = diagnostiquerEcart_(testsContexteEcart_({
       theoriqueCents: 100000, declareCents: 0, paiements: [paiement],
     }));
-    assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'Le double d\'un paiement explique l\'écart.');
-    testsAssertContient_(diag.diagnostic, 'deux fois', 'Le diagnostic dit ce qui s\'est passé.');
-    testsAssertContient_(diag.detail, 'P-000077', 'Le détail nomme le paiement compté deux fois.');
+    testsAssertNeContientPas_(diag.diagnostic, 'deux fois',
+      'Un écart valant deux fois le paiement ne correspond à aucune erreur du client : ' +
+      'déduire un paiement une fois de trop creuse l\'écart d\'UN montant, pas de deux.');
   });
 
-  test_('Diagnostic 3 : deux paiements identiques, un seul pris en compte', () => {
+  test_('Diagnostic 3 : un écart de signe opposé n\'est jamais « compté deux fois »', () => {
+    const paiement = testsPaiement_({ id: 'P-000077', client: 'C-001', date: '2026-05-05',
+      montant: 500, reference: 'CHQ-114' });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 0, declareCents: 100000, paiements: [paiement],
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'deux fois',
+      'Un paiement déduit deux fois ABAISSE le solde du client. Son solde étant ici plus ' +
+      'élevé que le vôtre, l\'hypothèse 3 est arithmétiquement impossible.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE,
+      'Mieux vaut un écart inexpliqué qu\'un diagnostic exactement inverse de la réalité.');
+  });
+
+  test_('Diagnostic 3 : deux paiements de même montant, un semble compté deux fois', () => {
     const paiements = [
       testsPaiement_({ id: 'P-000021', client: 'C-001', date: '2026-04-08', montant: 300 }),
       testsPaiement_({ id: 'P-000022', client: 'C-001', date: '2026-05-08', montant: 300 }),
@@ -9702,9 +10592,9 @@ function testsDiagnosticPaiementDouble_() {
     const diag = diagnostiquerEcart_(testsContexteEcart_({
       theoriqueCents: 30000, declareCents: 0, paiements: paiements,
     }));
-    assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'Le montant apparaît deux fois : c\'est la piste.');
-    testsAssertContient_(diag.detail, 'P-000021', 'Le détail nomme le premier paiement.');
-    testsAssertContient_(diag.detail, 'P-000022', 'Le détail nomme le second paiement.');
+    assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'Le client a retranché 300,00 $ de trop.');
+    testsAssertContient_(diag.diagnostic, 'deux fois', 'Le diagnostic dit ce qui s\'est passé.');
+    testsAssertContient_(diag.detail, 'P-000021', 'Le détail nomme un paiement de ce montant.');
   });
 }
 
@@ -9752,11 +10642,76 @@ function testsDiagnosticFactures_() {
     testsAssertContient_(diag.detail, '50,00 $', 'Le détail chiffre l\'écart de la facture.');
   });
 
+  test_('Diagnostic 2 : un écart de signe opposé n\'accuse jamais une facture non comptabilisée',
+    () => {
+      const facture = testsFacture_({
+        id: 'F-000031', client: 'C-001', numero: 'INV-501', periode: '2026-05', total: 1000,
+        verification: STATUT_VERIF.CONFORME,
+      });
+      const diag = diagnostiquerEcart_(testsContexteEcart_({
+        theoriqueCents: 0, declareCents: 100000, factures: [facture],
+      }));
+      testsAssertNeContientPas_(diag.diagnostic, 'comptabilisée',
+        'Une facture que le client a oubliée ABAISSE son solde sous le vôtre (écart > 0). ' +
+        'Ici son solde est plus élevé : l\'hypothèse 2 est impossible.');
+      assertEgal_(diag.verdict, VERDICT.INEXPLIQUE, 'Aucune hypothèse ne s\'applique.');
+    });
+
+  test_('Diagnostic 2 : une facture annulée n\'explique jamais un écart', () => {
+    const factures = [
+      testsFacture_({ id: 'F-000201', client: 'C-001', periode: '2026-04', total: 1000,
+        verification: STATUT_VERIF.CONFORME, paiement: STATUT_PAIEMENT.NON_PAYEE }),
+      testsFacture_({ id: 'F-000202', client: 'C-001', periode: '2026-05', total: 500,
+        verification: STATUT_VERIF.CONFORME, paiement: STATUT_PAIEMENT.ANNULEE }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 100000, declareCents: 50000, factures: factures,
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'comptabilisée',
+      'Une facture annulée n\'entre pas non plus dans VOTRE solde théorique (§4.2) : ' +
+      'le client a raison de ne pas la compter, elle ne peut pas expliquer l\'écart.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE,
+      'La vraie cause reste à chercher : on ne clôt pas le dossier sur une facture annulée.');
+  });
+
+  test_('Diagnostic 4 : un écart de facturation de sens contraire n\'explique rien', () => {
+    const facture = testsFacture_({
+      id: 'F-000010', client: 'C-001', numero: 'INV-778', periode: '2026-06', total: 900,
+      verification: STATUT_VERIF.ECART, ecart: -250,
+    });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 100000, declareCents: 75000, factures: [facture],
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'facturation',
+      'La somme des « Écart vs bilan » a un sens déterminé : un écart de −250 $ ne peut pas ' +
+      'expliquer un écart de +250 $. La comparer en valeur absolue retourne l\'explication.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE, 'Mieux vaut inexpliqué qu\'à l\'envers.');
+  });
+
+  test_('Diagnostic 4 : une facture annulée ne compte pas dans la somme des écarts', () => {
+    const factures = [
+      testsFacture_({ id: 'F-000401', client: 'C-001', periode: '2026-04', total: 1000,
+        verification: STATUT_VERIF.CONFORME }),
+      testsFacture_({ id: 'F-000403', client: 'C-001', periode: '2026-05', total: 900,
+        verification: STATUT_VERIF.ECART, ecart: 123.45,
+        paiement: STATUT_PAIEMENT.ANNULEE }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 100000, declareCents: 87655, factures: factures,
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'facturation',
+      'Une facture annulée ne contribue à aucun des deux soldes : son écart de vérification ' +
+      'tombe pourtant pile sur l\'écart, et ne l\'explique pas pour autant.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE,
+      'La coïncidence de montant ne vaut pas explication : la vraie cause reste à chercher.');
+  });
 }
 
 /**
  * diagnostiquerEcart_ — hypothèse 5 : le client comptabilise une facture que
  * vous avez écartée (Doublon ou Sans bilan), et qui n'est pas dans votre solde.
+ * Signe imposé par le §4.4 : écart < 0, puisque compter une facture de plus
+ * ÉLÈVE le solde du client au-dessus du vôtre.
  * @return {void}
  */
 function testsDiagnosticFactureEcartee_() {
@@ -9765,13 +10720,17 @@ function testsDiagnosticFactureEcartee_() {
       id: 'F-000055', client: 'C-001', numero: 'INV-900', periode: '2026-05', total: 750,
       verification: STATUT_VERIF.DOUBLON,
     });
+    // Vous n'inscrivez rien (la facture est écartée), le client inscrit 750 $ :
+    // son solde est plus ÉLEVÉ que le vôtre, écart = 0 − 75 000 = −75 000.
     const diag = diagnostiquerEcart_(testsContexteEcart_({
-      theoriqueCents: 75000, declareCents: 0, factures: [facture],
+      theoriqueCents: 0, declareCents: 75000, factures: [facture],
     }));
     assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'La facture écartée explique l\'écart.');
     testsAssertContient_(diag.diagnostic, STATUT_VERIF.DOUBLON,
       'Le diagnostic nomme le statut en cause.');
     testsAssertContient_(diag.detail, 'F-000055', 'Le détail nomme la facture doublon.');
+    testsAssertContient_(diag.detail, 'plus élevé',
+      'Le détail dit le bon sens : le solde du client est au-dessus du vôtre.');
     testsAssertContient_(diag.action, CONFIG.ONGLETS.FACTURES.nom,
       'L\'action dit dans quel onglet corriger si la facture est valable.');
   });
@@ -9782,11 +10741,26 @@ function testsDiagnosticFactureEcartee_() {
       verification: STATUT_VERIF.SANS_BILAN,
     });
     const diag = diagnostiquerEcart_(testsContexteEcart_({
-      theoriqueCents: 32000, declareCents: 0, factures: [facture],
+      theoriqueCents: 0, declareCents: 32000, factures: [facture],
     }));
     assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'Une facture sans bilan explique aussi un écart.');
     testsAssertContient_(diag.diagnostic, STATUT_VERIF.SANS_BILAN,
       'Le diagnostic nomme le statut « Sans bilan ».');
+  });
+
+  test_('Diagnostic 5 : un écart de signe opposé n\'accuse jamais une facture écartée', () => {
+    const facture = testsFacture_({
+      id: 'F-000055', client: 'C-001', numero: 'INV-900', periode: '2026-05', total: 750,
+      verification: STATUT_VERIF.DOUBLON,
+    });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 75000, declareCents: 0, factures: [facture],
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, STATUT_VERIF.DOUBLON,
+      'Si le client comptait cette facture, son solde serait plus ÉLEVÉ que le vôtre. ' +
+      'Ici il est plus bas : l\'explication se contredirait elle-même.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE,
+      'Sans explication valable, on le dit franchement plutôt que d\'en inventer une.');
   });
 }
 
@@ -9837,6 +10811,100 @@ function testsDiagnosticDivers_() {
     testsAssertContient_(diag.detail, '2026-T3', 'Le détail dit à quel trimestre elle appartient.');
   });
 
+  test_('Diagnostic 2 : une facture « Écart de montant » compte comme non comptabilisée', () => {
+    // §4.2 : une facture « Écart de montant » entre dans le solde théorique.
+    // La restreindre aux « Conforme » rendait le rapport contradictoire avec
+    // son propre calcul : il comptait la facture, mais refusait de la nommer.
+    const facture = testsFacture_({
+      id: 'F-000210', client: 'C-001', numero: 'INV-810', periode: '2026-05', total: 1000,
+      verification: STATUT_VERIF.ECART, ecart: 0,
+    });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 100000, declareCents: 0, factures: [facture],
+    }));
+    assertEgal_(diag.verdict, VERDICT.EXPLIQUE, 'La facture reconnue explique l\'écart.');
+    testsAssertContient_(diag.diagnostic, 'comptabilisée',
+      'Une facture reconnue, même en écart de montant, peut être celle que le client a omise.');
+    testsAssertContient_(diag.detail, 'F-000210', 'Le détail la nomme.');
+  });
+
+  test_('Diagnostic 6 : une facture annulée n\'explique jamais un écart de taxes', () => {
+    // La facture annulée n'entre pas dans le solde théorique : l'accuser
+    // enverrait le client vérifier les taxes d'une pièce qu'aucun des deux
+    // ne compte, pendant que la vraie cause reste dans le classeur.
+    const factures = [
+      testsFacture_({ id: 'F-000220', client: 'C-001', periode: '2026-04', total: 1000, taxes: 0,
+        verification: STATUT_VERIF.CONFORME }),
+      testsFacture_({ id: 'F-000221', client: 'C-001', periode: '2026-05', total: 2000, taxes: 0,
+        verification: STATUT_VERIF.CONFORME, paiement: STATUT_PAIEMENT.ANNULEE }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 100000, declareCents: 90000, factures: factures,
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'taxes',
+      'L\'écart vaut pile la TPS de la facture ANNULÉE : c\'est une coïncidence, pas une cause.');
+    testsAssertNeContientPas_(diag.detail, 'F-000221',
+      'Une facture hors du solde théorique n\'est jamais nommée comme explication.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE, 'Mieux vaut « inexpliqué » qu\'un faux coupable.');
+  });
+
+  test_('Diagnostic 8 : une facture écartée du trimestre voisin n\'explique aucun décalage', () => {
+    const facture = testsFacture_({
+      id: 'F-000230', client: 'C-001', date: '2026-07-10', periode: '2026-07', total: 800,
+      verification: STATUT_VERIF.DOUBLON,
+    });
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 80000, declareCents: 0, factures: [facture],
+    }));
+    testsAssertNeContientPas_(diag.diagnostic, 'Décalage',
+      'Le décalage de période porte sur la DATE d\'une pièce reconnue, jamais sur son statut.');
+    testsAssertNeContientPas_(diag.detail, 'F-000230', 'La facture Doublon n\'est pas nommée.');
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE, 'Aucune hypothèse ne s\'applique.');
+  });
+
+  test_('Diagnostic 9 : les montants proches ne citent pas de pièce hors du solde', () => {
+    const factures = [
+      testsFacture_({ id: 'F-000240', client: 'C-001', periode: '2026-05', total: 1000, taxes: 0,
+        verification: STATUT_VERIF.CONFORME }),
+      testsFacture_({ id: 'F-000241', client: 'C-001', periode: '2026-05', total: 1234.6,
+        taxes: 0, verification: STATUT_VERIF.CONFORME, paiement: STATUT_PAIEMENT.ANNULEE }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 23334, declareCents: 0, factures: factures,
+    }));
+    assertEgal_(diag.verdict, VERDICT.INEXPLIQUE, 'Aucune combinaison exacte.');
+    testsAssertNeContientPas_(diag.detail, 'F-000241',
+      'Proposer une facture annulée comme « montant proche » envoie vérifier à la main une ' +
+      'pièce que le solde ne compte pas.');
+  });
+
+  test_('Pièces sans date : une facture écartée n\'est pas annoncée comme comptant', () => {
+    const factures = [
+      testsFacture_({ id: 'F-000250', client: 'C-001', periode: '', date: '', total: 400,
+        verification: STATUT_VERIF.REJETEE }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 0, declareCents: 0, factures: factures,
+    }));
+    assertEgal_(diag.verdict, VERDICT.BALANCE, 'Une facture rejetée ne déséquilibre rien.');
+    testsAssertNeContientPas_(diag.detail, 'F-000250',
+      'Annoncer « cette pièce compte dans votre solde » d\'une facture rejetée est faux, et ' +
+      'laisse un avertissement que rien ne fera disparaître.');
+  });
+
+  test_('Pièces sans date : une facture reconnue, elle, est bien signalée', () => {
+    const factures = [
+      testsFacture_({ id: 'F-000251', client: 'C-001', periode: '', date: '', total: 400,
+        verification: STATUT_VERIF.CONFORME }),
+    ];
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 40000, declareCents: 40000, factures: factures,
+    }));
+    testsAssertContient_(diag.detail, 'F-000251',
+      'Une pièce comptée dans le solde mais non datable doit être nommée, sans quoi son écart ' +
+      'serait un jour déclaré « inexpliqué » alors que la cause est dans le classeur.');
+  });
+
   test_('Diagnostic 9 : aucun montant n\'explique l\'écart', () => {
     const facture = testsFacture_({
       id: 'F-000099', client: 'C-001', periode: '2026-05', total: 900, taxes: 0,
@@ -9853,6 +10921,136 @@ function testsDiagnosticDivers_() {
     testsAssertContient_(diag.detail, 'P-000099', 'Le détail propose les montants les plus proches.');
     assertEgal_(diag.paiementsNonDeduits, [],
       'Aucun paiement n\'est mis en cause quand rien n\'est démontré.');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// §4.4 — pièces sans date : comptées dans le solde, donc nommables
+// ---------------------------------------------------------------------------
+
+/**
+ * diagnostiquerEcart_ — une pièce sans date compte dans le solde théorique
+ * (§4.2) : elle est rattachée au trimestre traité pour que les hypothèses
+ * puissent la nommer, et le rapport signale la ligne à compléter (§4.4).
+ * @return {void}
+ */
+function testsDiagnosticSansDate_() {
+  test_('Pièces sans date : une facture sans date reste nommable', () => {
+    // Facture saisie à la main, sans « Date facture » NI « Période » : elle
+    // compte dans le solde théorique, elle doit donc rester visible du moteur.
+    const facture = testsFacture_({
+      id: 'F-000050', client: 'C-001', numero: 'INV-050', total: 500,
+      verification: STATUT_VERIF.CONFORME,
+    });
+    facture._ligne = 14;
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 50000, declareCents: 0, factures: [facture],
+    }));
+    assertEgal_(diag.verdict, VERDICT.EXPLIQUE,
+      'La seule pièce du dossier explique la totalité de l\'écart : la déclarer ' +
+      '« inexpliquée » serait faux.');
+    testsAssertContient_(diag.detail, 'F-000050', 'Le détail nomme la facture en cause.');
+    assertEgal_(diag.piecesSansDate, 1, 'La pièce sans date est comptée.');
+    testsAssertContient_(diag.detail, 'ligne 14',
+      'Le détail dit quelle ligne du classeur compléter.');
+    testsAssertContient_(diag.detail, CONFIG.ONGLETS.FACTURES.nom,
+      'Le détail nomme l\'onglet concerné.');
+  });
+
+  test_('Pièces sans date : un paiement sans date reste nommable', () => {
+    const facture = testsFacture_({
+      id: 'F-000060', client: 'C-001', periode: '2026-05', total: 1000,
+      verification: STATUT_VERIF.CONFORME,
+    });
+    const paiement = testsPaiement_({ id: 'P-000001', client: 'C-001', montant: 400 });
+    paiement._ligne = 27;
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 60000, declareCents: 100000,
+      factures: [facture], paiements: [paiement],
+    }));
+    assertEgal_(diag.verdict, VERDICT.EXPLIQUE,
+      'Le paiement sans date est bien celui qui crée l\'écart : il doit être nommé.');
+    testsAssertContient_(diag.detail, 'P-000001', 'Le détail nomme le paiement en cause.');
+    testsAssertContient_(diag.detail, CONFIG.ONGLETS.PAIEMENTS.nom,
+      'Le détail nomme l\'onglet où compléter la date.');
+  });
+
+  test_('Pièces sans date : le détail les énumère ligne par ligne', () => {
+    const premier = testsPaiement_({ id: 'P-000001', client: 'C-001', montant: 100 });
+    const second = testsPaiement_({ id: 'P-000002', client: 'C-001', montant: 250 });
+    premier._ligne = 14;
+    second._ligne = 27;
+    const diag = diagnostiquerEcart_(testsContexteEcart_({
+      theoriqueCents: 0, declareCents: 0, paiements: [premier, second],
+    }));
+    assertEgal_(diag.verdict, VERDICT.BALANCE,
+      'Même quand tout balance, les lignes à compléter sont signalées.');
+    assertEgal_(diag.piecesSansDate, 2, 'Les deux pièces sans date sont comptées.');
+    testsAssertContient_(diag.detail,
+      `2 pièce(s) sans date : lignes 14 et 27 de l'onglet ${CONFIG.ONGLETS.PAIEMENTS.nom}`,
+      'Le détail nomme les lignes exactes, comme l\'exige le §4.4.');
+    testsAssertContient_(diag.detail, 'complétez la colonne Date',
+      'Le détail dit quoi faire pour que la pièce redevienne datable.');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// §2 — idempotence : relancer un trimestre ne réarme pas les relances
+// ---------------------------------------------------------------------------
+
+/**
+ * rapprocherPeriode_ — la colonne « Relance » d'un trimestre déjà traité est
+ * reportée sur les nouvelles lignes : relancer deux fois le rapprochement du
+ * même trimestre ne doit pas provoquer un second courriel (§2).
+ * @return {void}
+ */
+function testsRapprochementRelance_() {
+  const dossier = (relanceExistante) => ({
+    clients: [],
+    bilans: [],
+    factures: [testsFacture_({ id: 'F-000501', client: 'C-001', nom: 'Boulangerie Petit',
+      periode: '2026-05', total: 1000, verification: STATUT_VERIF.CONFORME })],
+    paiements: [],
+    soldes: [testsSolde_({ client: 'C-001', nom: 'Boulangerie Petit', periode: '2026-T2',
+      date: '2026-06-30', montant: 0 })],
+    rapprochements: relanceExistante
+      ? [testsLigneRapprochement_({ periode: '2026-T2', client: 'C-001',
+        nom: 'Boulangerie Petit', relance: relanceExistante })]
+      : [],
+    params: {},
+    maintenant: new Date(2026, 5, 30, 12, 0, 0, 0),
+  });
+  const relanceDe = (resultat) =>
+    resultat.lignes[0][CONFIG.ONGLETS.RAPPROCHEMENT.colonnes[10].nom];
+
+  test_('Rapprochement : un client déjà relancé garde son état de relance', () => {
+    const resultat = rapprocherPeriode_('2026-T2', dossier('Envoyée'));
+    assertEgal_(resultat.total, 1, 'Le client en écart figure bien au rapport.');
+    assertEgal_(relanceDe(resultat), 'Envoyée',
+      'Remettre « — » ferait repartir un second courriel identique au premier.');
+  });
+
+  test_('Rapprochement : un brouillon déjà créé est reporté lui aussi', () => {
+    assertEgal_(relanceDe(rapprocherPeriode_('2026-T2', dossier('Brouillon créé'))),
+      'Brouillon créé', 'Le brouillon déjà préparé ne doit pas être recréé.');
+  });
+
+  test_('Rapprochement : un client nouvellement en écart part de « — »', () => {
+    assertEgal_(relanceDe(rapprocherPeriode_('2026-T2', dossier(''))), '—',
+      'Sans relance antérieure, la ligne est neuve : elle doit pouvoir être relancée.');
+  });
+
+  test_('Rapprochement : une relance en échec peut être retentée', () => {
+    assertEgal_(relanceDe(rapprocherPeriode_('2026-T2', dossier('Échec'))), '—',
+      'Un envoi manqué n\'est pas un envoi : il doit rester possible de réessayer.');
+  });
+
+  test_('Rapprochement : la relance d\'un AUTRE trimestre n\'est pas reprise', () => {
+    const donnees = dossier('');
+    donnees.rapprochements = [testsLigneRapprochement_({ periode: '2026-T1', client: 'C-001',
+      relance: 'Envoyée' })];
+    assertEgal_(relanceDe(rapprocherPeriode_('2026-T2', donnees)), '—',
+      'Un courriel envoyé pour 2026-T1 ne dispense pas de relancer 2026-T2.');
   });
 }
 
@@ -10404,6 +11602,8 @@ function testsSuites_() {
     { nom: 'Diagnostic — factures oubliées ou mal facturées', fn: testsDiagnosticFactures_ },
     { nom: 'Diagnostic — factures écartées', fn: testsDiagnosticFactureEcartee_ },
     { nom: 'Diagnostic — taxes, signe, période, inexpliqué', fn: testsDiagnosticDivers_ },
+    { nom: 'Diagnostic — pièces sans date', fn: testsDiagnosticSansDate_ },
+    { nom: 'Rapprochement — report des relances', fn: testsRapprochementRelance_ },
     { nom: 'Solde théorique — exclusions', fn: testsSoldeTheoriqueExclusions_ },
     { nom: 'Solde théorique — bornes de date', fn: testsSoldeTheoriqueBornes_ },
     { nom: 'Trimestres — période', fn: testsPeriodeTrimestre_ },
