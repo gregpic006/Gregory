@@ -64,6 +64,7 @@ const CONFIG = {
   /** Bornes du moteur de recherche de sous-ensemble (§4.4 de SPEC.md). */
   SOUS_ENSEMBLE_MAX_ELEMENTS: 25,
   SOUS_ENSEMBLE_MAX_CIBLE: 5000000, // 50 000,00 $ en cents
+  SOUS_ENSEMBLE_MAX_TAILLE3: 200, // au-delà, on renonce aux combinaisons de 3 (O(n²))
 
   /** Nombre de candidats listés quand un écart reste inexpliqué. */
   CANDIDATS_INEXPLIQUE: 3,
@@ -86,6 +87,8 @@ const CONFIG = {
     DEVISE: 'CAD',
     RELANCE_AUTO: 'Non',                     // Oui | Non
     TRIMESTRE_DECALAGE_MOIS: '0',            // décalage si l'exercice ne suit pas l'année civile
+    PERIODE_BILAN_AUTO: 'Mois précédent',    // Mois précédent | Mois courant
+    DOSSIER_DRIVE_ID: '',                    // rempli automatiquement à la création du dossier
   },
 
   DESCRIPTIONS_PARAMETRES: {
@@ -101,6 +104,8 @@ const CONFIG = {
     DEVISE: "Devise affichée dans les courriels.",
     RELANCE_AUTO: "Oui = les relances d'écart partent automatiquement après le rapprochement.",
     TRIMESTRE_DECALAGE_MOIS: "0 si vos trimestres suivent l'année civile (janv-mars = T1).",
+    PERIODE_BILAN_AUTO: "Période visée par l'envoi mensuel automatique. « Mois précédent » si vous facturez le mois écoulé.",
+    DOSSIER_DRIVE_ID: "Rempli tout seul par le script. Ne pas modifier : c'est l'identifiant du dossier Drive qu'il a créé.",
   },
 
   /**

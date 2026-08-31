@@ -1,0 +1,27 @@
+# Dépendances Node (le projet n'en a aucune, mais npm peut en créer le dossier)
+node_modules/
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# Journaux et fichiers temporaires
+*.log
+npm-debug.log*
+.cache/
+tmp/
+
+# Éditeurs
+.idea/
+.vscode/
+
+# Secrets et configuration locale
+.env
+.env.*
+.clasprc.json
+.clasp.json
+
+# ATTENTION : dist/ n'est PAS ignoré.
+# dist/Code.gs est le fichier assemblé que l'on copie-colle dans l'éditeur
+# Apps Script : il doit rester versionné pour qu'on sache exactement ce qui
+# tourne dans le classeur de Grégory.

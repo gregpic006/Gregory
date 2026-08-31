@@ -1,0 +1,14 @@
+{
+  "name": "rapprochement-clients",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Automatisation Google Apps Script du cycle bilan -> facture -> paiement -> rapprochement trimestriel.",
+  "scripts": {
+    "build": "node outils/build.mjs",
+    "test": "node outils/test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

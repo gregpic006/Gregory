@@ -202,31 +202,65 @@ Sortie : `{verdict, diagnostic, detail, action}`.
 
 Hypothèses testées, dans cet ordre, la première qui explique **exactement** l'écart gagne :
 
-| # | Hypothèse | Test |
-|---|---|---|
-| 0 | Rien à expliquer | `|écart| ≤ TOLERANCE_CENTS` → `✅ Balancé` |
-| 1 | **Paiement(s) non déduit(s)** | il existe un sous-ensemble des paiements de la période dont la somme == `−écart` (le client n'a pas retranché ces paiements → son solde est trop haut). Priorité aux paiements `Déduit par le client ≠ Oui`. |
-| 2 | **Facture non comptabilisée** | l'écart == somme exacte d'un sous-ensemble des factures `Conforme` de la période |
-| 3 | **Paiement compté deux fois** | l'écart == 2 × le montant d'un paiement, ou == un paiement dont le montant apparaît deux fois dans les paiements |
-| 4 | **Écart de facturation** | l'écart == somme des `Écart vs bilan` des factures `Écart de montant` de la période |
-| 5 | **Facture doublon comptée** | l'écart == montant d'une facture marquée `Doublon` ou `Sans bilan` |
-| 6 | **Erreur de taxes** | l'écart == TPS, TVQ, ou TPS+TVQ d'un montant présent (facture ou bilan) |
-| 7 | **Signe inversé** | `|solde_théorique + solde_déclaré| ≤ TOLERANCE_CENTS` → le client a inversé le signe |
-| 8 | **Décalage de période** | l'écart == montant d'une facture ou d'un paiement de la période **suivante** ou **précédente** |
-| 9 | **Inexpliqué** | aucune des ci-dessus → `❌ Écart inexpliqué`, avec les 3 candidats les plus proches en montant |
+**Convention de signe — à lire avant toute modification de ce module.**
+`écart = solde_théorique − solde_déclaré`, les deux exprimant ce que Grégory doit encore
+au client (§4.1). Il en découle mécaniquement :
+
+- **écart < 0** → le solde du client est **trop haut** : il n'a pas retranché quelque chose
+  (un paiement reçu), ou il compte une dette que Grégory ne reconnaît pas.
+- **écart > 0** → le solde du client est **trop bas** : il a retranché de trop (paiement
+  déduit deux fois), ou il n'a pas enregistré une facture qu'il vous a pourtant envoyée.
+
+Chaque hypothèse impose donc un signe. Une hypothèse aveugle au signe produit un diagnostic
+non seulement faux, mais **exactement inverse de la réalité** — le pire résultat possible ici,
+puisque l'utilisateur va le recopier dans un courriel au client. Le signe attendu est
+non négociable et testé.
+
+| # | Hypothèse | Signe | Test |
+|---|---|---|---|
+| 0 | Rien à expliquer | — | `|écart| ≤ TOLERANCE_CENTS` → `✅ Balancé` |
+| 1 | **Paiement(s) non déduit(s)** par le client | `écart < 0` | un sous-ensemble des paiements de la période somme exactement `−écart`. Priorité aux paiements `Déduit par le client ≠ Oui`. |
+| 2 | **Facture non comptabilisée** par le client | `écart > 0` | un sous-ensemble des factures **reconnues** (celles qui composent le solde théorique) somme exactement `+écart` |
+| 3 | **Paiement déduit deux fois** par le client | `écart > 0` | `écart` == le montant d'un paiement de la période (le client l'a retranché une fois de trop) |
+| 4 | **Écart de facturation** | signé | `écart` == somme **signée** des `Écart vs bilan` des factures `Écart de montant` reconnues |
+| 5 | **Facture écartée comptée par le client** | `écart < 0` | `−écart` == le montant d'une facture `Doublon` ou `Sans bilan` (le client compte une facture que vous avez écartée) |
+| 6 | **Erreur de taxes** | — | `|écart|` == TPS (5 %), TVQ (9,975 %) ou TPS+TVQ d'un montant présent (facture ou bilan) |
+| 7 | **Signe inversé** | — | `|solde_théorique + solde_déclaré| ≤ TOLERANCE_CENTS` : le client a inversé le signe de son relevé |
+| 8 | **Décalage de période** | — | `|écart|` == le montant d'une facture ou d'un paiement du trimestre **précédent** ou **suivant**. Le texte doit dire dans quel sens. |
+| 9 | **Inexpliqué** | — | aucune des précédentes → `❌ Écart inexpliqué`, avec les `CANDIDATS_INEXPLIQUE` montants les plus proches |
 
 `✅ Balancé` pour le cas 0 ; `⚠️ Écart expliqué` pour 1-8 ; `❌ Écart inexpliqué` pour 9 ;
 `❓ Solde non déclaré` si aucun `Soldes_declares` pour ce client et cette période.
 
+**Les hypothèses ne raisonnent que sur les pièces qui composent réellement le solde théorique**
+(§4.2) — sauf l'hypothèse 5, dont c'est justement l'objet d'examiner les factures exclues.
+Accuser une facture `Annulée` d'expliquer un écart est une contradiction : le solde théorique
+ne la compte pas.
+
+**Pièces sans date.** Une facture ou un paiement dont la date est vide ou illisible est
+**compté** dans le solde théorique (la pièce existe) et **rattaché au trimestre traité** pour
+que les hypothèses puissent le nommer. Le rapport doit en plus signaler explicitement ces
+lignes (« 2 pièce(s) sans date : lignes 14 et 27 de l'onglet Paiements — complétez la colonne
+Date »). Ce qui est interdit, c'est d'utiliser une pièce dans le calcul tout en la rendant
+invisible au diagnostic : l'écart serait déclaré inexpliqué alors que sa cause est dans le
+classeur.
+
 **Recherche de sous-ensemble (`trouverSousEnsemble_`)** — contrainte de performance et de
 lisibilité :
 - travailler en **cents entiers** ;
-- d'abord chercher les combinaisons de taille 1, puis 2, puis 3 (exhaustif, O(n³) borné) —
-  ce sont les seules explications qu'un humain accepte de vérifier à la main ;
-- au-delà, si `n ≤ SOUS_ENSEMBLE_MAX_ELEMENTS` (25), programmation dynamique sur les cents
-  avec reconstruction de la solution, plafonnée à `SOUS_ENSEMBLE_MAX_CIBLE` cents (5 000 000
-  = 50 000 $) pour borner la mémoire ; sinon abandonner proprement et renvoyer `null` ;
-- ne jamais renvoyer un sous-ensemble vide ni une somme approximative.
+- **la recherche exhaustive des combinaisons de taille 1, 2 puis 3 a toujours lieu**, quel que
+  soit le nombre de pièces : ce sont les seules explications qu'un humain accepte de vérifier à
+  la main, et ce sont les plus fréquentes. Taille 1 en O(n), taille 2 en O(n) via table de
+  hachage, taille 3 en O(n²) via table de hachage, plafonnée à `SOUS_ENSEMBLE_MAX_TAILLE3`
+  (200) éléments ;
+- **ensuite seulement**, si `n ≤ SOUS_ENSEMBLE_MAX_ELEMENTS` (25), programmation dynamique sur
+  les cents avec reconstruction de la solution, plafonnée à `SOUS_ENSEMBLE_MAX_CIBLE` cents
+  (5 000 000 = 50 000 $) pour borner la mémoire ; au-delà de ces bornes, abandonner
+  proprement en renvoyant `null` ;
+- ne jamais renvoyer un sous-ensemble vide, un indice en double, ni une somme approximative ;
+- renvoyer des **indices**, pas des montants, pour pouvoir remonter aux pièces d'origine ;
+- une cible nulle, une liste vide, ou une cible dépassant la somme des montants positifs
+  sortent immédiatement en `null`.
 
 ### 4.5 Relance client
 Pour chaque ligne `⚠️` ou `❌`, un courriel est préparé : il liste **précisément** ce qui
