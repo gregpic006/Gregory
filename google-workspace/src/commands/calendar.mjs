@@ -533,7 +533,7 @@ async function subscribeUser({ config, userEmail, calendarId, summary, log }) {
     const visible = entry.selected === true && entry.hidden !== true;
     if (visible) {
       log.skip(`${userEmail} : « ${summary} » est déjà dans son Agenda et affiché.`);
-      return { status: 'already', detail: `${userEmail} (déjà affiché)` };
+      return { status: 'already', detail: userEmail };
     }
     // Présent mais décoché ou masqué : les événements n'apparaissent pas dans
     // la grille. C'est le piège classique — on force l'état voulu.
@@ -547,7 +547,7 @@ async function subscribeUser({ config, userEmail, calendarId, summary, log }) {
       { tries: 4, propagation: false, label: `affichage de « ${summary} » chez ${userEmail}` },
     );
     log.ok(`${userEmail} : « ${summary} » était présent mais décoché — il est maintenant affiché.`);
-    return { status: 'updated', detail: `${userEmail} (réaffiché)` };
+    return { status: 'updated', detail: userEmail };
   }
 
   /* --- Pas encore abonné : on l'ajoute ----------------------------- */
@@ -588,7 +588,7 @@ async function subscribeUser({ config, userEmail, calendarId, summary, log }) {
         { tries: 4, propagation: false, label: `affichage de « ${summary} » chez ${userEmail}` },
       );
       log.ok(`${userEmail} : « ${summary} » était déjà là — affichage confirmé.`);
-      return { status: 'updated', detail: `${userEmail} (réaffiché)` };
+      return { status: 'updated', detail: userEmail };
     }
     throw error;
   }
