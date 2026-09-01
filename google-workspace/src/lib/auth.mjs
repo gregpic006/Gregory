@@ -110,7 +110,7 @@ export function delegationInstructions({ clientId = null, scopes = ALL_SCOPES, s
     '    l\'approbation d\'un DEUXIÈME super-administrateur. Si l\'ajout reste',
     '    « en attente », c\'est ça — ce n\'est pas un bogue.',
   ]
-    .filter((line) => line !== '')
+    .filter((line) => line !== null)
     .join('\n');
 }
 

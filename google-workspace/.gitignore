@@ -13,7 +13,9 @@ config.json
 .state.json
 
 # Dependances
-node_modules/
+# (sans barre oblique : attrape aussi un lien symbolique, qu'un motif
+#  « node_modules/ » laisserait passer)
+node_modules
 
 # Bruit divers
 *.log

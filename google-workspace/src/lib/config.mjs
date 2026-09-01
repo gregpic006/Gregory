@@ -71,6 +71,57 @@ export const DEFAULTS = Object.freeze({
   },
 });
 
+/**
+ * Clés reconnues, par section. Sert à repérer les fautes de frappe : une clé
+ * inconnue est ignorée en silence par JSON.parse, ce qui donne un script qui
+ * « ne tient pas compte » d'un réglage sans jamais le dire.
+ * Les clés commençant par « _ » sont libres (commentaires dans le JSON).
+ */
+const KNOWN_KEYS = Object.freeze({
+  root: ['domain', 'adminEmail', 'personalEmail', 'timeZone', 'team', 'group', 'calendars', 'sharedDrive', 'auth'],
+  sharedDrive: ['name', 'restrictions', 'folders', 'createReadme'],
+  auth: ['mode', 'keyFile', 'oauthClientFile', 'tokenFile'],
+});
+
+/** Distance de Levenshtein, pour suggérer « tu voulais dire … ». */
+function editDistance(a, b) {
+  const m = a.length;
+  const n = b.length;
+  let previous = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= n; j += 1) {
+      current[j] = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    previous = current;
+  }
+  return previous[n];
+}
+
+/** Avertit pour chaque clé non reconnue, avec la correction la plus probable. */
+function warnUnknownKeys(object, known, sectionLabel, warnings) {
+  for (const key of Object.keys(object)) {
+    if (key.startsWith('_')) continue; // convention de commentaire
+    if (known.includes(key)) continue;
+
+    const lowered = key.toLowerCase();
+    const candidates = known
+      .map((k) => ({ k, d: editDistance(lowered, k.toLowerCase()) }))
+      .sort((x, y) => x.d - y.d);
+    const best = candidates[0];
+    const suggestion = best && best.d <= Math.max(2, Math.ceil(key.length / 3)) ? ` Tu voulais peut-être « ${best.k} » ?` : '';
+
+    warnings.push(
+      `${sectionLabel} : le champ « ${key} » n'est pas reconnu et sera ignoré.${suggestion} ` +
+        `Champs acceptés : ${known.join(', ')}.`,
+    );
+  }
+}
+
 /** Erreur de configuration : message déjà formaté et lisible par un humain. */
 export class ConfigError extends Error {
   /**
@@ -278,6 +329,12 @@ export function validateConfig(input) {
   /** @type {string[]} */
   const warnings = [];
   const fail = (field, msg) => errors.push({ field, msg });
+
+  // Une clé mal orthographiée serait sinon ignorée en silence, et la valeur par
+  // défaut s'appliquerait sans que personne ne s'en rende compte.
+  warnUnknownKeys(input, KNOWN_KEYS.root, 'config.json', warnings);
+  if (isPlainObject(input.sharedDrive)) warnUnknownKeys(input.sharedDrive, KNOWN_KEYS.sharedDrive, 'sharedDrive', warnings);
+  if (isPlainObject(input.auth)) warnUnknownKeys(input.auth, KNOWN_KEYS.auth, 'auth', warnings);
 
   /* --- domaine ---------------------------------------------------- */
   let domain = null;
