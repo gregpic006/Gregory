@@ -1660,6 +1660,18 @@ export async function run({ config, apply = false, state = {}, log }) {
         );
         summary.unchanged.push('Adresse secondaire du compte : déjà détachée');
         alternateEmailFait = true;
+      } else if (!recovery.value || !isEmail(recovery.value)) {
+        // Cas possible : aucune adresse de récupération d'USAGER n'était à
+        // remplacer, donc --recovery n'a pas été exigé par les vérifications,
+        // mais l'adresse secondaire du COMPTE, elle, pointe encore sur
+        // l'adresse personnelle. On ne la vide surtout pas : une adresse
+        // secondaire absente, c'est la porte de secours du compte qui disparaît.
+        const msg =
+          "L'adresse secondaire du compte vaut encore l'adresse personnelle, mais aucune adresse " +
+          'de remplacement valide n\'a été fournie. Refus de la vider — ce serait retirer la porte ' +
+          'de secours du compte. Relancer avec une adresse externe, ou faire le changement à la main.';
+        log.warn(`${msg}\n\n${commentFournirRecovery()}`);
+        summary.warnings.push('Adresse secondaire du compte : adresse de remplacement manquante');
       } else if (domainOf(recovery.value) === lower(config.domain)) {
         const msg =
           `L'adresse de remplacement « ${recovery.value} » est dans le domaine « ${config.domain} ». ` +
