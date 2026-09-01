@@ -155,6 +155,15 @@ const ROLE_LABELS = {
   reader: 'lecteur — lit seulement',
 };
 
+/** Nom court d'un rôle, quand la phrase n'a pas la place pour l'explication complète. */
+const SHORT_ROLE_LABELS = {
+  organizer: 'gestionnaire',
+  fileOrganizer: 'gestionnaire de contenu',
+  writer: 'contributeur',
+  commenter: 'commentateur',
+  reader: 'lecteur',
+};
+
 /** Traduction des restrictions, pour expliquer ce qu'on est en train de serrer. */
 const RESTRICTION_LABELS = {
   domainUsersOnly: `l'accès est réservé aux comptes du domaine (aucun compte externe)`,
@@ -324,9 +333,14 @@ function driveUrl(id) {
   return `https://drive.google.com/drive/folders/${id}`;
 }
 
-/** Libellé français d'un rôle Drive. */
+/** Libellé français complet d'un rôle Drive (nom + ce qu'il permet). */
 function roleLabel(role) {
   return ROLE_LABELS[role] ?? role;
+}
+
+/** Nom court d'un rôle Drive, pour les phrases où l'explication complète alourdit. */
+function shortRoleLabel(role) {
+  return SHORT_ROLE_LABELS[role] ?? role;
 }
 
 /** Clé de comparaison d'une permission : « type:valeur ». */
@@ -918,11 +932,12 @@ async function reconcileMembers({ driveApi, driveId, desired, apply, log, warnin
         // serait la pire surprise possible.
         if (currentRank > wantedRank) {
           log.skip(
-            `${want.label} est déjà ${roleLabel(current.role)} — plus que les ${roleLabel(want.role)} ` +
-              "demandés par config.json. La trousse ne retire jamais un accès : rien n'est changé.",
+            `${want.label} a plus d'accès que prévu : ${shortRoleLabel(current.role)} au lieu de ` +
+              `${shortRoleLabel(want.role)}. La trousse ne retire jamais un accès à personne : rien n'est changé. ` +
+              'Pour le réduire, le faire à la main dans Google Drive.',
           );
         } else {
-          log.skip(`${want.label} est déjà ${roleLabel(current.role)} du Drive.`);
+          log.skip(`${want.label} a déjà l'accès voulu au Drive : ${roleLabel(current.role)}.`);
         }
         already.push(`${want.label} — ${roleLabel(current.role)}`);
         continue;
@@ -1121,10 +1136,16 @@ async function ensureFolderTree({
           stats.failed.push(path);
         }
       }
-    } else {
+    } else if (!apply) {
       /* --- Simulation d'un parent qui n'existe pas encore ----------- */
       log.plan(`Créer le dossier « ${path} ».`);
       stats.created.push(path);
+    } else {
+      /* --- Mode réel sans parent : le dossier du dessus a échoué ---- */
+      // On ne crée SURTOUT pas ce dossier sans parent : Google le déposerait
+      // dans le « Mon Drive » personnel. On signale et on passe.
+      log.warn(`Dossier « ${path} » non créé : son dossier parent n'a pas pu l'être. Relancer la commande.`);
+      stats.failed.push(path);
     }
 
     if (spec.children?.length) {
@@ -1557,11 +1578,13 @@ export async function run({ config, apply, state, log }) {
   const memberSummary =
     desired.length === 0
       ? '—'
-      : desired.map((d) => `${d.email} (${d.role === 'organizer' ? 'gestionnaire' : 'gestionnaire de contenu'})`).join(', ');
+      : desired.map((d) => `${d.email} (${shortRoleLabel(d.role)})`).join(', ');
 
   const restrictionSummary = (() => {
     const parts = [];
-    if (restrictions.changed.length > 0) parts.push(`${restrictions.changed.length} appliqué(s)`);
+    if (restrictions.changed.length > 0) {
+      parts.push(apply ? `${restrictions.changed.length} appliqué(s)` : `${restrictions.changed.length} à appliquer`);
+    }
     if (restrictions.already.length > 0) parts.push(`${restrictions.already.length} déjà conforme(s)`);
     if (restrictions.refused.length > 0) parts.push(`${restrictions.refused.length} refusé(s) par Google`);
     return parts.length > 0 ? parts.join(', ') : 'aucun';
