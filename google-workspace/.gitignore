@@ -1,18 +1,21 @@
-# --- SECRETS : ne JAMAIS commiter ---
+# Secrets — ne JAMAIS commiter ces fichiers.
+# Ils donnent un acces administrateur complet au Google Workspace.
 service-account.json
-*-service-account*.json
 oauth-client.json
-client_secret*.json
 .tokens.json
-*.pem
-*.p12
 
-# --- Configuration réelle (garder seulement config.example.json) ---
+# Configuration reelle (contient les adresses et le domaine du client).
+# Le modele a commiter est config.example.json.
 config.json
 
-# --- État local ---
+# Cache local des identifiants deja crees. Ce n'est qu'une optimisation :
+# la trousse redecouvre tout via l'API si le fichier est absent.
 .state.json
 
-# --- Node ---
+# Dependances
 node_modules/
+
+# Bruit divers
+*.log
 npm-debug.log*
+.DS_Store

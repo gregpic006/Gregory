@@ -1,0 +1,29 @@
+{
+  "name": "portail-google-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Trousse d'automatisation de la mise en place du Google Workspace de Portail (gestion immobiliere) : groupe d'equipe, calendriers partages et Drive partage. Mode simulation par defaut.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "portail-gw": "./src/cli.mjs"
+  },
+  "files": [
+    "src/",
+    "config.example.json",
+    "README.md"
+  ],
+  "scripts": {
+    "audit": "node src/cli.mjs audit",
+    "doctor": "node src/cli.mjs doctor",
+    "setup": "node src/cli.mjs setup",
+    "setup:apply": "node src/cli.mjs setup --apply",
+    "verify": "node src/cli.mjs verify"
+  },
+  "dependencies": {
+    "googleapis": "^178.0.0"
+  }
+}

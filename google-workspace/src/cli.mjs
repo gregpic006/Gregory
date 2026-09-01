@@ -79,7 +79,7 @@ class UsageError extends Error {
  * Couleurs (aucune dépendance : séquences ANSI à la main)
  * ------------------------------------------------------------------ */
 
-const ESC = '[';
+const ESC = '\u001b[';
 let COLOR_ON = false;
 
 function computeColor(forcedOff) {

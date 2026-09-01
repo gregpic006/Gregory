@@ -133,14 +133,17 @@ Tous les champs de Schema$Groups sont des `string`.
   `isArchived`, `membersCanPostAsTheGroup`
 
 ---
-## CONFIG RÉELLE DU CLIENT (confirmée)
+## CONFIG DU DÉPLOIEMENT
+> ⚠️ Ce dépôt est PUBLIC. Aucune adresse personnelle ni adresse d'employé ne doit
+> apparaître ici. Les vraies valeurs vivent dans `config.json`, qui est gitignoré et
+> généré localement par `node src/cli.mjs init`.
 - Domaine Workspace : **leaselane.ca**  (PAS portailgestion.ca — celui-là est le domaine
   du site web/produit dans le repo. « listening.ca » venait de la dictée vocale.)
-- Super-admin : greg@leaselane.ca
-- Adresse perso à détacher : greg.picard.2003@gmail.com
+- Super-admin : le compte super-admin du domaine (rempli par `init`)
+- Adresse perso à détacher : <adresse-perso@gmail.com>  # jamais commitée — voir config.json (gitignoré)
 - Groupe d'équipe : equipe@leaselane.ca
 - Mode d'auth choisi : **service-account** (compte de service + délégation)
-- 3 autres adresses de l'équipe : ENCORE INCONNUES
+- Adresses de l'équipe : découvertes automatiquement
   => la commande `init` doit les DÉCOUVRIR via `admin.users.list` plutôt que de les
      demander au client. C'est ça, « le moins de manipulation possible ».
 

@@ -1,0 +1,137 @@
+{
+  "_LISEZ_MOI": "Ce dépôt est PUBLIC. Ce fichier est un MODÈLE : il ne doit contenir aucune vraie adresse. Ne le modifie pas — lance plutôt « node src/cli.mjs init » : la commande lit les usagers réels de ton domaine et génère config.json (gitignoré) avec les bonnes valeurs. Tu n'as aucune adresse à taper à la main.",
+  "domain": "exemple.ca",
+  "adminEmail": "admin@exemple.ca",
+  "personalEmail": null,
+  "team": [
+    {
+      "email": "personne1@exemple.ca",
+      "name": "Prénom Nom",
+      "role": "organizer"
+    },
+    {
+      "email": "personne2@exemple.ca",
+      "name": "Prénom Nom",
+      "role": "member"
+    }
+  ],
+  "group": {
+    "email": "equipe@exemple.ca",
+    "name": "Équipe",
+    "description": "Groupe qui contient l'équipe. Les accès (calendrier, Drive partagé) sont accordés à ce groupe plutôt qu'à chaque personne : quand quelqu'un arrive ou part, on modifie le groupe et tous les accès suivent. Mets ce champ à null pour accorder les accès directement à chaque adresse."
+  },
+  "calendars": [
+    {
+      "key": "equipe",
+      "summary": "Équipe",
+      "description": "Calendrier partagé de l'équipe : rendez-vous, visites, échéances et rappels. Toute l'équipe peut y ajouter et modifier des événements.",
+      "timeZone": "America/Toronto",
+      "role": "writer"
+    }
+  ],
+  "sharedDrive": {
+    "name": "Espace d'équipe",
+    "restrictions": {
+      "domainUsersOnly": true,
+      "driveMembersOnly": true,
+      "copyRequiresWriterPermission": true,
+      "sharingFoldersRequiresOrganizerPermission": true
+    },
+    "folders": [
+      {
+        "name": "00 — Administration",
+        "children": [
+          {
+            "name": "Légal & incorporation"
+          },
+          {
+            "name": "Assurances"
+          },
+          {
+            "name": "Contrats fournisseurs"
+          }
+        ]
+      },
+      {
+        "name": "10 — Finance",
+        "children": [
+          {
+            "name": "États financiers"
+          },
+          {
+            "name": "Taxes TPS-TVQ"
+          },
+          {
+            "name": "Banque & rapprochements"
+          },
+          {
+            "name": "Paie"
+          }
+        ]
+      },
+      {
+        "name": "20 — Produit & Tech",
+        "children": [
+          {
+            "name": "Specs & décisions"
+          },
+          {
+            "name": "Design"
+          },
+          {
+            "name": "Accès & environnements"
+          }
+        ]
+      },
+      {
+        "name": "30 — Ventes & Marketing",
+        "children": [
+          {
+            "name": "Matériel de vente"
+          },
+          {
+            "name": "Prospection"
+          },
+          {
+            "name": "Contenu & blogue"
+          }
+        ]
+      },
+      {
+        "name": "40 — Clients & Mandats",
+        "children": [
+          {
+            "name": "_MODÈLE — Nouveau mandat"
+          }
+        ]
+      },
+      {
+        "name": "50 — Légal & Conformité",
+        "children": [
+          {
+            "name": "Loi 25"
+          },
+          {
+            "name": "Baux types"
+          },
+          {
+            "name": "Politiques internes"
+          }
+        ]
+      },
+      {
+        "name": "90 — Archives"
+      },
+      {
+        "name": "_MODÈLES"
+      }
+    ],
+    "createReadme": true
+  },
+  "auth": {
+    "mode": "service-account",
+    "keyFile": "./service-account.json",
+    "oauthClientFile": "./oauth-client.json",
+    "tokenFile": "./.tokens.json"
+  }
+}
