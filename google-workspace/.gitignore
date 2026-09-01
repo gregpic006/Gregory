@@ -21,3 +21,8 @@ node_modules
 *.log
 npm-debug.log*
 .DS_Store
+
+# Bancs d'essai jetables créés pendant le développement.
+# Ils contiennent des copies de fichiers de src/ : versionner ces doublons
+# les ferait diverger du vrai code. Le test de fumée officiel vit dans scripts/.
+.smoketest/

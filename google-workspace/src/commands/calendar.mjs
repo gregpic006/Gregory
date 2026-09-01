@@ -359,15 +359,27 @@ async function listAcl(calendarApi, calendarId) {
 /**
  * Accorde les accès voulus, sans jamais retirer un accès existant.
  *
+ * @param {object} params
+ * @param {boolean} params.notify demander à Google d'envoyer le courriel
+ *        d'invitation. Faux quand la trousse abonne elle-même les gens (compte
+ *        de service) : le courriel serait du bruit. Vrai en OAuth, où c'est le
+ *        seul moyen pour l'équipe de voir le calendrier apparaître.
  * @returns {Promise<{ granted: string[], adjusted: string[], already: string[], failed: string[] }>}
  */
-async function reconcileAcl({ calendarApi, calendarId, spec, desired, config, apply, log, warnings }) {
+async function reconcileAcl({ calendarApi, calendarId, spec, desired, config, apply, notify, log, warnings }) {
   const result = { granted: [], adjusted: [], already: [], failed: [] };
 
   // En simulation sans calendrier existant, il n'y a rien à lire : on annonce
   // simplement tous les partages à venir.
   if (!calendarId) {
+    const futureOwner = lower(config.adminEmail);
     for (const want of desired) {
+      // Le futur propriétaire n'a pas besoin qu'on lui partage son propre calendrier.
+      if (want.type === 'user' && lower(want.value) === futureOwner) {
+        log.plan(`${want.value} sera propriétaire de « ${spec.summary} » : aucun partage à lui accorder.`);
+        result.already.push(`${want.value} (propriétaire)`);
+        continue;
+      }
       log.plan(`Partager « ${spec.summary} » avec ${want.value} — ${roleLabel(want.role)}.`);
       result.granted.push(`${want.value} (${want.role})`);
     }
@@ -429,10 +441,13 @@ async function reconcileAcl({ calendarApi, calendarId, spec, desired, config, ap
         () =>
           calendarApi.acl.insert({
             calendarId,
-            // sendNotifications: le défaut de l'API est TRUE. Laissé tel quel,
-            // Google enverrait un courriel d'invitation à tout le monde — alors
-            // qu'on va justement abonner chaque personne automatiquement.
-            sendNotifications: false,
+            // sendNotifications : le défaut de l'API est TRUE.
+            //   - compte de service : FAUX, parce qu'on abonne chaque personne
+            //     juste après. Le courriel serait du bruit, le calendrier est
+            //     déjà dans leur Agenda avant même qu'ils ouvrent le message.
+            //   - OAuth : VRAI, parce que ce courriel est alors le seul moyen
+            //     pour l'équipe de voir le calendrier apparaître.
+            sendNotifications: notify === true,
             requestBody: { role: want.role, scope: { type: want.type, value: want.value } },
             fields: 'id,role,scope',
           }),
@@ -747,6 +762,7 @@ export async function run({ config, apply, state, log }) {
     }
 
     if (ensured.action === 'created') created.push(`Calendrier « ${spec.summary} » (${ensured.id})`);
+    else if (ensured.action === 'planned') created.push(`Calendrier « ${spec.summary} »`);
 
     /* --- 2. Description et fuseau horaire -------------------------- */
     if (ensured.action === 'reused') {
@@ -781,6 +797,8 @@ export async function run({ config, apply, state, log }) {
           desired,
           config,
           apply,
+          // En OAuth, le courriel d'invitation est le seul chemin possible.
+          notify: !canImpersonate,
           log,
           warnings,
         });
