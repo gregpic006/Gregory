@@ -1,0 +1,18 @@
+# --- SECRETS : ne JAMAIS commiter ---
+service-account.json
+*-service-account*.json
+oauth-client.json
+client_secret*.json
+.tokens.json
+*.pem
+*.p12
+
+# --- Configuration réelle (garder seulement config.example.json) ---
+config.json
+
+# --- État local ---
+.state.json
+
+# --- Node ---
+node_modules/
+npm-debug.log*
