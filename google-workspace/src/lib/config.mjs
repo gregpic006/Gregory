@@ -64,7 +64,12 @@ export const DEFAULTS = Object.freeze({
     createReadme: true,
   },
   auth: {
-    mode: 'service-account',
+    // « oauth » est le défaut, et c'est le MÊME défaut que celui d'auth.mjs
+    // (DEFAULT_AUTH_MODE). Les deux modules doivent rester d'accord : sinon un
+    // config.json sans « auth.mode » partirait en mode compte de service et
+    // réclamerait une clé privée que Google refuse désormais de créer sur les
+    // organisations récentes.
+    mode: 'oauth',
     keyFile: './service-account.json',
     oauthClientFile: './oauth-client.json',
     tokenFile: './.tokens.json',
@@ -81,6 +86,13 @@ const KNOWN_KEYS = Object.freeze({
   root: ['domain', 'adminEmail', 'personalEmail', 'timeZone', 'team', 'group', 'calendars', 'sharedDrive', 'auth'],
   sharedDrive: ['name', 'restrictions', 'folders', 'createReadme'],
   auth: ['mode', 'keyFile', 'oauthClientFile', 'tokenFile'],
+  // Les sous-objets comptent AUTANT que la racine : « timezone » au lieu de
+  // « timeZone » dans un calendrier passait autrefois inaperçu, et le
+  // calendrier était créé dans le mauvais fuseau sans que rien ne le dise.
+  team: ['email', 'name', 'role'],
+  group: ['email', 'name', 'description'],
+  calendar: ['key', 'summary', 'description', 'timeZone', 'role'],
+  folder: ['name', 'children'],
 });
 
 /** Distance de Levenshtein, pour suggérer « tu voulais dire … ». */
@@ -419,6 +431,7 @@ export function validateConfig(input) {
         fail(field, `Chaque membre doit être un objet { "email": ..., "name": ..., "role": ... }, pas ${Array.isArray(member) ? 'un tableau' : typeof member}.`);
         return;
       }
+      warnUnknownKeys(member, KNOWN_KEYS.team, field, warnings);
 
       let email = null;
       if (!isNonEmptyString(member.email)) {
@@ -482,6 +495,7 @@ export function validateConfig(input) {
     if (!isPlainObject(input.group)) {
       fail('group', `Doit être un objet { "email": ..., "name": ..., "description": ... } ou null.\nMettre null pour accorder les permissions directement à chaque adresse de l'équipe.`);
     } else {
+      warnUnknownKeys(input.group, KNOWN_KEYS.group, 'group', warnings);
       let gEmail = null;
       if (!isNonEmptyString(input.group.email)) {
         fail('group.email', `Champ obligatoire quand « group » n'est pas null.\nExemple : "email": "equipe@${domain ?? 'mondomaine.ca'}"`);
@@ -536,6 +550,7 @@ export function validateConfig(input) {
           fail(field, 'Chaque calendrier doit être un objet { "key": ..., "summary": ..., "timeZone": ..., "role": ... }.');
           return;
         }
+        warnUnknownKeys(cal, KNOWN_KEYS.calendar, field, warnings);
 
         let key = null;
         if (!isNonEmptyString(cal.key)) {
@@ -736,6 +751,7 @@ function validateFolders(nodes, field, depth, fail, warnings) {
       raw = { name: node, children: [] };
     } else if (isPlainObject(node)) {
       raw = node;
+      warnUnknownKeys(node, KNOWN_KEYS.folder, nodeField, warnings);
     } else {
       fail(nodeField, `Chaque dossier doit être un objet { "name": "...", "children": [...] } (ou simplement une chaîne de caractères), pas ${Array.isArray(node) ? 'un tableau' : typeof node}.`);
       return;

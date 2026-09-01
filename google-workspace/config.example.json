@@ -1,13 +1,20 @@
 {
-  "_LISEZ_MOI": "Ce dépôt est PUBLIC. Ce fichier est un MODÈLE : il ne doit contenir aucune vraie adresse. Ne le modifie pas — lance plutôt « node src/cli.mjs init » : la commande lit les usagers réels de ton domaine et génère config.json (gitignoré) avec les bonnes valeurs. Tu n'as aucune adresse à taper à la main.",
+  "_LISEZ_MOI": "Ce dépôt est PUBLIC. Ce fichier est un MODÈLE : il ne doit contenir aucune vraie adresse. Ne le modifie pas — lance plutôt « node src/cli.mjs init », qui lit les usagers réels de ton domaine et te MONTRE le config.json qu'elle propose, sans rien écrire. Si la proposition te convient, relance « node src/cli.mjs init --apply » pour écrire le fichier config.json (qui, lui, n'est jamais versionné). Tu n'as aucune adresse à taper à la main.",
   "domain": "exemple.ca",
   "adminEmail": "admin@exemple.ca",
+  "_personalEmail": "Adresse personnelle (souvent une @gmail.com) qui a servi à créer le compte Google Workspace et qui traîne encore un peu partout : propriétaire de calendriers, membre de groupes, adresse de récupération. La commande « detach » la retire de partout où l'API le permet. Laisser null s'il n'y en a pas : « detach » n'aura alors rien à faire.",
   "personalEmail": null,
+  "_team": "Les personnes qui recevront les accès. « role » vaut « organizer » (peut gérer les accès et l'arborescence du Drive partagé) ou « member » (peut déposer et modifier des fichiers). Un seul organizer suffit : c'est le principe du moindre privilège. L'administrateur doit figurer dans cette liste s'il utilise le Workspace au quotidien.",
   "team": [
+    {
+      "email": "admin@exemple.ca",
+      "name": "Prénom Nom",
+      "role": "organizer"
+    },
     {
       "email": "personne1@exemple.ca",
       "name": "Prénom Nom",
-      "role": "organizer"
+      "role": "member"
     },
     {
       "email": "personne2@exemple.ca",
@@ -20,6 +27,7 @@
     "name": "Équipe",
     "description": "Groupe qui contient l'équipe. Les accès (calendrier, Drive partagé) sont accordés à ce groupe plutôt qu'à chaque personne : quand quelqu'un arrive ou part, on modifie le groupe et tous les accès suivent. Mets ce champ à null pour accorder les accès directement à chaque adresse."
   },
+  "_calendars": "« role » est l'accès accordé à l'équipe sur chaque calendrier : « reader » (voir seulement), « writer » (ajouter et modifier des événements) ou « owner » (peut en plus supprimer le calendrier et changer ses accès). « timeZone » doit être un identifiant reconnu : pour le Québec, c'est « America/Toronto ».",
   "calendars": [
     {
       "key": "equipe",
@@ -129,9 +137,13 @@
     "createReadme": true
   },
   "auth": {
-    "mode": "service-account",
-    "keyFile": "./service-account.json",
+    "_mode": "« oauth » est le mode par défaut : tu te connectes UNE fois dans ton navigateur et la trousse retient l'autorisation. Aucune clé secrète à télécharger, rien à faire approuver par un deuxième administrateur. Ce qu'il faut savoir : en mode « oauth », la trousse agit EN TON NOM et seulement au tien. Les autres membres de l'équipe recevront un courriel de partage pour le calendrier et devront cliquer une fois pour l'ajouter — c'est une seule fois, et la trousse te dit clairement à qui c'est arrivé. L'autre mode, « service-account », ajoute le calendrier directement dans l'agenda de chaque personne, mais exige une clé de compte de service : Google en bloque la création par défaut sur les organisations récentes, et désactiver cette protection affaiblit ton domaine.",
+    "mode": "oauth",
+    "_oauthClientFile": "Le fichier JSON téléchargé depuis console.cloud.google.com > API et services > Identifiants > « ID client OAuth », type « Application de bureau ». Pas besoin de le renommer : s'il s'appelle encore « client_secret_…json » et qu'il est déposé à côté de ce fichier, la trousse le trouve toute seule.",
     "oauthClientFile": "./oauth-client.json",
-    "tokenFile": "./.tokens.json"
+    "_tokenFile": "Où la trousse garde ton autorisation pour ne plus rien te redemander. Fichier privé (lisible par toi seul, jamais versionné). Supprime-le pour te reconnecter avec un autre compte.",
+    "tokenFile": "./.tokens.json",
+    "_keyFile": "Sert uniquement si mode vaut « service-account ». Ce fichier est un secret : il ne doit jamais être versionné ni envoyé par courriel.",
+    "keyFile": "./service-account.json"
   }
 }

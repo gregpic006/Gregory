@@ -18,11 +18,18 @@
  * l'identifiant de Drive partagé est vide ou invalide.
  *
  * Robustesse : chaque section est isolée. Si une API n'est pas activée (cas
- * classique : Groups Settings), ou si le compte impersonné n'a pas le privilège
+ * classique : Groups Settings), ou si le compte utilisé par la trousse n'a pas le privilège
  * requis, on affiche un avertissement en français et on continue avec le reste.
  */
 
-import { getClients, withRetry, isNotFound, isForbidden, explainGoogleError } from '../lib/google.mjs';
+import {
+  getClients,
+  withRetry,
+  isNotFound,
+  isForbidden,
+  errorInfo,
+  explainGoogleError,
+} from '../lib/google.mjs';
 import { ALL_SCOPES } from '../lib/auth.mjs';
 
 export const meta = {
@@ -45,6 +52,14 @@ const GROUPS_PAGE_SIZE = 200; // admin.groups.list    : max 200
 const MEMBERS_PAGE_SIZE = 200; // admin.members.list  : max 200
 const CALENDAR_PAGE_SIZE = 250; // calendarList/acl   : max 250
 const DRIVE_PAGE_SIZE = 100; // drives/permissions    : max 100 (défaut 10 !)
+
+/**
+ * Garde-fou anti-boucle infinie. Si Google renvoyait indéfiniment le même
+ * jeton de page, l'audit tournerait sans fin sans jamais rien afficher. Au-delà
+ * de ce plafond on préfère interrompre la lecture avec un message clair : la
+ * zone sera alors déclarée « non balayée » plutôt que silencieusement tronquée.
+ */
+const MAX_PAGES = 500;
 
 /** Masques `fields` explicites : on ne rapatrie que ce qu'on affiche. */
 const USER_FIELDS =
@@ -200,9 +215,22 @@ const sameEmail = (a, b) => lower(a) !== '' && lower(a) === lower(b);
 const ouiNon = (v) => (v ? 'oui' : 'non');
 const tiret = (v) => (v === null || v === undefined || v === '' ? '—' : String(v));
 
-/** Code HTTP d'une erreur googleapis, quelle que soit sa forme. */
+/**
+ * Code HTTP d'une erreur googleapis, quelle que soit sa forme.
+ *
+ * On passe par le normaliseur de la trousse : selon la couche qui lève,
+ * `error.code` n'est PAS le statut HTTP mais un code réseau en toutes lettres
+ * (« ECONNRESET », « ETIMEDOUT »). Le lire en premier ferait manquer les 400.
+ */
 function errCode(error) {
-  return error?.code ?? error?.status ?? error?.response?.status ?? null;
+  try {
+    const { status } = errorInfo(error);
+    if (typeof status === 'number') return status;
+  } catch {
+    /* on retombe sur une lecture directe */
+  }
+  const brut = error?.status ?? error?.response?.status ?? error?.code;
+  return typeof brut === 'number' ? brut : null;
 }
 
 /** Traduit une erreur Google en français, sans jamais lever à son tour. */
@@ -243,12 +271,21 @@ function formatDate(iso, timeZone) {
 }
 
 /**
- * Appel de lecture avec reprise sur erreur passagère (429, 5xx).
+ * Appel de LECTURE avec reprise sur erreur passagère (429, 5xx, coupure réseau).
+ *
+ * `propagation: false` est essentiel ici. Par défaut, withRetry réessaie aussi
+ * les 404 et les 403 « mous », parce qu'une ressource fraîchement CRÉÉE met
+ * quelques secondes à apparaître partout chez Google. L'audit ne crée rien :
+ * un 404 veut dire « ça n'existe pas » et un 403 « ce compte n'a pas le
+ * privilège » — deux réponses définitives. Sans ce réglage, chaque groupe ou
+ * chaque Drive illisible ferait dormir l'audit six secondes pour rien, ce qui
+ * se compte en minutes sur un domaine qui a beaucoup de groupes.
+ *
  * @param {string} label
  * @param {() => Promise<any>} fn
  */
 function lire(label, fn) {
-  if (typeof withRetry === 'function') return withRetry(fn, { tries: 3, label });
+  if (typeof withRetry === 'function') return withRetry(fn, { tries: 3, label, propagation: false });
   return fn();
 }
 
@@ -267,6 +304,22 @@ async function collecter(log, warnings, label, fn) {
     warnings.push(`${label} : ${texte}`);
     return { ok: false, value: null, error };
   }
+}
+
+/**
+ * Garde-fou de pagination : refuse de dépasser MAX_PAGES.
+ * @param {number} pages nombre de pages DÉJÀ lues
+ * @param {string} label nom de l'appel, pour le message
+ */
+function encorePaginer(pageToken, pages, label) {
+  if (!pageToken) return false;
+  if (pages >= MAX_PAGES) {
+    throw new Error(
+      `${label} : Google a renvoyé plus de ${MAX_PAGES} pages de résultats. La lecture est interrompue par ` +
+        "sécurité (jeton de page qui ne progresse plus). Cette zone est signalée comme non balayée.",
+    );
+  }
+  return true;
 }
 
 /**
@@ -294,6 +347,7 @@ async function listerUsagers(admin) {
   let pageToken;
   let fields = USER_FIELDS;
   let encore = true;
+  let pages = 0;
 
   // Boucle « while » et non « do...while » : en cas de repli sur le masque
   // `fields`, on doit REJOUER la même page, pas passer à la suivante.
@@ -322,7 +376,8 @@ async function listerUsagers(admin) {
 
     users.push(...(data.users ?? [])); // `users` est ABSENT (pas []) si 0 résultat
     pageToken = data.nextPageToken ?? undefined;
-    encore = Boolean(pageToken);
+    pages += 1;
+    encore = encorePaginer(pageToken, pages, 'admin.users.list');
   }
 
   return users;
@@ -332,6 +387,7 @@ async function listerUsagers(admin) {
 async function listerGroupes(admin) {
   const groups = [];
   let pageToken;
+  let pages = 0;
   do {
     const { data } = await lire('admin.groups.list', () =>
       admin.groups.list({
@@ -344,7 +400,8 @@ async function listerGroupes(admin) {
     );
     groups.push(...(data.groups ?? []));
     pageToken = data.nextPageToken ?? undefined;
-  } while (pageToken);
+    pages += 1;
+  } while (encorePaginer(pageToken, pages, 'admin.groups.list'));
   return groups;
 }
 
@@ -352,6 +409,7 @@ async function listerGroupes(admin) {
 async function listerMembres(admin, groupKey) {
   const members = [];
   let pageToken;
+  let pages = 0;
   do {
     const { data } = await lire(`admin.members.list(${groupKey})`, () =>
       admin.members.list({
@@ -364,14 +422,16 @@ async function listerMembres(admin, groupKey) {
     );
     members.push(...(data.members ?? []));
     pageToken = data.nextPageToken ?? undefined;
-  } while (pageToken);
+    pages += 1;
+  } while (encorePaginer(pageToken, pages, `admin.members.list(${groupKey})`));
   return members;
 }
 
-/** Toute la liste de calendriers du compte impersonné. Pagination gérée. */
+/** Toute la liste de calendriers du compte utilisé par la trousse. Pagination gérée. */
 async function listerCalendriers(calendar) {
   const items = [];
   let pageToken;
+  let pages = 0;
   do {
     const { data } = await lire('calendar.calendarList.list', () =>
       calendar.calendarList.list({
@@ -384,7 +444,8 @@ async function listerCalendriers(calendar) {
     );
     items.push(...(data.items ?? []));
     pageToken = data.nextPageToken ?? undefined;
-  } while (pageToken);
+    pages += 1;
+  } while (encorePaginer(pageToken, pages, 'calendar.calendarList.list'));
   return items;
 }
 
@@ -392,25 +453,28 @@ async function listerCalendriers(calendar) {
 async function listerAcl(calendar, calendarId) {
   const items = [];
   let pageToken;
+  let pages = 0;
   do {
     const { data } = await lire(`calendar.acl.list(${calendarId})`, () =>
       calendar.acl.list({ calendarId, maxResults: CALENDAR_PAGE_SIZE, pageToken, fields: ACL_FIELDS }),
     );
     items.push(...(data.items ?? []));
     pageToken = data.nextPageToken ?? undefined;
-  } while (pageToken);
+    pages += 1;
+  } while (encorePaginer(pageToken, pages, `calendar.acl.list(${calendarId})`));
   return items;
 }
 
 /**
  * Liste les Drive PARTAGÉS. Jamais de fichiers, jamais de « Mon Drive ».
  * Tente d'abord en accès administrateur de domaine (vue complète), et retombe
- * sur la vue « mes Drive » si le compte impersonné n'a pas ce privilège.
+ * sur la vue « mes Drive » si le compte utilisé par la trousse n'a pas ce privilège.
  */
 async function listerDrivesPartages(drive) {
   const lireListe = async (useDomainAdminAccess) => {
     const drives = [];
     let pageToken;
+    let pages = 0;
     do {
       const { data } = await lire('drive.drives.list', () =>
         drive.drives.list({
@@ -422,7 +486,8 @@ async function listerDrivesPartages(drive) {
       );
       drives.push(...(data.drives ?? []));
       pageToken = data.nextPageToken ?? undefined;
-    } while (pageToken);
+      pages += 1;
+    } while (encorePaginer(pageToken, pages, 'drive.drives.list'));
     return drives;
   };
 
@@ -430,7 +495,7 @@ async function listerDrivesPartages(drive) {
     return { drives: await lireListe(true), adminAccess: true, degrade: null };
   } catch (error) {
     if (!isForbidden(error)) throw error;
-    // Le compte impersonné n'est pas administrateur Drive : vue partielle.
+    // Le compte utilisé n'est pas administrateur Drive : vue partielle.
     return { drives: await lireListe(false), adminAccess: false, degrade: expliquer(error) };
   }
 }
@@ -440,6 +505,7 @@ async function listerMembresDrive(drive, driveId, useDomainAdminAccess) {
   const fileId = assertSharedDriveId(driveId); // garde de sécurité
   const permissions = [];
   let pageToken;
+  let pages = 0;
   do {
     const { data } = await lire(`drive.permissions.list(${fileId})`, () =>
       drive.permissions.list({
@@ -453,7 +519,8 @@ async function listerMembresDrive(drive, driveId, useDomainAdminAccess) {
     );
     permissions.push(...(data.permissions ?? []));
     pageToken = data.nextPageToken ?? undefined;
-  } while (pageToken);
+    pages += 1;
+  } while (encorePaginer(pageToken, pages, `drive.permissions.list(${fileId})`));
   return permissions;
 }
 
@@ -496,6 +563,16 @@ export async function run({ config, apply, state, log }) {
   const tz = config?.timeZone || 'America/Toronto';
   const perso = lower(config?.personalEmail);
   const domaine = lower(config?.domain);
+
+  // Normalisation défensive : config.json est écrit à la main, chaque champ
+  // peut être absent, à null, ou du mauvais type. On ne veut pas qu'un audit
+  // — la commande censée être la plus sûre de la trousse — plante là-dessus.
+  /** @type {Array<{email: string, name?: string, role?: string}>} */
+  const equipe = (Array.isArray(config?.team) ? config.team : []).filter((m) => lower(m?.email) !== '');
+  const calendriersVoulus = (Array.isArray(config?.calendars) ? config.calendars : []).filter((c) => c && c.key);
+  const groupeVoulu = lower(config?.group?.email) !== '' ? String(config.group.email).trim() : null;
+  const nomDriveVoulu = typeof config?.sharedDrive?.name === 'string' ? config.sharedDrive.name.trim() : '';
+  const driveConfigure = nomDriveVoulu !== '';
 
   if (apply) {
     log.info("L'option --apply n'a aucun effet ici : « audit » est en lecture seule et ne modifie jamais rien.");
@@ -552,12 +629,40 @@ export async function run({ config, apply, state, log }) {
     }
   }
 
+  /*
+   * Appartenance réelle au groupe d'équipe.
+   *
+   * Une règle d'accès accordée à « group:equipe@… » ne donne l'accès qu'aux
+   * MEMBRES de ce groupe. Conclure « tout le monde a accès » du seul fait que
+   * la règle existe est faux : une personne absente du groupe n'a rien. On
+   * croise donc les deux informations. Si les membres n'ont pas pu être lus,
+   * on reste prudent et on le dit, plutôt que de rassurer à tort.
+   */
+  const infoGroupeEquipe = groupeVoulu ? membresParGroupe.get(lower(groupeVoulu)) ?? null : null;
+  const membresGroupeLisibles = Boolean(infoGroupeEquipe && !infoGroupeEquipe.erreur);
+  const membresGroupeEquipe = new Set((infoGroupeEquipe?.membres ?? []).map((m) => lower(m.email)));
+
+  /**
+   * Une personne a-t-elle accès à une ressource ?
+   * @param {string} email
+   * @param {Set<string>} portees clés « type:valeur » des règles d'accès existantes
+   * @param {boolean} viaGroupe une règle vise-t-elle le groupe d'équipe ?
+   * @param {boolean} viaDomaine une règle vise-t-elle tout le domaine ?
+   */
+  function aAcces(email, portees, viaGroupe, viaDomaine) {
+    if (portees.has(`user:${lower(email)}`)) return true;
+    if (viaDomaine && lower(email).endsWith(`@${domaine}`)) return true;
+    if (!viaGroupe) return false;
+    // Règle accordée au groupe : encore faut-il que la personne y soit.
+    return membresGroupeLisibles ? membresGroupeEquipe.has(lower(email)) : true;
+  }
+
   // Réglages du groupe d'équipe : API distincte, souvent pas activée.
   let reglagesGroupe = null;
-  if (config.group?.email) {
-    const res = await collecter(log, warnings, `Réglages du groupe ${config.group.email}`, async () => {
+  if (groupeVoulu) {
+    const res = await collecter(log, warnings, `Réglages du groupe ${groupeVoulu}`, async () => {
       const { data } = await groupsSettings.groups.get({
-        groupUniqueId: config.group.email, // l'ADRESSE du groupe, pas son id numérique
+        groupUniqueId: groupeVoulu, // l'ADRESSE du groupe, pas son id numérique
         alt: 'json',
       });
       return data;
@@ -579,7 +684,7 @@ export async function run({ config, apply, state, log }) {
 
   /** @type {Array<any>} */
   const calendriersAnalyses = [];
-  for (const spec of config.calendars ?? []) {
+  for (const spec of calendriersVoulus) {
     const analyse = {
       key: spec.key,
       summary: spec.summary,
@@ -593,6 +698,10 @@ export async function run({ config, apply, state, log }) {
       acl: [],
       aclErreur: null,
       ambigus: [],
+      // Faux dès qu'une lecture a échoué : on n'a alors PAS le droit de
+      // conclure « ce calendrier n'existe pas » (cf. section 5).
+      lectureFiable: resCalendriers.ok,
+      cacheErreur: null,
     };
 
     // 1) le cache local, s'il pointe encore sur un calendrier vivant
@@ -607,6 +716,19 @@ export async function run({ config, apply, state, log }) {
         analyse.id = data.id;
         analyse.timeZone = data.timeZone ?? null;
         analyse.source = 'cache local';
+        // Le cache est un simple fichier local : il peut avoir été copié d'un
+        // autre poste ou d'un autre domaine. Si le nom ne correspond pas, on le
+        // signale plutôt que d'auditer le mauvais calendrier en silence.
+        if (lower(data.summary) !== lower(spec.summary)) {
+          log.warn(
+            `Le cache local associe la clé « ${spec.key} » à un calendrier nommé « ${data.summary} », ` +
+              `alors que config.json demande « ${spec.summary} ». Vérifie le fichier de cache local ` +
+              "(.state.json) : il pointe peut-être sur le calendrier d'un autre domaine.",
+          );
+          warnings.push(
+            `Cache local : la clé « ${spec.key} » pointe sur « ${data.summary} », pas sur « ${spec.summary} ».`,
+          );
+        }
       } catch (error) {
         if (isNotFound(error)) {
           log.warn(
@@ -614,7 +736,10 @@ export async function run({ config, apply, state, log }) {
               "On le retrouve par son nom, sinon il sera recréé par « setup ».",
           );
         } else {
-          log.warn(`Calendrier « ${spec.key} » — vérification du cache impossible. ${expliquer(error)}`);
+          // 403, panne réseau… : on ne SAIT pas si le calendrier existe.
+          analyse.cacheErreur = expliquer(error);
+          analyse.lectureFiable = false;
+          log.warn(`Calendrier « ${spec.key} » — vérification du cache impossible. ${analyse.cacheErreur}`);
         }
       }
     }
@@ -661,13 +786,59 @@ export async function run({ config, apply, state, log }) {
     calendriersAnalyses.push(analyse);
   }
 
+  /*
+   * BALAYAGE ÉLARGI DES CALENDRIERS.
+   *
+   * Les analyses ci-dessus ne couvrent que les calendriers décrits dans
+   * config.json. Or l'adresse personnelle a très bien pu rester attachée à un
+   * VIEUX calendrier créé avant la trousse. Sans cette passe, la section 3
+   * pourrait afficher un rassurant « l'adresse n'apparaît nulle part » alors
+   * qu'elle est propriétaire d'un autre agenda du compte.
+   *
+   * On ne peut lire les règles d'accès (`acl.list`) que sur les calendriers où
+   * le compte est « owner » ou « writer » — un simple lecteur reçoit un 403.
+   * Les autres sont donc déclarés « non balayés », honnêtement, plutôt que
+   * passés sous silence.
+   */
+  const idsDejaAnalyses = new Set(calendriersAnalyses.map((c) => c.id).filter(Boolean));
+  /** @type {Array<{ id: string, summary: string, acl: any[] }>} */
+  const autresCalendriers = [];
+  /** @type {string[]} */
+  const calendriersNonBalayes = [];
+
+  const candidats = entreesCalendrier.filter((e) => e.id && !e.primary && !idsDejaAnalyses.has(e.id));
+  const LIMITE_CALENDRIERS = 100;
+  for (const [index, entree] of candidats.entries()) {
+    const nom = entree.summaryOverride || entree.summary || entree.id;
+    if (index >= LIMITE_CALENDRIERS) {
+      calendriersNonBalayes.push(
+        `${candidats.length - LIMITE_CALENDRIERS} autre(s) calendrier(s) (au-delà de la limite de ` +
+          `${LIMITE_CALENDRIERS} par exécution)`,
+      );
+      break;
+    }
+    if (entree.accessRole !== 'owner' && entree.accessRole !== 'writer') {
+      // Accès insuffisant pour lire les partages : on le dit.
+      calendriersNonBalayes.push(`« ${nom} » (accès « ${entree.accessRole ?? 'inconnu'} », partages illisibles)`);
+      continue;
+    }
+    try {
+      autresCalendriers.push({ id: entree.id, summary: nom, acl: await listerAcl(calendar, entree.id) });
+    } catch (error) {
+      const texte = expliquer(error);
+      calendriersNonBalayes.push(`« ${nom} » (${texte})`);
+      log.warn(`Calendrier « ${nom} » — règles d'accès illisibles. ${texte}`);
+    }
+  }
+
   log.info('Lecture des Drive partagés…');
   const resDrives = await collecter(log, warnings, 'Drive partagés', () => listerDrivesPartages(drive));
   const drivesPartages = resDrives.ok ? resDrives.value.drives : [];
   const driveAdminAccess = resDrives.ok ? resDrives.value.adminAccess : false;
   if (resDrives.ok && !driveAdminAccess) {
     log.warn(
-      "Le compte impersonné n'a pas le privilège « administrateur Drive » : la liste ci-dessous ne montre que " +
+      `Le compte ${config.adminEmail} n'a pas le privilège « administrateur Drive » : la liste ci-dessous ne ` +
+        "montre que " +
         "les Drive partagés dont il est membre. Un Drive existant ailleurs dans l'organisation resterait invisible.",
     );
     warnings.push(
@@ -677,12 +848,15 @@ export async function run({ config, apply, state, log }) {
   }
 
   // Le Drive de la config est-il dans la liste ? Sinon, on tente le cache.
-  const nomDriveVoulu = config.sharedDrive?.name ?? '';
   let driveCible = null;
   if (state?.driveId) driveCible = drivesPartages.find((d) => d.id === state.driveId) ?? null;
-  if (!driveCible) driveCible = drivesPartages.find((d) => lower(d.name) === lower(nomDriveVoulu)) ?? null;
+  if (!driveCible && driveConfigure) {
+    driveCible = drivesPartages.find((d) => lower(d.name) === lower(nomDriveVoulu)) ?? null;
+  }
 
-  const doublonsDrive = drivesPartages.filter((d) => lower(d.name) === lower(nomDriveVoulu));
+  const doublonsDrive = driveConfigure
+    ? drivesPartages.filter((d) => lower(d.name) === lower(nomDriveVoulu))
+    : [];
   if (doublonsDrive.length > 1) {
     warnings.push(
       `${doublonsDrive.length} Drive partagés portent le nom « ${nomDriveVoulu} ». ` +
@@ -776,7 +950,10 @@ export async function run({ config, apply, state, log }) {
   if (!resUsagers.ok) {
     log.warn("L'annuaire n'a pas pu être lu : les sections suivantes seront incomplètes.");
   } else if (usagers.length === 0) {
-    log.warn("Aucun usager trouvé dans l'annuaire. C'est très inhabituel : vérifie le compte impersonné.");
+    log.warn(
+      "Aucun usager trouvé dans l'annuaire. C'est très inhabituel : vérifie que « adminEmail » de config.json " +
+        `(${config.adminEmail}) est bien un compte de ce domaine, et qu'il est super-administrateur.`,
+    );
   } else {
     log.info(`${usagers.length} usager(s) dans l'annuaire.`);
     log.table(
@@ -785,7 +962,7 @@ export async function run({ config, apply, state, log }) {
         Nom: couper(u.name?.fullName ?? '—', 28),
         'Super-admin': ouiNon(u.isAdmin),
         Suspendu: ouiNon(u.suspended),
-        '2FA': ouiNon(u.isEnrolledIn2Sv),
+        'Deux étapes': ouiNon(u.isEnrolledIn2Sv),
         Récupération: tiret(u.recoveryEmail),
         'Dernier accès': formatDate(u.lastLoginTime, tz),
       })),
@@ -819,12 +996,21 @@ export async function run({ config, apply, state, log }) {
         `Il n'y a que ${superAdmins.length} super-administrateur actif. Un mot de passe perdu ou un téléphone ` +
           'volé et personne ne peut plus rien débloquer.',
       );
+      // Ne jamais proposer une adresse déjà utilisée : le conseil paraîtrait
+      // absurde à quelqu'un qui lit « créer admin@… » alors que c'est le compte
+      // avec lequel il vient de lancer l'audit.
+      const exemple = ['secours', 'admin2', 'urgence']
+        .map((n) => `${n}@${config.domain}`)
+        .find((adresse) => !parCourriel.has(lower(adresse)));
       aFaire.push({
         p: 1,
         t:
-          "Créer un DEUXIÈME super-administrateur (ex. admin@" + config.domain + "), avec son propre mot de " +
-          'passe, sa 2FA et ses codes de secours imprimés. Console : Annuaire > Utilisateurs > Ajouter, puis ' +
-          "Rôles et privilèges d'administrateur > Super Admin. Compter jusqu'à 24 h de propagation.",
+          'Créer un DEUXIÈME super-administrateur' +
+          (exemple ? ` (par exemple ${exemple})` : '') +
+          ", avec son propre mot de passe, sa validation en deux étapes et ses codes de secours imprimés et " +
+          'rangés hors ligne. Console : Annuaire > Utilisateurs > Ajouter un utilisateur, puis, sur la fiche ' +
+          "créée, Rôles et privilèges d'administrateur > Super Admin. Compter jusqu'à 24 h de propagation. " +
+          "Ce compte ne sert QU'AUX URGENCES : ne pas s'en servir au quotidien.",
       });
     }
     if (usagerAdmin && !usagerAdmin.isEnrolledIn2Sv) {
@@ -856,7 +1042,7 @@ export async function run({ config, apply, state, log }) {
       warnings.push(`${config.adminEmail} introuvable dans l'annuaire.`);
     }
 
-    const manquants = (config.team ?? []).filter((m) => !parCourriel.has(lower(m.email)));
+    const manquants = equipe.filter((m) => !parCourriel.has(lower(m.email)));
     if (manquants.length > 0) {
       log.warn(
         `${manquants.length} personne(s) de config.json n'existe(nt) pas encore dans l'annuaire : ` +
@@ -893,6 +1079,21 @@ export async function run({ config, apply, state, log }) {
     // a) adresse de récupération d'un usager
     for (const u of usagers) {
       if (sameEmail(u.recoveryEmail, perso)) {
+        // RISQUE DE VERROUILLAGE. Si cette adresse est le SEUL moyen de
+        // reprendre la main sur un compte d'administrateur, la retirer sans
+        // remplaçant, c'est se condamner au formulaire de récupération de
+        // Google (défi DNS de 48 h) ou au support. À dire en priorité 1.
+        if (u.isAdmin && !u.recoveryPhone) {
+          aFaire.push({
+            p: 1,
+            t:
+              `AVANT de lancer « detach » : ${u.primaryEmail} est administrateur et ${config.personalEmail} est ` +
+              "son SEUL moyen de récupération (aucun téléphone de secours enregistré). Ajouter d'abord une " +
+              "autre adresse de récupération externe ET un téléphone, vérifier qu'ils fonctionnent, et " +
+              "seulement ensuite détacher l'adresse personnelle. Sinon, un mot de passe oublié se règle par " +
+              'le formulaire de récupération de Google (preuve DNS à publier sous 48 h) ou par le support.',
+          });
+        }
         occurrences.push({
           lieu: `Récupération de ${u.primaryEmail}`,
           detail: `recoveryEmail = ${u.recoveryEmail}`,
@@ -965,7 +1166,7 @@ export async function run({ config, apply, state, log }) {
       }
     }
 
-    // f) règle ACL sur un calendrier de la config
+    // f) règle d'accès sur un calendrier DE LA CONFIG
     for (const c of calendriersAnalyses) {
       for (const regle of c.acl) {
         if (regle?.scope?.type === 'user' && sameEmail(regle.scope.value, perso)) {
@@ -974,6 +1175,28 @@ export async function run({ config, apply, state, log }) {
             detail: `règle d'accès ${regle.id ?? `${regle.scope.type}:${regle.scope.value}`} — rôle ${regle.role}`,
             auto: true,
             quoiFaire: "AUTOMATIQUE — « detach » supprime la règle (acl.delete).",
+          });
+        }
+      }
+    }
+
+    // f bis) règle d'accès sur un calendrier QUI N'EST PAS DANS config.json.
+    // « detach » ne connaît que les calendriers de la config : y toucher
+    // reviendrait à modifier un agenda dont la trousse n'a pas la charge.
+    for (const c of autresCalendriers) {
+      for (const regle of c.acl) {
+        if (regle?.scope?.type === 'user' && sameEmail(regle.scope.value, perso)) {
+          occurrences.push({
+            lieu: `Calendrier « ${c.summary} » (hors config.json)`,
+            detail: `règle d'accès ${regle.id ?? `${regle.scope.type}:${regle.scope.value}`} — rôle ${regle.role}`,
+            auto: false,
+            quoiFaire:
+              "MANUEL — ce calendrier n'est pas décrit dans config.json ; la trousse n'y touche jamais. " +
+              `Google Agenda > « ${c.summary} » > Paramètres et partage > Partager avec des personnes.` +
+              (regle.role === 'owner'
+                ? " ATTENTION : le rôle est « propriétaire ». Donner d'abord ce rôle à une adresse du domaine, " +
+                  "vérifier qu'elle l'a bien reçu, PUIS seulement retirer l'ancienne — sinon le calendrier devient orphelin."
+                : ''),
           });
         }
       }
@@ -1013,6 +1236,7 @@ export async function run({ config, apply, state, log }) {
     for (const c of calendriersAnalyses) {
       if (c.aclErreur) zonesNonBalayees.push(`les règles d'accès du calendrier « ${c.summary} »`);
     }
+    for (const nom of calendriersNonBalayes) zonesNonBalayees.push(`les partages du calendrier ${nom}`);
     if (!resDrives.ok) zonesNonBalayees.push('les membres des Drive partagés');
     if (resDrives.ok && !driveAdminAccess) {
       zonesNonBalayees.push(
@@ -1025,8 +1249,14 @@ export async function run({ config, apply, state, log }) {
 
     if (occurrences.length === 0 && zonesNonBalayees.length === 0) {
       log.ok(
-        `L'adresse ${config.personalEmail} n'apparaît nulle part dans ce que l'API peut voir. ` +
-          "Il reste malgré tout les angles morts listés plus bas — surtout la facturation.",
+        `L'adresse ${config.personalEmail} n'apparaît nulle part dans ce que l'API peut voir : ` +
+          "annuaire, groupes, partages de calendriers et membres des Drive partagés ont tous été lus.",
+      );
+      log.info(
+        "Une limite demeure, quoi qu'il arrive : Google ne sait lister que les calendriers auxquels " +
+          `${config.adminEmail} est abonné. Un agenda oublié, auquel ce compte n'est pas abonné, n'apparaît ` +
+          "dans aucune liste. Et surtout, la FACTURATION n'a aucune API : elle se vérifie à la main " +
+          '(voir les angles morts ci-dessous).',
       );
     } else if (occurrences.length === 0) {
       log.warn(
@@ -1137,47 +1367,61 @@ export async function run({ config, apply, state, log }) {
   }
 
   // Le groupe d'équipe de la config
-  if (config.group?.email) {
-    const attendu = lower(config.group.email);
+  if (groupeVoulu) {
+    const attendu = lower(groupeVoulu);
     const trouve = groupes.find((g) => lower(g.email) === attendu) ?? null;
-    if (!trouve) {
-      log.warn(`Le groupe d'équipe « ${config.group.email} » n'existe pas encore.`);
+    if (!trouve && !resGroupes.ok) {
+      // La liste des groupes n'a PAS pu être lue : « absent » et « illisible »
+      // ne sont pas la même chose. Conseiller une création ici pourrait faire
+      // écraser les réglages d'un groupe qui existe déjà.
+      log.warn(
+        `Impossible de dire si le groupe « ${groupeVoulu} » existe : la lecture des groupes a échoué. ` +
+          "Ne lance PAS « group --apply » avant d'avoir vérifié à la main.",
+      );
+      aFaire.push({
+        p: 2,
+        t:
+          `Vérifier à la main si le groupe ${groupeVoulu} existe (Annuaire > Groupes), puis corriger le droit ` +
+          "de lecture manquant. L'audit n'a pas pu le déterminer.",
+      });
+    } else if (!trouve) {
+      log.warn(`Le groupe d'équipe « ${groupeVoulu} » n'existe pas encore.`);
       aFaire.push({
         p: 3,
-        t: `Créer le groupe d'équipe ${config.group.email} : node src/cli.mjs group --apply`,
+        t: `Créer le groupe d'équipe ${groupeVoulu} : node src/cli.mjs group --apply`,
       });
     } else {
       const info = membresParGroupe.get(attendu);
       const membres = info?.membres ?? [];
       const presents = new Set(membres.map((m) => lower(m.email)));
-      const absents = (config.team ?? []).filter((m) => !presents.has(lower(m.email)));
+      const absents = equipe.filter((m) => !presents.has(lower(m.email)));
       if (absents.length > 0) {
         log.warn(
-          `${absents.length} personne(s) de l'équipe ne sont pas dans ${config.group.email} : ` +
+          `${absents.length} personne(s) de l'équipe ne sont pas dans ${groupeVoulu} : ` +
             absents.map((m) => m.email).join(', '),
         );
         aFaire.push({
           p: 3,
-          t: `Ajouter au groupe ${config.group.email} : ${absents.map((m) => m.email).join(', ')} — node src/cli.mjs group --apply`,
+          t: `Ajouter au groupe ${groupeVoulu} : ${absents.map((m) => m.email).join(', ')} — node src/cli.mjs group --apply`,
         });
       } else if (membres.length > 0) {
-        log.ok(`Le groupe ${config.group.email} contient bien les ${config.team.length} personnes de l'équipe.`);
+        log.ok(`Le groupe ${groupeVoulu} contient bien les ${equipe.length} personne(s) de l'équipe.`);
       }
-      unchanged.push(`Groupe ${config.group.email} — ${membres.length} membre(s)`);
+      unchanged.push(`Groupe ${groupeVoulu} — ${membres.length} membre(s)`);
 
       const externes = membres.filter((m) => !lower(m.email).endsWith(`@${domaine}`));
       if (externes.length > 0) {
         log.warn(
-          `Le groupe ${config.group.email} contient ${externes.length} membre(s) EXTERNE(S) au domaine : ` +
+          `Le groupe ${groupeVoulu} contient ${externes.length} membre(s) EXTERNE(S) au domaine : ` +
             externes.map((m) => m.email).join(', '),
         );
-        warnings.push(`Membres externes dans ${config.group.email} : ${externes.map((m) => m.email).join(', ')}`);
+        warnings.push(`Membres externes dans ${groupeVoulu} : ${externes.map((m) => m.email).join(', ')}`);
       }
     }
 
     if (reglagesGroupe) {
       log.info(
-        `Réglages de ${config.group.email} — qui peut joindre : ${tiret(reglagesGroupe.whoCanJoin)} · ` +
+        `Réglages de ${groupeVoulu} — qui peut joindre : ${tiret(reglagesGroupe.whoCanJoin)} · ` +
           `qui peut publier : ${tiret(reglagesGroupe.whoCanPostMessage)} · ` +
           `qui voit les membres : ${tiret(reglagesGroupe.whoCanViewMembership)} · ` +
           `membres externes permis : ${tiret(reglagesGroupe.allowExternalMembers)}`,
@@ -1185,17 +1429,37 @@ export async function run({ config, apply, state, log }) {
       // Rappel : dans cette API, TOUS les booléens sont des CHAÎNES ('true'/'false').
       if (lower(reglagesGroupe.allowExternalMembers) === 'true') {
         log.warn(
-          `${config.group.email} accepte des membres externes au domaine. Pour un groupe interne, ce devrait ` +
+          `${groupeVoulu} accepte des membres externes au domaine. Pour un groupe interne, ce devrait ` +
             'être « false ».',
         );
         aFaire.push({
           p: 4,
-          t: `Interdire les membres externes sur ${config.group.email} : node src/cli.mjs group --apply`,
+          t: `Interdire les membres externes sur ${groupeVoulu} : node src/cli.mjs group --apply`,
         });
       }
       if (lower(reglagesGroupe.whoCanJoin) === 'anyone_can_join') {
-        log.warn(`${config.group.email} peut être rejoint par n'importe qui sur Internet. À corriger.`);
-        aFaire.push({ p: 1, t: `Restreindre l'adhésion au groupe ${config.group.email} (whoCanJoin = INVITED_CAN_JOIN).` });
+        log.warn(`${groupeVoulu} peut être rejoint par n'importe qui sur Internet. À corriger.`);
+        aFaire.push({ p: 1, t: `Restreindre l'adhésion au groupe ${groupeVoulu} (whoCanJoin = INVITED_CAN_JOIN).` });
+      }
+      if (lower(reglagesGroupe.whoCanPostMessage) === 'anyone_can_post') {
+        log.warn(
+          `N'importe qui sur Internet peut écrire à ${groupeVoulu} sans être membre. C'est une porte ouverte ` +
+            'au pourriel, et les messages arrivent dans la boîte de toute l\'équipe.',
+        );
+        aFaire.push({
+          p: 2,
+          t: `Restreindre l'envoi de messages au groupe ${groupeVoulu} (whoCanPostMessage = ALL_MEMBERS_CAN_POST) : node src/cli.mjs group --apply`,
+        });
+      }
+      if (lower(reglagesGroupe.whoCanViewGroup) === 'anyone_can_view') {
+        log.warn(
+          `Les archives de ${groupeVoulu} sont visibles par n'importe qui sur Internet : tout ce qui a été ` +
+            'échangé dans ce groupe est public.',
+        );
+        aFaire.push({
+          p: 1,
+          t: `Rendre les archives du groupe ${groupeVoulu} privées (whoCanViewGroup = ALL_MEMBERS_CAN_VIEW) : node src/cli.mjs group --apply`,
+        });
       }
     }
   } else {
@@ -1213,7 +1477,7 @@ export async function run({ config, apply, state, log }) {
 
   if (!resCalendriers.ok) {
     log.warn("La liste des calendriers n'a pas pu être lue.");
-  } else if ((config.calendars ?? []).length === 0) {
+  } else if (calendriersVoulus.length === 0) {
     log.info('Aucun calendrier configuré dans config.json.');
   } else {
     log.table(
@@ -1227,8 +1491,31 @@ export async function run({ config, apply, state, log }) {
     );
 
     for (const c of calendriersAnalyses) {
+      if (!c.existe && !c.lectureFiable) {
+        // Une lecture a échoué : on ne conclut pas. Créer un calendrier qui
+        // existe déjà en produirait un DEUXIÈME du même nom — Google l'autorise.
+        log.warn(
+          `Impossible de dire si le calendrier « ${c.summary} » existe : ` +
+            `${c.cacheErreur ?? "la liste des calendriers n'a pas pu être lue"}. ` +
+            "Ne lance PAS « calendar --apply » avant d'avoir vérifié dans Google Agenda.",
+        );
+        aFaire.push({
+          p: 2,
+          t:
+            `Vérifier à la main dans Google Agenda si le calendrier « ${c.summary} » existe déjà. ` +
+            "L'audit n'a pas pu le déterminer, et créer un doublon est possible.",
+        });
+        continue;
+      }
       if (!c.existe) {
-        log.warn(`Le calendrier « ${c.summary} » n'existe pas encore.`);
+        log.warn(
+          `Le calendrier « ${c.summary} » n'apparaît pas dans les agendas de ${config.adminEmail}.`,
+        );
+        log.info(
+          "   À savoir : Google ne liste que les agendas AUXQUELS ce compte est abonné. Un calendrier peut " +
+            "exister sans y figurer. Si tu sais qu'il existe déjà, ouvre-le une fois dans Google Agenda avant " +
+            "de lancer « calendar --apply », sinon un deuxième calendrier du même nom sera créé.",
+        );
         aFaire.push({ p: 3, t: `Créer le calendrier « ${c.summary} » : node src/cli.mjs calendar --apply` });
         continue;
       }
@@ -1262,6 +1549,38 @@ export async function run({ config, apply, state, log }) {
         })),
       );
 
+      // Le rôle accordé à l'équipe correspond-il à celui demandé dans
+      // config.json ? Sans ce contrôle, un calendrier partagé en simple
+      // lecture passait pour conforme alors que config.json demande « writer ».
+      if (c.attenduRole) {
+        /** @type {Set<string>} */
+        const rolesEquipe = new Set();
+        for (const r of c.acl) {
+          if (!r.role || r.role === 'none') continue;
+          const type = r.scope?.type;
+          const valeur = lower(r.scope?.value);
+          const viseEquipe =
+            (groupeVoulu && type === 'group' && valeur === lower(groupeVoulu)) ||
+            (type === 'domain' && valeur === domaine) ||
+            (type === 'user' && equipe.some((m) => lower(m.email) === valeur));
+          if (viseEquipe) rolesEquipe.add(r.role);
+        }
+        if (rolesEquipe.size > 0 && !rolesEquipe.has(c.attenduRole)) {
+          log.warn(
+            `L'équipe a le rôle « ${[...rolesEquipe].join(' / ')} » sur « ${c.summary} », alors que ` +
+              `config.json demande « ${c.attenduRole} ».`,
+          );
+          log.info(
+            "   Pour mémoire : « reader » = voir seulement · « writer » = ajouter et modifier des événements · " +
+              '« owner » = peut en plus supprimer le calendrier et changer les accès.',
+          );
+          aFaire.push({
+            p: 4,
+            t: `Corriger le niveau d'accès de l'équipe au calendrier « ${c.summary} » : node src/cli.mjs calendar --apply`,
+          });
+        }
+      }
+
       const publique = c.acl.find((r) => r.scope?.type === 'default' && r.role && r.role !== 'none');
       if (publique) {
         log.warn(
@@ -1278,11 +1597,9 @@ export async function run({ config, apply, state, log }) {
       const portees = new Set(
         c.acl.filter((r) => r.role && r.role !== 'none').map((r) => `${r.scope?.type}:${lower(r.scope?.value)}`),
       );
-      const viaGroupe = config.group?.email ? portees.has(`group:${lower(config.group.email)}`) : false;
+      const viaGroupe = groupeVoulu ? portees.has(`group:${lower(groupeVoulu)}`) : false;
       const viaDomaine = portees.has(`domain:${domaine}`);
-      const sansAcces = (config.team ?? []).filter(
-        (m) => !portees.has(`user:${lower(m.email)}`) && !viaGroupe && !viaDomaine,
-      );
+      const sansAcces = equipe.filter((m) => !aAcces(m.email, portees, viaGroupe, viaDomaine));
       if (sansAcces.length > 0) {
         log.warn(
           `${sansAcces.length} personne(s) n'ont pas accès à « ${c.summary} » : ` +
@@ -1307,18 +1624,26 @@ export async function run({ config, apply, state, log }) {
     "Rappel : seuls les Drive PARTAGÉS sont listés. Aucun « Mon Drive », aucun fichier personnel n'est lu.",
   );
 
-  if (!resDrives.ok) {
+  if (!resDrives.ok && drivesPartages.length === 0) {
     log.warn("La liste des Drive partagés n'a pas pu être lue.");
   } else if (drivesPartages.length === 0) {
     log.info('Aucun Drive partagé visible.');
   } else {
+    if (!resDrives.ok) {
+      log.warn(
+        "La liste complète des Drive partagés n'a pas pu être lue. Seul le Drive retrouvé grâce au cache " +
+          'local est affiché ci-dessous : il en existe peut-être d\'autres.',
+      );
+    }
     log.info(
       `${drivesPartages.length} Drive partagé(s) — vue ${driveAdminAccess ? 'administrateur de domaine (complète)' : 'limitée aux Drive dont ' + config.adminEmail + ' est membre'}.`,
     );
     log.table(
       drivesPartages.map((d) => ({
         Nom: couper(d.name ?? '—', 34),
-        Identifiant: couper(d.id, 26),
+        // Jamais tronqué : un identifiant coupé est un identifiant faux, et
+        // c'est exactement ce qu'on recopie dans une URL ou dans config.json.
+        Identifiant: tiret(d.id),
         'Créé le': formatDate(d.createdTime, tz),
         Membres: membresParDrive.get(d.id)?.erreur ? 'illisibles' : String(membresParDrive.get(d.id)?.permissions.length ?? 0),
         Cible: driveCible && d.id === driveCible.id ? 'oui' : '',
@@ -1369,8 +1694,45 @@ export async function run({ config, apply, state, log }) {
     if (driveCible) unchanged.push(`Drive partagé « ${driveCible.name} » (${driveCible.id})`);
   }
 
-  if (!driveCible) {
-    log.warn(`Le Drive partagé « ${nomDriveVoulu} » de config.json n'existe pas encore (ou n'est pas visible).`);
+  if (!driveConfigure) {
+    log.info(
+      "Aucun Drive partagé n'est décrit dans config.json (champ « sharedDrive »). Rien à comparer : " +
+        "l'audit ne propose donc aucune création.",
+    );
+  } else if (!driveCible && !resDrives.ok) {
+    /*
+     * DANGER DE DOUBLON. La lecture des Drive partagés a ÉCHOUÉ : on ne sait
+     * pas si « nomDriveVoulu » existe. Or Google autorise deux Drive partagés
+     * du même nom et `drives.create` ne déduplique pas par nom. Conseiller une
+     * création ici, c'est risquer un deuxième Drive à moitié rempli, que
+     * personne ne remarquera avant que des fichiers y aient été déposés.
+     */
+    log.warn(
+      `Impossible de dire si le Drive partagé « ${nomDriveVoulu} » existe : la lecture a échoué. ` +
+        "Ne lance PAS « drive --apply » : Google accepte deux Drive partagés du même nom, et le doublon " +
+        "ne se répare qu'à la main.",
+    );
+    aFaire.push({
+      p: 2,
+      t:
+        `Vérifier à la main dans drive.google.com > Drive partagés si « ${nomDriveVoulu} » existe déjà, ` +
+        "puis relancer l'audit. L'audit n'a pas pu le déterminer.",
+    });
+  } else if (!driveCible && !driveAdminAccess) {
+    log.warn(
+      `Le Drive partagé « ${nomDriveVoulu} » n'est pas visible depuis ${config.adminEmail}, mais la vue est ` +
+        "PARTIELLE : ce compte n'a pas le privilège « administrateur Drive » et ne voit que les Drive dont il " +
+        "est membre. Le Drive peut donc exister sans apparaître ici.",
+    );
+    aFaire.push({
+      p: 2,
+      t:
+        `Avant de créer quoi que ce soit : vérifier dans drive.google.com > Drive partagés si « ${nomDriveVoulu} » ` +
+        `existe déjà, ou donner à ${config.adminEmail} le privilège d'administrateur Drive (Console d'admin > ` +
+        "Rôles d'administrateur). Sans ça, « drive --apply » risque de créer un DOUBLON.",
+    });
+  } else if (!driveCible) {
+    log.warn(`Le Drive partagé « ${nomDriveVoulu} » de config.json n'existe pas encore.`);
     aFaire.push({ p: 3, t: `Créer le Drive partagé « ${nomDriveVoulu} » : node src/cli.mjs drive --apply` });
   } else {
     const attendues = config.sharedDrive?.restrictions ?? {};
@@ -1404,11 +1766,9 @@ export async function run({ config, apply, state, log }) {
       const acces = new Set(
         infoCible.permissions.map((p) => `${p.type}:${lower(p.emailAddress ?? p.domain ?? 'anyone')}`),
       );
-      const viaGroupe = config.group?.email ? acces.has(`group:${lower(config.group.email)}`) : false;
+      const viaGroupe = groupeVoulu ? acces.has(`group:${lower(groupeVoulu)}`) : false;
       const viaDomaine = acces.has(`domain:${domaine}`);
-      const sansAcces = (config.team ?? []).filter(
-        (m) => !acces.has(`user:${lower(m.email)}`) && !viaGroupe && !viaDomaine,
-      );
+      const sansAcces = equipe.filter((m) => !aAcces(m.email, acces, viaGroupe, viaDomaine));
       if (sansAcces.length > 0) {
         log.warn(
           `${sansAcces.length} personne(s) n'ont pas accès au Drive partagé : ` + sansAcces.map((m) => m.email).join(', '),
@@ -1465,8 +1825,16 @@ export async function run({ config, apply, state, log }) {
   if (liste.length === 0) {
     log.ok("Rien à signaler : tout ce que l'API peut voir est conforme à config.json.");
   } else {
+    // La légende AVANT la liste : elle ne sert à rien une fois qu'on a fini de
+    // lire les points, et ce classement est un choix de la trousse, pas une
+    // règle de Google — autant le dire.
+    log.info('Ordre de priorité (classement propre à cette trousse, du plus grave au moins grave) :');
+    log.info("  P1 — risque de PERDRE L'ACCÈS au compte : à régler en premier, avant tout le reste.");
+    log.info('  P2 — adresse personnelle encore rattachée, et facturation.');
+    log.info('  P3 — ressources manquantes (groupe, calendrier, Drive partagé).');
+    log.info('  P4 — réglages fins de conformité.');
+    log.blank?.();
     for (const item of liste) log.info(`[P${item.p}] ${item.t}`);
-    log.info('P1 = risque de perdre l\'accès au compte · P2 = adresse personnelle et facturation · P3 = ressources manquantes · P4 = conformité fine.');
   }
 
   log.step('Rappel');

@@ -301,7 +301,7 @@ function roleDriveAttendu(roleEquipe) {
 }
 
 /** Tronque un texte long pour garder le rapport lisible. */
-function couper(texte, max = 200) {
+function couper(texte, max = 400) {
   const s = String(texte ?? '');
   return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
 }

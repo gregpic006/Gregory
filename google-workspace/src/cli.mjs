@@ -26,34 +26,72 @@ const MIN_NODE_MAJOR = 20;
  * ------------------------------------------------------------------ */
 
 /**
- * readOnly : la commande ne modifie jamais rien. On force alors apply=false,
- *            peu importe ce qui est passé en ligne de commande (ceinture ET bretelles).
- * steps    : commande composite — on exécute ces commandes dans l'ordre.
+ * readOnly    : la commande ne modifie jamais rien. On force alors apply=false,
+ *               peu importe ce qui est passé en ligne de commande (ceinture ET bretelles).
+ * steps       : commande composite — on exécute ces commandes dans l'ordre.
+ * needsConfig : false = la commande fonctionne SANS config.json (c'est le cas
+ *               de « init », qui est justement là pour le créer).
+ * touchesGoogle : false = même avec --apply, la commande n'écrit que sur le
+ *               disque local. Sert uniquement à formuler les messages justes.
+ * options     : options supplémentaires acceptées par cette commande-là.
+ *               La valeur dit si l'option attend une valeur après elle.
  */
 const COMMANDS = {
+  init: {
+    summary:
+      "Lit les comptes réels de ton domaine et écrit config.json à ta place. N'écrit rien chez Google.",
+    needsConfig: false,
+    touchesGoogle: false,
+    options: {
+      '--force': false,
+      '--oauth': false,
+      '--service-account': false,
+      '--compte-de-service': false,
+      '--mode': true,
+      '--admin': true,
+    },
+  },
   doctor: {
     summary: "Vérifie l'accès : clé, délégation, API activées. Ne modifie rien.",
     readOnly: true,
   },
+  dns: {
+    summary:
+      'Vérifie le DNS du domaine : MX, SPF, DMARC, DKIM. Ne touche pas à Google, ne modifie rien.',
+    readOnly: true,
+    // Interroge le DNS public, pas Google : ni identifiants ni config.json requis.
+    // Sans config.json, il faut nommer le domaine avec --domain.
+    needsConfig: false,
+    touchesGoogle: false,
+    options: {
+      '--domain': true,
+      '--domaine': true,
+    },
+  },
   audit: {
-    summary: "Dresse l'inventaire de ce qui existe déjà dans le domaine. Ne modifie rien.",
+    summary: 'Dresse l\'inventaire de ce qui existe déjà dans le domaine. Ne modifie rien.',
     readOnly: true,
   },
   setup: {
-    summary: "Fait tout, dans l'ordre : groupe, puis calendriers, puis Drive partagé.",
+    summary: 'Fait tout, dans l\'ordre : groupe, puis calendriers, puis Drive partagé.',
     steps: ['group', 'calendar', 'drive'],
   },
   group: {
     summary: "Crée le groupe d'équipe et synchronise ses membres.",
   },
   calendar: {
-    summary: "Crée les calendriers partagés et accorde les accès à l'équipe.",
+    summary: 'Crée les calendriers partagés et accorde les accès à l\'équipe.',
   },
   drive: {
-    summary: "Crée le Drive partagé, applique les restrictions et bâtit l'arborescence.",
+    summary: 'Crée le Drive partagé, applique les restrictions et bâtit l\'arborescence.',
   },
   detach: {
     summary: "Détache l'adresse personnelle des ressources de l'entreprise.",
+    options: {
+      '--recovery': true,
+      '--recuperation': true,
+      '--récupération': true,
+    },
   },
   verify: {
     summary: "Relit tout via l'API et confirme que le résultat est conforme. Ne modifie rien.",
@@ -61,7 +99,7 @@ const COMMANDS = {
   },
 };
 
-const COMMAND_ORDER = ['doctor', 'audit', 'setup', 'group', 'calendar', 'drive', 'detach', 'verify'];
+const COMMAND_ORDER = ['init', 'doctor', 'dns', 'audit', 'setup', 'group', 'calendar', 'drive', 'detach', 'verify'];
 
 /* ------------------------------------------------------------------ *
  * Erreur d'utilisation (mauvaise commande, config manquante, etc.)
@@ -77,6 +115,10 @@ class UsageError extends Error {
 
 /* ------------------------------------------------------------------ *
  * Couleurs (aucune dépendance : séquences ANSI à la main)
+ *
+ * Les règles doivent être EXACTEMENT celles de src/lib/log.mjs, sinon l'aide
+ * du CLI et les messages des commandes ne s'accorderaient pas (par exemple
+ * FORCE_COLOR=0, qui veut dire « pas de couleur », pas « couleur forcée »).
  * ------------------------------------------------------------------ */
 
 const ESC = '\u001b[';
@@ -84,9 +126,12 @@ let COLOR_ON = false;
 
 function computeColor(forcedOff) {
   if (forcedOff) return false;
-  if (process.env.NO_COLOR) return false;
-  if (process.env.FORCE_COLOR) return true;
-  return Boolean(process.stdout.isTTY);
+  // Convention NO_COLOR (https://no-color.org) : toute valeur non vide désactive.
+  if (typeof process.env.NO_COLOR === 'string' && process.env.NO_COLOR !== '') return false;
+  if (process.env.TERM === 'dumb') return false;
+  const force = process.env.FORCE_COLOR;
+  if (typeof force === 'string' && force !== '' && force !== '0') return true;
+  return Boolean(process.stdout && process.stdout.isTTY);
 }
 
 const paint = (code, text) => (COLOR_ON ? `${ESC}${code}m${text}${ESC}0m` : text);
@@ -97,10 +142,13 @@ const cyan = (t) => paint('36', t);
 
 /** Dessine un cadre bien visible autour de quelques lignes. */
 function box(lines, colorize = (t) => t) {
-  const width = Math.max(...lines.map((l) => l.length)) + 2;
+  // On aplatit d'abord : une chaîne contenant un saut de ligne casserait le cadre.
+  const flat = lines.flatMap((line) => String(line).split('\n'));
+  if (flat.length === 0) return '';
+  const width = Math.max(...flat.map((l) => l.length)) + 2;
   const out = [];
   out.push('+' + '='.repeat(width) + '+');
-  for (const line of lines) {
+  for (const line of flat) {
     out.push('| ' + line + ' '.repeat(width - line.length - 1) + '|');
   }
   out.push('+' + '='.repeat(width) + '+');
@@ -111,7 +159,34 @@ function box(lines, colorize = (t) => t) {
  * Analyse des arguments (à la main, zéro dépendance)
  * ------------------------------------------------------------------ */
 
-function parseArgs(argv) {
+/**
+ * Première passe : on cherche le nom de la commande dans les arguments, avant
+ * même de les analyser. C'est nécessaire parce que certaines commandes
+ * acceptent des options qui leur sont propres (« init --force », par exemple) :
+ * il faut savoir de quelle commande il s'agit pour savoir quoi accepter.
+ *
+ * @param {string[]} argv
+ * @returns {string|null}
+ */
+function detectCommand(argv) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = String(argv[i] ?? '');
+    if (arg === '--config') {
+      i += 1; // la valeur du --config n'est pas un nom de commande
+      continue;
+    }
+    if (arg.startsWith('-')) continue;
+    const lowered = arg.toLowerCase();
+    if (Object.hasOwn(COMMANDS, lowered)) return lowered;
+  }
+  return null;
+}
+
+/**
+ * @param {string[]} argv
+ * @param {Record<string, boolean>} extraOptions options propres à la commande
+ */
+function parseArgs(argv, extraOptions = {}) {
   const parsed = {
     command: null,
     apply: false,
@@ -120,6 +195,7 @@ function parseArgs(argv) {
     configPath: null,
     noColor: false,
     extras: [],
+    passthrough: [], // options propres à la commande, transmises telles quelles
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -137,10 +213,13 @@ function parseArgs(argv) {
       parsed.noColor = true;
     } else if (arg === '--config') {
       const value = argv[i + 1];
-      if (!value || value.startsWith('-')) {
+      // Un mot commençant par « - » est forcément une autre option : sans ce
+      // contrôle, « --config --apply » avalerait le --apply en silence.
+      if (value === undefined || value === '' || value.startsWith('-')) {
         throw new UsageError(
           "L'option --config attend un chemin de fichier.\n" +
-            '  Exemple : node src/cli.mjs setup --config ./config.json',
+            '  Exemple : node src/cli.mjs setup --config ./config.json\n' +
+            "  (Pour un fichier dont le nom commence par « - », utilise la forme --config=./-mon-fichier.json.)",
         );
       }
       parsed.configPath = value;
@@ -154,6 +233,23 @@ function parseArgs(argv) {
         );
       }
       parsed.configPath = value;
+    } else if (Object.hasOwn(extraOptions, arg)) {
+      parsed.passthrough.push(arg);
+      if (extraOptions[arg]) {
+        const value = argv[i + 1];
+        // Même précaution que pour --config : « --recovery --apply » ne doit pas
+        // prendre « --apply » pour une adresse courriel et le faire disparaître.
+        if (value === undefined || value === '' || value.startsWith('-')) {
+          throw new UsageError(
+            `L'option « ${arg} » attend une valeur juste après elle.\n` +
+              `  Exemple : node src/cli.mjs ${detectCommand(argv) ?? '<commande>'} ${arg} <valeur> --apply`,
+          );
+        }
+        parsed.passthrough.push(value);
+        i += 1;
+      }
+    } else if (arg.startsWith('--') && arg.includes('=') && Object.hasOwn(extraOptions, arg.slice(0, arg.indexOf('=')))) {
+      parsed.passthrough.push(arg);
     } else if (arg.startsWith('-')) {
       throw new UsageError(`Option inconnue : « ${arg} ».`, { showHelp: true });
     } else if (parsed.command === null) {
@@ -233,13 +329,26 @@ function printHelp() {
   lines.push(`  ${cyan('-h, --help')}          Affiche cette aide.`);
   lines.push(`  ${cyan('-v, --version')}       Affiche la version de la trousse.`);
   lines.push('');
+  lines.push(dim("  Options propres à « init » : --force (remplacer un config.json existant),"));
+  lines.push(dim('  --oauth ou --service-account (mode de connexion), --admin <adresse>.'));
+  lines.push(
+    dim("  Option propre à « detach » : --recovery <adresse> — l'adresse de récupération qui"),
+  );
+  lines.push(dim("  remplacera l'adresse personnelle. Obligatoire quand il y en a une à remplacer."));
+  lines.push('');
   lines.push(bold("PREMIÈRE UTILISATION (dans l'ordre)"));
-  lines.push('  1. cp config.example.json config.json   puis remplace toutes les valeurs « REMPLACER »');
-  lines.push('  2. npm install');
-  lines.push("  3. node src/cli.mjs doctor              vérifie que l'accès à Google fonctionne");
-  lines.push('  4. node src/cli.mjs setup               simulation : montre ce qui serait fait');
-  lines.push('  5. node src/cli.mjs setup --apply       exécute pour de vrai');
-  lines.push('  6. node src/cli.mjs verify              confirme que tout est bien en place');
+  lines.push('  1. npm install');
+  lines.push('  2. node src/cli.mjs init                 propose un config.json à partir de ton domaine');
+  lines.push('  3. node src/cli.mjs init --apply         écrit le fichier config.json');
+  lines.push("  4. node src/cli.mjs doctor               vérifie que l'accès à Google fonctionne");
+  lines.push('  5. node src/cli.mjs setup                simulation : montre ce qui serait fait');
+  lines.push('  6. node src/cli.mjs setup --apply        exécute pour de vrai');
+  lines.push('  7. node src/cli.mjs verify               confirme que tout est bien en place');
+  lines.push('');
+  lines.push(
+    dim('  (Tu peux aussi partir du modèle à la main : cp config.example.json config.json, puis'),
+  );
+  lines.push(dim("  remplacer les adresses d'exemple « @exemple.ca » par les vraies.)"));
   lines.push('');
   lines.push(bold('EXEMPLES'));
   lines.push(dim("  # Voir l'état actuel du domaine, sans rien changer"));
@@ -256,7 +365,7 @@ function printHelp() {
   lines.push('  node src/cli.mjs setup --apply --config ./config.autre-domaine.json');
   lines.push('');
   lines.push(
-    dim('Raccourcis npm : npm run doctor · npm run audit · npm run setup · npm run setup:apply · npm run verify'),
+    dim('Raccourcis npm : npm run init · npm run doctor · npm run audit · npm run setup · npm run setup:apply · npm run verify'),
   );
 
   console.log(lines.join('\n'));
@@ -267,21 +376,50 @@ function printHelp() {
  * si une fonction venait à manquer (la trousse reste utilisable).
  * ------------------------------------------------------------------ */
 
+/**
+ * Replis minimalistes. Il en faut UN PAR FONCTION que les commandes appellent :
+ * une fonction absente de cette liste ET absente de log.mjs ferait planter la
+ * commande avec « log.machin is not a function » en plein milieu du travail.
+ */
+const LOG_FALLBACKS = {
+  banner: (m) => console.log(`\n=== ${m} ===`),
+  step: (m) => console.log(`\n> ${m}`),
+  info: (m) => console.log(`  ${m}`),
+  ok: (m) => console.log(`  [OK] ${m}`),
+  warn: (m) => console.warn(`  [ATTENTION] ${m}`),
+  err: (m) => console.error(`  [ERREUR] ${m}`),
+  plan: (m) => console.log(`  [PLAN] ${m}`),
+  skip: (m) => console.log(`  [DÉJÀ OK] ${m}`),
+  raw: (m = '') => console.log(String(m)),
+  blank: () => console.log(''),
+  bold: (m) => String(m),
+  dim: (m) => String(m),
+  table: (rows) => {
+    // Repli très simple : une ligne par enregistrement, « clé: valeur ».
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (row && typeof row === 'object' && !Array.isArray(row)) {
+        console.log(
+          '  ' +
+            Object.entries(row)
+              .map(([k, v]) => `${k}: ${v ?? ''}`)
+              .join(' | '),
+        );
+      } else {
+        console.log('  ' + (Array.isArray(row) ? row.join(' | ') : String(row)));
+      }
+    }
+  },
+};
+
 function hardenLog(mod) {
-  const fallbacks = {
-    banner: (m) => console.log(`\n=== ${m} ===`),
-    step: (m) => console.log(`\n> ${m}`),
-    info: (m) => console.log(`  ${m}`),
-    ok: (m) => console.log(`  [OK] ${m}`),
-    warn: (m) => console.warn(`  [ATTENTION] ${m}`),
-    err: (m) => console.error(`  [ERREUR] ${m}`),
-    plan: (m) => console.log(`  [PLAN] ${m}`),
-    skip: (m) => console.log(`  [DÉJÀ OK] ${m}`),
-    table: (rows) => console.log(rows),
-  };
+  // On repart de TOUT ce que log.mjs exporte (y compris ce qui n'a pas de repli
+  // ci-dessous : stripAnsi, setColor, isColorEnabled…), puis on bouche les trous.
   const out = {};
-  for (const [name, fallback] of Object.entries(fallbacks)) {
-    out[name] = typeof mod?.[name] === 'function' ? mod[name] : fallback;
+  for (const [name, value] of Object.entries(mod ?? {})) {
+    if (typeof value === 'function') out[name] = value;
+  }
+  for (const [name, fallback] of Object.entries(LOG_FALLBACKS)) {
+    if (typeof out[name] !== 'function') out[name] = fallback;
   }
   return out;
 }
@@ -299,25 +437,35 @@ function resolveConfigPath(explicit) {
   return candidates[candidates.length - 1];
 }
 
+/** Vrai si la commande a besoin d'un config.json déjà écrit pour fonctionner. */
+function needsConfigFile(definition) {
+  return definition?.needsConfig !== false;
+}
+
 function ensureConfigExists(configPath) {
   if (existsSync(configPath)) return;
   throw new UsageError(
     `Fichier de configuration introuvable : ${configPath}\n` +
       '\n' +
-      'Quoi faire :\n' +
+      'Quoi faire — le plus simple, la trousse le remplit pour toi :\n' +
       `  1. cd ${ROOT_DIR}\n` +
-      '  2. cp config.example.json config.json\n' +
-      '  3. Ouvre config.json et remplace toutes les valeurs « REMPLACER » par les vraies.\n' +
-      '  4. Relance la commande.\n' +
+      '  2. node src/cli.mjs init            montre le config.json proposé, sans rien écrire\n' +
+      '  3. node src/cli.mjs init --apply    écrit le fichier\n' +
+      '\n' +
+      'Ou à la main :\n' +
+      '  cp config.example.json config.json\n' +
+      "  puis ouvre config.json et remplace les adresses d'exemple « @exemple.ca » par les vraies.\n" +
       '\n' +
       'Si ta configuration est ailleurs : node src/cli.mjs <commande> --config /chemin/vers/config.json',
   );
 }
 
+/**
+ * Le cache d'état vit à côté du config.json utilisé (et non du dossier courant) :
+ * deux domaines gérés depuis la même machine ont ainsi deux caches distincts.
+ */
 function resolveStateFile(config, configPath) {
-  const fromConfig = typeof config?.stateFile === 'string' ? config.stateFile.trim() : '';
-  const baseDir = path.dirname(configPath);
-  if (fromConfig) return path.resolve(baseDir, fromConfig);
+  const baseDir = path.dirname(config?.__configFile ?? configPath);
   return path.join(baseDir, '.state.json');
 }
 
@@ -351,7 +499,7 @@ function describeEntry(entry) {
   if (typeof entry === 'string') return entry;
   if (typeof entry !== 'object') return String(entry);
 
-  const label =
+  const candidate =
     entry.label ??
     entry.message ??
     entry.name ??
@@ -360,9 +508,14 @@ function describeEntry(entry) {
     entry.email ??
     entry.path ??
     entry.key;
-  if (label && entry.id && entry.id !== label) return `${label} (${entry.id})`;
-  if (label) return String(label);
-  if (entry.id) return String(entry.id);
+  // Un « nom » qui serait lui-même un objet donnerait « [object Object] » :
+  // on ne retient que ce qui s'affiche vraiment.
+  const label = typeof candidate === 'string' || typeof candidate === 'number' ? String(candidate) : null;
+  const id = typeof entry.id === 'string' || typeof entry.id === 'number' ? String(entry.id) : null;
+
+  if (label && id && id !== label) return `${label} (${id})`;
+  if (label) return label;
+  if (id) return id;
   try {
     return JSON.stringify(entry);
   } catch {
@@ -385,7 +538,14 @@ function normalizeSummary(result) {
   };
 }
 
-function printSummary(log, summaries, apply, elapsedMs) {
+/**
+ * @param {object} log
+ * @param {Array} summaries
+ * @param {{ apply: boolean, readOnly: boolean, touchesGoogle: boolean }} mode
+ * @param {number} elapsedMs
+ */
+function printSummary(log, summaries, mode, elapsedMs) {
+  const { apply, readOnly, touchesGoogle } = mode;
   log.banner('Résumé');
 
   let totalCreated = 0;
@@ -404,7 +564,7 @@ function printSummary(log, summaries, apply, elapsedMs) {
     const verbUpdated = apply ? 'ajusté(s)' : 'à ajuster';
     log.step(
       `${name} : ${created.length} ${verbCreated}, ${updated.length} ${verbUpdated}, ` +
-        `${unchanged.length} déjà conforme(s), ${warnings.length} avertissement(s)`,
+        `${unchanged.length} déjà conforme(s), ${warnings.length} point(s) à lire`,
     );
 
     for (const item of created) {
@@ -422,20 +582,29 @@ function printSummary(log, summaries, apply, elapsedMs) {
   const seconds = (elapsedMs / 1000).toFixed(1);
   log.step(
     `Total : ${totalCreated} création(s), ${totalUpdated} ajustement(s), ` +
-      `${totalUnchanged} déjà conforme(s), ${totalWarnings} avertissement(s) — en ${seconds} s`,
+      `${totalUnchanged} déjà conforme(s), ${totalWarnings} point(s) à lire — en ${seconds} s`,
   );
 
-  if (!apply) {
-    log.plan("Rien n'a été modifié chez Google. Relance la même commande avec --apply quand le plan te convient.");
+  const chezQui = touchesGoogle ? 'chez Google' : 'sur ton ordinateur';
+
+  if (readOnly) {
+    // Surtout pas d'invitation à relancer avec --apply : cette commande-là
+    // ignore --apply, et le dire ici embrouillerait.
+    log.info("Cette commande est en lecture seule : elle n'a rien modifié, ni chez Google ni sur ton ordinateur.");
+  } else if (!apply) {
+    log.plan(`Rien n'a été modifié ${chezQui}. Relance la même commande avec --apply quand le plan te convient.`);
   } else {
     log.ok('Terminé.');
-    log.info("Pour confirmer le résultat en relisant tout via l'API : node src/cli.mjs verify");
+    if (touchesGoogle) {
+      log.info("Pour confirmer le résultat en relisant tout via l'API : node src/cli.mjs verify");
+    }
   }
 
   if (totalWarnings > 0) {
     log.warn(
-      `Il y a ${totalWarnings} avertissement(s) ci-dessus. Ce ne sont pas des erreurs, mais lis-les : ` +
-        'ils indiquent ce qui demande une intervention manuelle dans la console Google.',
+      `Il y a ${totalWarnings} point(s) à lire ci-dessus (lignes « ATTENTION »). ` +
+        'Chacun dit ce qui demande une décision ou une intervention à la main dans la console Google. ' +
+        'Rien ne se corrige tout seul en relançant : lis-les avant de passer à la suite.',
     );
   }
 }
@@ -454,7 +623,9 @@ async function main() {
     return 1;
   }
 
-  const args = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const guessedCommand = detectCommand(argv);
+  const args = parseArgs(argv, COMMANDS[guessedCommand]?.options ?? {});
 
   if (args.noColor) process.env.NO_COLOR = '1';
   COLOR_ON = computeColor(args.noColor);
@@ -494,23 +665,64 @@ async function main() {
   }
 
   // Les commandes en lecture seule ne peuvent JAMAIS écrire, même avec --apply.
-  const apply = definition.readOnly ? false : args.apply;
+  const readOnly = Boolean(definition.readOnly);
+  const apply = readOnly ? false : args.apply;
+  const touchesGoogle = definition.touchesGoogle !== false;
 
   const log = hardenLog(await import('./lib/log.mjs'));
 
   const configPath = resolveConfigPath(args.configPath);
-  ensureConfigExists(configPath);
 
-  const { loadConfig } = await import('./lib/config.mjs');
-  const config = await loadConfig(configPath);
+  // Garde-fou : config.example.json est le MODÈLE, et c'est le seul fichier de
+  // configuration que le .gitignore laisse partir sur le dépôt (public). Y
+  // écrire les vraies adresses du domaine les publierait au prochain commit.
+  if (!needsConfigFile(definition) && path.basename(configPath) === 'config.example.json') {
+    throw new UsageError(
+      `Refus d'écrire dans ${configPath}.\n` +
+        '\n' +
+        "Ce fichier-là est le MODÈLE de la trousse : c'est le seul fichier de configuration qui\n" +
+        'peut être publié sur le dépôt (qui est PUBLIC). Il ne doit contenir que des adresses\n' +
+        "d'exemple, jamais celles de ton domaine.\n" +
+        '\n' +
+        'Quoi faire : viser config.json, qui lui reste privé :\n' +
+        '  node src/cli.mjs init --config ./config.json',
+    );
+  }
+
+  // « init » est la commande qui CRÉE config.json : exiger le fichier ici
+  // rendrait la trousse impossible à démarrer.
+  const needsConfig = needsConfigFile(definition);
+  let config = null;
+  if (needsConfig) {
+    ensureConfigExists(configPath);
+    const { loadConfig } = await import('./lib/config.mjs');
+    config = await loadConfig(configPath);
+  } else if (existsSync(configPath)) {
+    const { loadConfig } = await import('./lib/config.mjs');
+    try {
+      config = await loadConfig(configPath);
+    } catch (error) {
+      // Un config.json cassé ne doit pas empêcher « init » de le regénérer :
+      // c'est précisément le moment où on en a le plus besoin.
+      log.warn(
+        `Le fichier ${configPath} existe mais n'est pas utilisable : ${error?.message ?? error}\n` +
+          "On continue sans lui : la commande « init » va justement en proposer un nouveau.",
+      );
+      config = null;
+    }
+  }
 
   log.banner(`Trousse Google Workspace — commande « ${args.command} »`);
-  log.info(`Domaine cible           : ${config.domain}`);
-  log.info(`Compte impersonné       : ${config.adminEmail}`);
-  log.info(`Mode d'authentification : ${config?.auth?.mode ?? 'inconnu'}`);
-  log.info(`Configuration           : ${configPath}`);
+  if (config) {
+    log.info(`Domaine cible                : ${config.domain}`);
+    log.info(`Compte au nom duquel on agit : ${config.adminEmail}`);
+    log.info(`Mode de connexion            : ${config?.auth?.mode ?? 'inconnu'}`);
+    log.info(`Configuration                : ${configPath}`);
+  } else {
+    log.info(`Configuration                : aucune pour l'instant (fichier visé : ${configPath})`);
+  }
 
-  if (definition.readOnly) {
+  if (readOnly) {
     log.info('Cette commande est en LECTURE SEULE : elle ne modifie rien, peu importe les options.');
     if (args.apply) {
       log.warn(`La commande « ${args.command} » ne modifie jamais rien : l'option --apply est sans effet ici.`);
@@ -518,12 +730,18 @@ async function main() {
   } else if (!apply) {
     console.log(
       '\n' +
-        box(['MODE SIMULATION — rien ne sera modifié.', 'Ajoute --apply pour exécuter pour de vrai.'], (line) =>
-          yellow(bold(line)),
+        box(
+          [
+            'MODE SIMULATION — rien ne sera modifié.',
+            'Ajoute --apply pour exécuter pour de vrai.',
+          ],
+          (line) => yellow(bold(line)),
         ),
     );
-  } else {
+  } else if (touchesGoogle) {
     log.warn('MODE RÉEL (--apply) : les changements ci-dessous seront appliqués chez Google.');
+  } else {
+    log.warn(`MODE RÉEL (--apply) : un fichier va être écrit sur ton ordinateur. Rien n'est envoyé à Google.`);
   }
 
   // Cache local des identifiants créés. Ce n'est qu'une optimisation :
@@ -532,7 +750,7 @@ async function main() {
   const stateFile = resolveStateFile(config, configPath);
   let state;
   try {
-    state = (await stateModule.loadState(stateFile)) ?? {};
+    state = (await stateModule.loadState(stateFile, { onWarn: log.warn })) ?? {};
   } catch (error) {
     log.warn(
       `Cache local illisible (${stateFile}) : ${error?.message ?? error}. ` +
@@ -544,7 +762,7 @@ async function main() {
   const persistState = async () => {
     if (!apply) return;
     try {
-      await stateModule.saveState(stateFile, state);
+      await stateModule.saveState(stateFile, state, { onWarn: log.warn });
     } catch (error) {
       log.warn(
         `Impossible d'écrire le cache local (${stateFile}) : ${error?.message ?? error}. ` +
@@ -561,19 +779,32 @@ async function main() {
   const startedAt = Date.now();
   const summaries = [];
 
-  for (const stepName of steps) {
-    const mod = await loadCommandModule(stepName);
-    const label = mod.meta?.name ?? stepName;
-    const description = mod.meta?.summary ?? COMMANDS[stepName]?.summary ?? '';
-    log.banner(`Commande « ${label} »`);
-    if (description) log.info(description);
+  try {
+    for (const stepName of steps) {
+      const mod = await loadCommandModule(stepName);
+      const label = mod.meta?.name ?? stepName;
+      const description = mod.meta?.summary ?? COMMANDS[stepName]?.summary ?? '';
+      log.banner(`Commande « ${label} »`);
+      if (description) log.info(description);
 
-    const result = await mod.run({ config, apply, state, log });
-    summaries.push({ name: label, ...normalizeSummary(result) });
+      const result = await mod.run({
+        config,
+        apply,
+        state,
+        log,
+        configPath,
+        argv: args.passthrough,
+      });
+      summaries.push({ name: label, ...normalizeSummary(result) });
+      await persistState();
+    }
+  } finally {
+    // Même si une étape échoue : ce qui a déjà été créé chez Google est noté
+    // dans le cache, pour que la reprise soit plus rapide (et jamais en double).
     await persistState();
   }
 
-  printSummary(log, summaries, apply, Date.now() - startedAt);
+  printSummary(log, summaries, { apply, readOnly, touchesGoogle }, Date.now() - startedAt);
   return 0;
 }
 
@@ -581,7 +812,12 @@ async function main() {
  * Filet de sécurité : on attrape TOUT et on explique en français.
  * ------------------------------------------------------------------ */
 
+let alreadyReported = false;
+
 async function reportFatal(error) {
+  if (alreadyReported) return 1;
+  alreadyReported = true;
+
   let logModule;
   let explain = null;
   try {
@@ -618,7 +854,7 @@ async function reportFatal(error) {
   logModule.err(explanation ?? error?.message ?? String(error));
   logModule.info('Pistes :');
   logModule.info("  · node src/cli.mjs doctor  -> vérifie l'authentification et les API activées");
-  logModule.info("  · Relis config.json (domaine, adresses, mode d'authentification)");
+  logModule.info("  · Relis config.json (domaine, adresses, mode de connexion)");
   logModule.info('  · Pour la trace technique complète : PORTAIL_DEBUG=1 node src/cli.mjs <commande>');
 
   if (process.env.PORTAIL_DEBUG && error?.stack) {
@@ -627,14 +863,46 @@ async function reportFatal(error) {
   return 1;
 }
 
+/**
+ * Sort proprement.
+ *
+ * process.exit() coupe le processus sans attendre que la sortie soit
+ * réellement écrite : redirigée vers un fichier ou un « pipe » (par exemple
+ * « node src/cli.mjs audit > journal.txt »), la fin du rapport serait perdue.
+ * On vide donc les tampons avant de partir.
+ */
+async function exitAfterFlush(code) {
+  const flush = (stream) =>
+    new Promise((resolve) => {
+      if (!stream || typeof stream.write !== 'function' || stream.writableEnded) return resolve();
+      try {
+        stream.write('', () => resolve());
+      } catch {
+        resolve();
+      }
+    });
+
+  const timeout = new Promise((resolve) => setTimeout(resolve, 2000).unref?.());
+  try {
+    await Promise.race([Promise.all([flush(process.stdout), flush(process.stderr)]), timeout]);
+  } catch {
+    /* on sort quand même */
+  }
+  process.exit(code);
+}
+
 process.on('unhandledRejection', (reason) => {
   const error = reason instanceof Error ? reason : new Error(String(reason));
-  reportFatal(error).then((code) => process.exit(code));
+  reportFatal(error).then((code) => exitAfterFlush(code));
+});
+
+process.on('uncaughtException', (error) => {
+  reportFatal(error).then((code) => exitAfterFlush(code));
 });
 
 process.on('SIGINT', () => {
   console.log("\nInterrompu par l'utilisateur. Rien de plus n'a été envoyé à Google.");
-  process.exit(130);
+  exitAfterFlush(130);
 });
 
 let exitCode = 0;
@@ -643,4 +911,4 @@ try {
 } catch (error) {
   exitCode = await reportFatal(error);
 }
-process.exit(exitCode);
+await exitAfterFlush(exitCode);

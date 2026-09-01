@@ -137,11 +137,10 @@ Tous les champs de Schema$Groups sont des `string`.
 > ⚠️ Ce dépôt est PUBLIC. Aucune adresse personnelle ni adresse d'employé ne doit
 > apparaître ici. Les vraies valeurs vivent dans `config.json`, qui est gitignoré et
 > généré localement par `node src/cli.mjs init`.
-- Domaine Workspace : **leaselane.ca**  (PAS portailgestion.ca — celui-là est le domaine
-  du site web/produit dans le repo. « listening.ca » venait de la dictée vocale.)
+- Domaine Workspace : découvert par `init` (jamais écrit en dur ici — dépôt public)
 - Super-admin : le compte super-admin du domaine (rempli par `init`)
 - Adresse perso à détacher : <adresse-perso@gmail.com>  # jamais commitée — voir config.json (gitignoré)
-- Groupe d'équipe : equipe@leaselane.ca
+- Groupe d'équipe : `equipe@<domaine>` par défaut, modifiable dans config.json
 - Mode d'auth choisi : **service-account** (compte de service + délégation)
 - Adresses de l'équipe : découvertes automatiquement
   => la commande `init` doit les DÉCOUVRIR via `admin.users.list` plutôt que de les
@@ -186,9 +185,9 @@ https://www.googleapis.com/auth/admin.directory.user,https://www.googleapis.com/
    `admin.users.list` et GÉNÈRE `config.json` automatiquement. Le client n'a jamais eu
    à taper les 3 autres adresses de son équipe. C'est le cœur du « moins de
    manipulation possible ».
-3. Nouvelle commande **`dns`** : vérifie MX / SPF / DKIM / DMARC de `leaselane.ca`
+3. Nouvelle commande **`dns`** : vérifie MX / SPF / DKIM / DMARC du domaine
    (via `node:dns/promises`, aucune dépendance). Signale si les courriels ne sont pas
    routés vers Google. À faire tourner chez le client — le proxy de la session de build
    bloquait le DNS sortant.
-4. Domaine partout : **leaselane.ca** (super-admin `greg@leaselane.ca`,
-   groupe `equipe@leaselane.ca`).
+4. Aucune valeur réelle en dur : `init` découvre le domaine, les usagers et
+   l'adresse personnelle à détacher. Le dépôt est public.

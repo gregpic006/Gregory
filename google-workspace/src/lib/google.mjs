@@ -227,12 +227,24 @@ function classifyError(e, propagation) {
  *   - la PROPAGATION : un groupe, un Drive partagé ou une appartenance qui
  *     vient d'être créé n'est pas immédiatement visible partout chez Google.
  *     Cela se traduit par un 404 ou un 403 pendant quelques secondes à
- *     quelques minutes. L'attente va jusqu'à 2 minutes au total, ce qui couvre
- *     la quasi-totalité des cas observés.
+ *     quelques minutes.
+ *
+ * Budget d'attente réel avec les valeurs par défaut (tries = 6) : les cinq
+ * pauses valent 2, 4, 8, 16 puis 32 secondes, soit 62 secondes au total —
+ * environ une minute, pas deux. Pour couvrir une propagation plus lente, passer
+ * explicitement { tries: 7 } (126 s) plutôt que d'espérer que le défaut suffise.
  *
  * ATTENTION — pour une recherche d'existence où le 404 est une réponse ATTENDUE
  * (« est-ce que ce groupe existe déjà ? »), passer { propagation: false },
- * sinon chaque vérification négative attendra deux minutes pour rien.
+ * sinon chaque vérification négative attendra une minute pour rien.
+ *
+ * ATTENTION (2) — RÉESSAI ET DOUBLONS. Un réessai relance l'appel EN ENTIER.
+ * Sur une lecture, c'est sans danger. Sur une CRÉATION, un 500 ou une coupure
+ * réseau peut survenir APRÈS que Google a créé la ressource : le réessai en
+ * créerait alors une deuxième. Pour toute création, l'appelant doit donc soit
+ * fournir une clé d'idempotence (drives.create → requestId déterministe), soit
+ * relire l'existant avant de créer et traiter le conflit (isConflict) comme un
+ * succès. Cette fonction ne peut pas le deviner à sa place.
  *
  * @template T
  * @param {() => Promise<T>} fn appel à exécuter
@@ -501,7 +513,8 @@ export async function collectPages(fetchPage, { itemsKey, label = 'lecture de la
   } while (pageToken && pages < maxPages);
 
   if (pageToken) {
-    log.warn(
+    const logger = retry?.log ?? log;
+    logger.warn(
       `${label} : plus de ${maxPages} pages de résultats, la lecture a été arrêtée. ` +
         'Si ce message apparaît, la trousse dépasse le volume pour lequel elle a été prévue.',
     );

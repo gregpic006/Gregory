@@ -3,7 +3,7 @@
  *
  * POURQUOI UN GROUPE ?
  * Parce qu'on accorde ensuite les accès (calendriers, Drive partagé) AU GROUPE
- * plutôt qu'à chacune des quatre adresses. Quand quelqu'un arrive ou part, on
+ * plutôt qu'à chaque adresse prise une par une. Quand quelqu'un arrive ou part, on
  * modifie une seule chose — le groupe — et tous les accès suivent
  * automatiquement. Sans groupe, il faudrait repasser sur chaque calendrier et
  * chaque Drive à la main, à chaque changement d'équipe.
@@ -28,12 +28,30 @@
  */
 
 import { getClients, withRetry, collectPages, isNotFound, isConflict, errorInfo, explainGoogleError } from '../lib/google.mjs';
+import { SCOPES } from '../lib/auth.mjs';
 import { setStateKey } from '../lib/state.mjs';
 
 export const meta = {
   name: 'group',
   summary: "Crée le groupe d'équipe, verrouille ses réglages et y met exactement les membres de « team ».",
 };
+
+/**
+ * PORTÉES DEMANDÉES — le strict nécessaire pour cette commande.
+ *
+ * Cette commande ne touche NI au Drive NI aux calendriers : elle ne demande donc
+ * pas ces droits-là. En mode « compte de service », le jeton fabriqué ici est
+ * physiquement incapable d'ouvrir, de déplacer ou de partager un document —
+ * même en cas de bogue. C'est la garantie la plus forte qu'on puisse donner au
+ * client sur ses documents personnels : ce n'est pas une promesse, c'est le
+ * jeton lui-même qui n'a pas la permission.
+ *
+ * En mode OAuth, auth.mjs élargit de toute façon au jeu complet pour n'ouvrir le
+ * navigateur qu'une seule fois (voir effectiveScopes) : restreindre ici ne
+ * provoque donc AUCUNE reconnexion supplémentaire. C'est gagnant dans les deux
+ * modes.
+ */
+const GROUP_SCOPES = [...SCOPES.directory, ...SCOPES.groups];
 
 /* ------------------------------------------------------------------ *
  * Réglages visés pour le groupe
@@ -50,6 +68,18 @@ export const meta = {
  *
  * ⚠️ DEUXIÈME PIÈGE : `whoCanInvite` et `whoCanAdd` sont DÉPRÉCIÉS et fusionnés
  * dans `whoCanModerateMembers`. On utilise donc uniquement le nouveau réglage.
+ *
+ * VALEURS RETENUES : celles de docs/00-reference-api.md, qui est la référence
+ * de la trousse (groupe d'équipe FERMÉ : seuls les membres lisent et écrivent).
+ *
+ * SI TU VEUX QUE DES GENS DE L'EXTÉRIEUR PUISSENT ÉCRIRE AU GROUPE (par exemple
+ * si equipe@… sert d'adresse de contact publique sur le site web), il y a
+ * exactement une ligne à changer ici : mettre `whoCanPostMessage` à
+ * `'ANYONE_CAN_POST'` (tout le monde) ou `'ALL_IN_DOMAIN_CAN_POST'` (seulement
+ * les gens du domaine), puis relancer « node src/cli.mjs group --apply ».
+ * Avec `ANYONE_CAN_POST`, Google recommande d'ajouter la modération des
+ * non-membres (`messageModerationLevel: 'MODERATE_NON_MEMBERS'`) pour éviter le
+ * pourriel.
  *
  * @type {Array<{ key: string, value: string, why: string, external?: boolean }>}
  */
@@ -68,18 +98,20 @@ const DESIRED_SETTINGS = [
   },
   {
     key: 'whoCanViewGroup',
-    value: 'ALL_IN_DOMAIN_CAN_VIEW',
-    why: "Seules les personnes du domaine peuvent lire les messages du groupe.",
+    value: 'ALL_MEMBERS_CAN_VIEW',
+    why: "Seuls les membres du groupe peuvent lire les conversations du groupe.",
   },
   {
     key: 'whoCanViewMembership',
-    value: 'ALL_IN_DOMAIN_CAN_VIEW',
-    why: "Seules les personnes du domaine peuvent voir qui fait partie du groupe.",
+    value: 'ALL_MEMBERS_CAN_VIEW',
+    why: "Seuls les membres du groupe peuvent voir qui en fait partie.",
   },
   {
     key: 'whoCanPostMessage',
-    value: 'ALL_IN_DOMAIN_CAN_POST',
-    why: "Seules les personnes du domaine peuvent écrire au groupe — ça bloque le pourriel externe.",
+    value: 'ALL_MEMBERS_CAN_POST',
+    why:
+      "Seuls les membres du groupe peuvent lui écrire — ça bloque le pourriel. " +
+      "ATTENTION : les courriels venant de l'extérieur seront refusés (voir l'explication à l'étape 2).",
   },
   {
     key: 'whoCanContactOwner',
@@ -136,25 +168,66 @@ function groupRoleFor(teamRole) {
 /** Puissance relative des rôles Google, pour ne jamais rétrograder quelqu'un par erreur. */
 const ROLE_RANK = { MEMBER: 0, MANAGER: 1, OWNER: 2 };
 
+/** Les rôles Google sont en anglais dans l'API : on les traduit dès qu'on les affiche. */
+const ROLE_LABEL = {
+  OWNER: 'OWNER (propriétaire du groupe)',
+  MANAGER: 'MANAGER (gestionnaire)',
+  MEMBER: 'MEMBER (membre simple)',
+};
+
+/** Rôle Google + sa traduction, pour que personne n'ait à deviner. */
+function roleLabel(role) {
+  const key = String(role ?? '').toUpperCase();
+  return ROLE_LABEL[key] ?? (key === '' ? 'MEMBER (membre simple)' : key);
+}
+
+/**
+ * Met une valeur dans une chaîne JavaScript entre apostrophes, en la rendant
+ * inoffensive. Retourne null si la valeur contient un caractère qui casserait
+ * la ligne de commande une fois collée dans un terminal (guillemet droit,
+ * dollar, accent grave, barre oblique inversée, retour à la ligne).
+ *
+ * Sans cette précaution, une adresse ou un chemin biscornu produirait une
+ * commande qui ne fait pas ce qu'elle annonce — le pire cadeau à faire à
+ * quelqu'un qui la copie-colle sans la lire.
+ *
+ * @param {string} value
+ * @returns {string|null}
+ */
+function safeJsString(value) {
+  const text = String(value ?? '');
+  if (text === '' || /["$`\\\r\n]/.test(text)) return null;
+  return `'${text.replace(/'/g, "\\'")}'`;
+}
+
 /**
  * Commande à copier-coller pour retirer un membre du groupe.
  * On ne le fait JAMAIS automatiquement : retirer quelqu'un coupe ses accès au
  * Drive partagé et aux calendriers. C'est une décision humaine.
  *
- * @param {string} groupEmail
- * @param {string} memberEmail
- * @returns {string}
+ * Retourne null si l'une des valeurs ne peut pas être insérée sans risque :
+ * l'appelant renvoie alors vers la console d'administration, ce qui marche
+ * toujours.
+ *
+ * @param {string} groupEmail adresse du groupe
+ * @param {string} memberEmail adresse à retirer
+ * @param {string} [configFile] chemin du config.json réellement utilisé
+ * @returns {string|null}
  */
-function removalCommand(groupEmail, memberEmail) {
+function removalCommand(groupEmail, memberEmail, configFile = './config.json') {
+  const g = safeJsString(groupEmail);
+  const m = safeJsString(memberEmail);
+  const c = safeJsString(configFile);
+  if (!g || !m || !c) return null;
+
   return (
     'node --input-type=module -e "' +
     "import{loadConfig}from'./src/lib/config.mjs';" +
     "import{getClients}from'./src/lib/google.mjs';" +
-    "const c=await loadConfig('./config.json');" +
+    `const c=loadConfig(${c});` +
     'const{admin}=await getClients({config:c});' +
-    `await admin.members.delete({groupKey:'${groupEmail}',memberKey:'${memberEmail}'});` +
-    `console.log('Retiré : ${memberEmail}');" ` +
-    '   # à lancer depuis la racine de la trousse'
+    `await admin.members.delete({groupKey:${g},memberKey:${m}});` +
+    `console.log('Retiré du groupe : '+${m});"`
   );
 }
 
@@ -172,16 +245,24 @@ const GROUP_FIELDS = 'id,email,name,description,adminCreated,directMembersCount'
  * (« le groupe n'existe pas encore »), pas une erreur temporaire. Sans ça,
  * chaque première exécution attendrait deux minutes pour rien.
  *
+ * EXCEPTION : juste après un 409 « existe déjà », le 404 n'est PLUS une réponse
+ * attendue — Google vient de nous dire que quelque chose porte cette adresse.
+ * Là, un 404 est presque toujours de la propagation, et conclure trop vite
+ * afficherait à tort « cette adresse est prise par un utilisateur ». D'où
+ * l'option { propagation: true } dans ce cas précis.
+ *
  * @param {object} admin client Admin SDK Directory
  * @param {string} groupEmail
+ * @param {{ propagation?: boolean, tries?: number }} [options]
  * @returns {Promise<object|null>}
  */
-async function findGroup(admin, groupEmail) {
+async function findGroup(admin, groupEmail, options = {}) {
+  const { propagation = false, tries = 4 } = options;
   try {
     const res = await withRetry(() => admin.groups.get({ groupKey: groupEmail, fields: GROUP_FIELDS }), {
       label: `recherche du groupe ${groupEmail}`,
-      propagation: false,
-      tries: 4,
+      propagation,
+      tries,
     });
     return res?.data ?? null;
   } catch (e) {
@@ -281,10 +362,11 @@ function explainSettingsFailure(e, groupEmail) {
  * @param {boolean} params.apply
  * @param {boolean} params.groupJustCreated le groupe vient d'être créé (donc réglages inconnus)
  * @param {object} params.log
- * @returns {Promise<{ changed: string[], unchanged: string[], warnings: string[] }>}
+ * @returns {Promise<{ changed: string[], unchanged: string[], warnings: string[], current: object|null }>}
+ *   `current` = les réglages lus chez Google (null si la lecture a échoué).
  */
 async function syncGroupSettings({ groupsSettings, groupEmail, desired, apply, groupJustCreated, log }) {
-  const out = { changed: [], unchanged: [], warnings: [] };
+  const out = { changed: [], unchanged: [], warnings: [], current: null };
 
   // On ne demande pas de « fields » à cette API : elle date de 2022, l'objet est
   // petit, et un filtrage partiel y est une source d'ennuis silencieux.
@@ -301,6 +383,7 @@ async function syncGroupSettings({ groupsSettings, groupEmail, desired, apply, g
       },
     );
     current = res?.data ?? {};
+    out.current = current;
   } catch (e) {
     // En simulation, si le groupe n'existe pas encore, l'échec est normal.
     if (!apply && isNotFound(e)) {
@@ -395,7 +478,19 @@ async function listGroupMembers(admin, groupEmail) {
  * @param {object} params
  * @returns {Promise<{ created: object[], updated: object[], unchanged: object[], warnings: string[] }>}
  */
-async function syncMembers({ admin, groupEmail, team, existing, apply, groupJustCreated, personalEmail, adminEmail, log }) {
+async function syncMembers({
+  admin,
+  groupEmail,
+  team,
+  existing,
+  apply,
+  groupJustCreated,
+  personalEmail,
+  adminEmail,
+  configFile,
+  membersReadable = true,
+  log,
+}) {
   const out = { created: [], updated: [], unchanged: [], warnings: [] };
 
   /** @type {Map<string, {role: string, status?: string, type?: string}>} */
@@ -418,7 +513,7 @@ async function syncMembers({ admin, groupEmail, team, existing, apply, groupJust
 
     if (!found) {
       if (!apply) {
-        log.plan(`Ajouter ${person.name} <${email}> au groupe comme ${wantedRole}.`);
+        log.plan(`Ajouter ${person.name} <${email}> au groupe comme ${roleLabel(wantedRole)}.`);
         out.created.push({ label: `${email} (${wantedRole})` });
         continue;
       }
@@ -446,7 +541,7 @@ async function syncMembers({ admin, groupEmail, team, existing, apply, groupJust
             tries: groupJustCreated ? 8 : 5,
           },
         );
-        log.ok(`${person.name} <${email}> ajouté au groupe comme ${wantedRole}.`);
+        log.ok(`${person.name} <${email}> ajouté au groupe comme ${roleLabel(wantedRole)}.`);
         out.created.push({ label: `${email} (${wantedRole})` });
       } catch (e) {
         if (isConflict(e)) {
@@ -456,9 +551,17 @@ async function syncMembers({ admin, groupEmail, team, existing, apply, groupJust
           out.unchanged.push({ label: `${email} (déjà membre)` });
           continue;
         }
+        const horsDomaine = domainOf(email) !== domainOf(groupEmail);
         throw new Error(
           `Impossible d'ajouter ${email} au groupe ${groupEmail}.\n` +
             explainGoogleError(e, { context: `ajout de ${email}` }) +
+            (horsDomaine
+              ? "\n\nCette adresse n'est pas dans le même domaine que le groupe. Un groupe qui\n" +
+                'refuse les membres externes (réglage « allowExternalMembers » à false) rejette\n' +
+                "exactement de cette façon. Pour l'autoriser : https://admin.google.com/ac/groups\n" +
+                `  -> chercher ${groupEmail} -> Paramètres du groupe -> « Autoriser les membres\n` +
+                '  externes au domaine ».'
+              : '') +
             "\n\nVérifie aussi que ce compte existe bien dans le domaine (une faute de frappe\n" +
             "dans config.json donne exactement cette erreur) : node src/cli.mjs audit",
         );
@@ -471,7 +574,7 @@ async function syncMembers({ admin, groupEmail, team, existing, apply, groupJust
     const wantedRank = ROLE_RANK[wantedRole] ?? 0;
 
     if (found.role === wantedRole) {
-      log.skip(`${email} est déjà membre du groupe avec le rôle ${wantedRole}.`);
+      log.skip(`${email} est déjà membre du groupe avec le rôle attendu : ${roleLabel(wantedRole)}.`);
       out.unchanged.push({ label: `${email} (${wantedRole})` });
       continue;
     }
@@ -481,9 +584,12 @@ async function syncMembers({ admin, groupEmail, team, existing, apply, groupJust
       // le genre de « correction » qui retire des droits à quelqu'un qui en a
       // besoin. On le signale, l'humain tranche.
       out.warnings.push(
-        `${email} est ${found.role} dans le groupe ${groupEmail}, alors que config.json le déclare ` +
-          `« ${person.role} » (soit ${wantedRole}). La trousse ne rétrograde JAMAIS personne toute seule.\n` +
-          `  Si c'est voulu, corrige config.json (team[].role).\n` +
+        `${email} est ${roleLabel(found.role)} dans le groupe ${groupEmail}, alors que config.json le ` +
+          `déclare « ${person.role} » (soit ${roleLabel(wantedRole)}). C'est PLUS de droits que prévu, ` +
+          'pas moins : rien ne manque à cette personne.\n' +
+          '  La trousse ne rétrograde JAMAIS personne toute seule — retirer des droits par erreur, ' +
+          "c'est aussi grave que retirer quelqu'un du groupe.\n" +
+          `  Si c'est voulu, corrige config.json (le « role » de cette personne dans « team »).\n` +
           `  Si tu veux vraiment le rétrograder : https://admin.google.com/ac/groups (chercher ${groupEmail}).`,
       );
       out.unchanged.push({ label: `${email} (${found.role}, non rétrogradé)` });
@@ -492,7 +598,7 @@ async function syncMembers({ admin, groupEmail, team, existing, apply, groupJust
 
     // Rôle insuffisant : on promeut, c'est ce que la configuration demande.
     if (!apply) {
-      log.plan(`Passer ${email} de ${found.role} à ${wantedRole} dans le groupe.`);
+      log.plan(`Passer ${email} de ${roleLabel(found.role)} à ${roleLabel(wantedRole)} dans le groupe.`);
       out.updated.push({ label: `${email} : ${found.role} -> ${wantedRole}` });
       continue;
     }
@@ -507,17 +613,25 @@ async function syncMembers({ admin, groupEmail, team, existing, apply, groupJust
           }),
         { label: `changement de rôle de ${email}`, propagation: true, tries: 5 },
       );
-      log.ok(`${email} passe de ${found.role} à ${wantedRole}.`);
+      log.ok(`${email} passe de ${roleLabel(found.role)} à ${roleLabel(wantedRole)}.`);
       out.updated.push({ label: `${email} : ${found.role} -> ${wantedRole}` });
     } catch (e) {
       out.warnings.push(
-        `Le rôle de ${email} n'a pas pu passer à ${wantedRole}.\n` +
+        `Le rôle de ${email} n'a pas pu passer à ${roleLabel(wantedRole)}.\n` +
           explainGoogleError(e, { context: `rôle de ${email}` }),
       );
     }
   }
 
   /* --- b) les membres présents qui ne sont PAS dans « team » ---------- */
+  // Si la liste des membres n'a pas pu être lue, on s'arrête ici. Les ajouts
+  // ci-dessus restent valables (ils sont idempotents : un membre déjà là
+  // renvoie un conflit, qu'on traite comme un succès), mais on ne peut RIEN
+  // conclure sur les « membres en trop » ni sur la présence d'un propriétaire.
+  // Annoncer « aucun membre en trop » alors qu'on n'a rien pu lire serait un
+  // mensonge, et c'est exactement le genre de silence qui coûte cher.
+  if (!membersReadable) return out;
+
   const wantedEmails = new Set(team.map((p) => normalizeEmail(p.email)));
   const extras = [...byEmail.keys()].filter((email) => !wantedEmails.has(email));
 
@@ -544,13 +658,23 @@ async function syncMembers({ admin, groupEmail, team, existing, apply, groupJust
     lines.push('');
     lines.push('Deux façons de corriger, au choix :');
     lines.push('  1. Si ces personnes DOIVENT rester : ajoute-les dans « team » de config.json.');
-    lines.push('  2. Si elles doivent partir, retire-les une par une. Pour chacune :');
-    lines.push('');
-    for (const email of extras) {
-      lines.push(`     ${removalCommand(groupEmail, email)}`);
+    lines.push('     Relancer la commande ne les retirera jamais : ce message reviendra simplement.');
+    lines.push('  2. Si elles doivent partir, le plus simple est la console d\'administration :');
+    lines.push(`     https://admin.google.com/ac/groups — chercher ${groupEmail} — onglet « Membres ».`);
+
+    const commandes = extras
+      .map((email) => removalCommand(groupEmail, email, configFile))
+      .filter((cmd) => typeof cmd === 'string');
+
+    if (commandes.length > 0) {
+      lines.push('');
+      lines.push('     Ou, en ligne de commande, depuis le dossier de la trousse, une par personne :');
+      lines.push('');
+      for (const cmd of commandes) lines.push(`     ${cmd}`);
+      lines.push('');
+      lines.push('     (relis bien l\'adresse avant d\'appuyer sur Entrée : cette commande retire');
+      lines.push('      la personne immédiatement, sans demander de confirmation.)');
     }
-    lines.push('');
-    lines.push(`  (ou à la souris : https://admin.google.com/ac/groups — chercher ${groupEmail})`);
 
     out.warnings.push(lines.join('\n'));
   }
@@ -560,8 +684,10 @@ async function syncMembers({ admin, groupEmail, team, existing, apply, groupJust
     team.some((p) => groupRoleFor(p.role) === 'OWNER') || [...byEmail.values()].some((m) => m.role === 'OWNER');
   if (!willHaveOwner) {
     out.warnings.push(
-      `Le groupe ${groupEmail} n'aura aucun propriétaire (OWNER). Personne ne pourra gérer ` +
-        "ses membres depuis l'interface Google.\n" +
+      `Le groupe ${groupEmail} n'aura aucun propriétaire (rôle OWNER). Personne ne pourra gérer ` +
+        "ses membres depuis l'interface Google Groupes.\n" +
+        '  Ce n\'est pas un blocage : un super-administrateur du domaine garde toujours la main ' +
+        'depuis https://admin.google.com/ac/groups. Mais c\'est une gestion de plus à faire à la main.\n' +
         '  Quoi faire : mettre « "role": "organizer" » sur au moins une personne dans ' +
         '« team » de config.json (typiquement le propriétaire de l\'entreprise), puis relancer.',
     );
@@ -579,10 +705,11 @@ async function syncMembers({ admin, groupEmail, team, existing, apply, groupJust
  * @param {object} params.config configuration validée
  * @param {boolean} params.apply false = simulation (défaut), true = on écrit chez Google
  * @param {object} params.state cache local des identifiants (optimisation seulement)
+ * @param {string} [params.configPath] chemin du config.json utilisé, pour les commandes affichées
  * @param {object} params.log
  * @returns {Promise<{created: object[], updated: object[], unchanged: object[], warnings: string[]}>}
  */
-export async function run({ config, apply = false, state = {}, log }) {
+export async function run({ config, apply = false, state = {}, configPath = './config.json', log }) {
   /** @type {{created: object[], updated: object[], unchanged: object[], warnings: string[]}} */
   const summary = { created: [], updated: [], unchanged: [], warnings: [] };
 
@@ -618,45 +745,80 @@ export async function run({ config, apply = false, state = {}, log }) {
       'le Drive partagé seront partagés AVEC LUI plutôt qu\'avec chaque adresse.',
   );
 
-  // On demande toutes les portées de la trousse en une seule fois. En mode
-  // OAuth, ça évite à l'administrateur de repasser par le navigateur à chaque
-  // commande : une seule autorisation couvre groupe, calendriers et Drive.
-  const { admin, groupsSettings } = await getClients({ config });
+  // Portées limitées à l'annuaire et aux réglages de groupe : voir GROUP_SCOPES.
+  // Cette commande n'a AUCUN droit sur Drive ni sur les calendriers.
+  const { admin, groupsSettings } = await getClients({ config, scopes: GROUP_SCOPES });
 
   /* --- Étape 1 : le groupe existe-t-il ? ------------------------------ */
   log.step('1/3 — Vérification du groupe');
   let group = await findGroup(admin, groupEmail);
   let groupJustCreated = false;
 
+  // Adresse réellement utilisée pour la suite. Elle peut différer de celle de
+  // config.json : groups.get accepte un ALIAS et répond avec le groupe qui le
+  // porte. Sans cette distinction, la trousse pourrait renommer un groupe qui
+  // n'est pas le sien parce que l'adresse voulue en est un simple alias.
+  let groupKey = groupEmail;
+  let isAlias = false;
+
   if (group) {
-    log.skip(`Le groupe ${groupEmail} existe déjà (id ${group.id}). On le réutilise, on n'en crée pas un deuxième.`);
-    summary.unchanged.push({ label: `Groupe ${groupEmail}`, id: group.id });
+    const canonical = normalizeEmail(group.email);
+    if (canonical && canonical !== groupEmail) {
+      isAlias = true;
+      groupKey = canonical;
+      summary.warnings.push(
+        `L'adresse « ${groupEmail} » demandée dans config.json n'est pas l'adresse principale d'un ` +
+          `groupe : c'est un ALIAS du groupe « ${group.name ?? canonical} » <${canonical}>, qui existe déjà.\n` +
+          "Par prudence, la trousse ne renomme PAS ce groupe : il ne lui appartient pas, il servait\n" +
+          "peut-être déjà à autre chose. Elle se contente d'y ajouter les membres de « team » et d'y\n" +
+          'appliquer les réglages de confidentialité.\n' +
+          'Quoi faire, au choix :\n' +
+          `  - si c'est bien le groupe voulu : remplace « group.email » par ${canonical} dans config.json ;\n` +
+          `  - si ce n'est PAS le bon groupe : choisis une autre adresse (ex. equipe-portail@${config.domain}).`,
+      );
+    }
+
+    log.skip(`Le groupe ${groupKey} existe déjà (id ${group.id}). On le réutilise, on n'en crée pas un deuxième.`);
 
     // Le nom affiché ou la description ont-ils dérivé par rapport à config.json ?
     // On réaligne : c'est du texte, c'est sans risque, et un nom qui ne
-    // correspond plus à la config sème la confusion.
+    // correspond plus à la config sème la confusion. Jamais sur un alias : ce
+    // groupe-là n'est pas celui que la trousse a créé.
     const patch = {};
-    if (groupName && group.name !== groupName) patch.name = groupName;
-    if (groupDescription && (group.description ?? '') !== groupDescription) patch.description = groupDescription;
+    if (!isAlias) {
+      if (groupName && group.name !== groupName) patch.name = groupName;
+      if (groupDescription && (group.description ?? '') !== groupDescription) patch.description = groupDescription;
+    }
+
+    // Compté « déjà conforme » seulement s'il n'y a rien à réaligner : sinon il
+    // apparaîtrait deux fois dans le résumé, en « conforme » ET en « ajusté ».
+    if (Object.keys(patch).length === 0) {
+      summary.unchanged.push({ label: `Groupe ${groupKey}`, id: group.id });
+    }
 
     if (Object.keys(patch).length > 0) {
       const what = Object.keys(patch).join(' et ');
+      log.info(
+        `Le ${what} du groupe chez Google ne correspond plus à config.json. C'est config.json qui ` +
+          "fait foi : la trousse le réaligne. Si tu as renommé ce groupe exprès dans la console, " +
+          'reporte le nouveau nom dans config.json, sinon il sera réécrit à chaque exécution.',
+      );
       if (!apply) {
         log.plan(`Mettre à jour ${what} du groupe pour correspondre à config.json.`);
-        summary.updated.push({ label: `Groupe ${groupEmail} (${what})` });
+        summary.updated.push({ label: `Groupe ${groupKey} (${what})` });
       } else {
         try {
           const res = await withRetry(
-            () => admin.groups.patch({ groupKey: groupEmail, requestBody: patch, fields: GROUP_FIELDS }),
-            { label: `mise à jour du groupe ${groupEmail}`, propagation: false, tries: 3 },
+            () => admin.groups.patch({ groupKey, requestBody: patch, fields: GROUP_FIELDS }),
+            { label: `mise à jour du groupe ${groupKey}`, propagation: false, tries: 3 },
           );
           group = res?.data ?? group;
           log.ok(`${what} du groupe mis à jour d'après config.json.`);
-          summary.updated.push({ label: `Groupe ${groupEmail} (${what})` });
+          summary.updated.push({ label: `Groupe ${groupKey} (${what})` });
         } catch (e) {
           summary.warnings.push(
             `Le nom ou la description du groupe n'ont pas pu être mis à jour.\n` +
-              explainGoogleError(e, { context: `mise à jour de ${groupEmail}` }),
+              explainGoogleError(e, { context: `mise à jour de ${groupKey}` }),
           );
         }
       }
@@ -682,6 +844,7 @@ export async function run({ config, apply = false, state = {}, log }) {
       );
       group = res?.data ?? null;
       groupJustCreated = true;
+      groupKey = normalizeEmail(group?.email) || groupEmail;
       log.ok(`Groupe ${groupEmail} créé (id ${group?.id ?? 'inconnu'}).`);
       summary.created.push({ label: `Groupe ${groupEmail}`, id: group?.id });
     } catch (e) {
@@ -694,10 +857,16 @@ export async function run({ config, apply = false, state = {}, log }) {
       // l'adresse soit déjà prise par un groupe, par un utilisateur ou par un
       // alias. Impossible de trancher sans relire — on relit.
       log.info(`Google répond que ${groupEmail} existe déjà. Vérification de ce que c'est exactement…`);
-      group = await findGroup(admin, groupEmail);
+      // Ici, et SEULEMENT ici, on tolère les 404 de propagation : Google vient
+      // d'affirmer que l'adresse est prise. Un 404 immédiat serait donc presque
+      // toujours un retard de propagation, et conclure tout de suite afficherait
+      // à tort « cette adresse appartient à un utilisateur ».
+      group = await findGroup(admin, groupEmail, { propagation: true, tries: 4 });
       if (group) {
+        const canonical = normalizeEmail(group.email);
+        if (canonical && canonical !== groupEmail) groupKey = canonical;
         log.skip(`C'était bien un groupe, créé entre-temps. On le réutilise (id ${group.id}).`);
-        summary.unchanged.push({ label: `Groupe ${groupEmail}`, id: group.id });
+        summary.unchanged.push({ label: `Groupe ${groupKey}`, id: group.id });
       } else {
         throw new Error(
           `L'adresse ${groupEmail} est déjà utilisée, mais PAS par un groupe.\n` +
@@ -723,16 +892,16 @@ export async function run({ config, apply = false, state = {}, log }) {
         'partout instantanément. Les commandes « calendar » et « drive » en dépendent.',
     );
     try {
-      const res = await withRetry(() => admin.groups.get({ groupKey: groupEmail, fields: GROUP_FIELDS }), {
-        label: `propagation du groupe ${groupEmail}`,
+      const res = await withRetry(() => admin.groups.get({ groupKey, fields: GROUP_FIELDS }), {
+        label: `propagation du groupe ${groupKey}`,
         propagation: true,
         tries: 8,
       });
       group = res?.data ?? group;
-      log.ok(`Le groupe ${groupEmail} est maintenant visible par l'API. On peut continuer.`);
+      log.ok(`Le groupe ${groupKey} est maintenant visible par l'API. On peut continuer.`);
     } catch (e) {
       summary.warnings.push(
-        `Le groupe ${groupEmail} a été créé, mais Google ne le voit pas encore partout après ` +
+        `Le groupe ${groupKey} a été créé, mais Google ne le voit pas encore partout après ` +
           "plusieurs minutes d'attente.\n" +
           "Ce n'est pas une erreur de configuration. Quoi faire : attendre 5 minutes puis relancer\n" +
           '« node src/cli.mjs setup --apply » — la trousse est idempotente et reprendra où elle en est.\n' +
@@ -743,68 +912,145 @@ export async function run({ config, apply = false, state = {}, log }) {
 
   /* --- Cache local (optimisation seulement) --------------------------- */
   if (apply && group?.id) {
-    setStateKey(state, 'group', { email: groupEmail, id: group.id, name: group.name ?? groupName });
+    setStateKey(state, 'group', { email: groupKey, id: group.id, name: group.name ?? groupName });
+  }
+
+  /* --- Lecture des membres AVANT de toucher aux réglages -------------- */
+  // L'ordre compte. Le réglage « aucun membre externe » ne doit pas être posé
+  // sans savoir qui est DÉJÀ dans le groupe : quelqu'un d'extérieur au domaine
+  // qui y figure aujourd'hui verrait son accès se dégrader sans qu'on l'ait dit.
+  // On lit donc d'abord, on décide ensuite. C'est aussi une lecture seule : elle
+  // est faite en simulation comme en vrai.
+  /** @type {Array<object>} */
+  let existingMembers = [];
+  let membersReadable = true;
+
+  if (groupJustCreated) {
+    // Un groupe créé par l'API naît vide (contrairement à l'interface web, qui
+    // ajoute le créateur). Inutile de le demander à Google, et ça évite un 404
+    // de propagation de plus.
+    existingMembers = [];
+  } else if (!group) {
+    // Simulation avec un groupe qui n'existe pas encore : rien à lire.
+    existingMembers = [];
+  } else {
+    try {
+      existingMembers = await listGroupMembers(admin, groupKey);
+    } catch (e) {
+      // On ne fait PAS échouer toute la commande pour ça : les ajouts restent
+      // possibles et sans danger. Mais il faut le dire, parce que tout ce qui
+      // suit (membres en trop, propriétaire présent) devient invérifiable.
+      membersReadable = false;
+      existingMembers = [];
+      summary.warnings.push(
+        `La liste des membres du groupe ${groupKey} n'a pas pu être lue.\n` +
+          explainGoogleError(e, { context: 'lecture des membres du groupe' }) +
+          '\nConséquence : les membres de « team » seront quand même ajoutés (un ajout en double ' +
+          'est sans effet),\nmais la trousse ne peut PAS te dire s\'il y a des membres en trop dans ' +
+          'ce groupe. À vérifier à la main :\n' +
+          `  https://admin.google.com/ac/groups — chercher ${groupKey} — onglet « Membres ».`,
+      );
+    }
   }
 
   /* --- Étape 2 : réglages -------------------------------------------- */
   log.step('2/3 — Réglages de confidentialité du groupe');
   log.info(
-    'Objectif : aucun membre externe, seules les personnes du domaine peuvent voir et écrire, ' +
+    'Objectif : un groupe FERMÉ — aucun membre externe, seuls les membres lisent et écrivent, ' +
       "et personne ne peut s'inscrire tout seul.",
   );
+  log.info(
+    "À savoir avant de continuer : avec ces réglages, un courriel envoyé à ce groupe depuis " +
+      "l'extérieur (un client, un fournisseur, ta propre adresse personnelle) sera REFUSÉ. " +
+      "C'est voulu pour un groupe d'équipe interne. Si cette adresse doit aussi servir de " +
+      'contact public, voir la note « whoCanPostMessage » en tête de src/commands/group.mjs : ' +
+      'une seule ligne à changer.',
+  );
 
-  // Cas particulier : si « team » contient une adresse hors domaine, interdire
-  // les membres externes rendrait son ajout impossible. On préfère laisser le
-  // réglage tel quel et le dire, plutôt que de casser la synchronisation.
-  const externalMembers = config.team.filter((m) => domainOf(m.email) !== config.domain);
+  // Cas particulier : interdire les membres externes rendrait impossible la
+  // présence d'une adresse hors domaine — celles de « team », mais aussi celles
+  // déjà membres du groupe. On préfère laisser le réglage tel quel et le dire,
+  // plutôt que de casser la synchronisation ou de dégrader un accès existant.
+  const externalWanted = config.team.filter((m) => domainOf(m.email) !== config.domain);
+  const externalPresent = existingMembers
+    .map((m) => normalizeEmail(m.email))
+    .filter((email) => email && domainOf(email) !== config.domain && domainOf(email) !== domainOf(groupKey));
+
   let desiredSettings = DESIRED_SETTINGS;
-  if (externalMembers.length > 0) {
+  if (externalWanted.length > 0 || externalPresent.length > 0) {
     desiredSettings = DESIRED_SETTINGS.filter((s) => !s.external);
+
+    const quiVeut = externalWanted.map((m) => m.email);
+    const dejaLa = externalPresent.filter((e) => !quiVeut.includes(e));
+    const perso = normalizeEmail(config.personalEmail);
+    const persoConcernee = perso !== '' && dejaLa.includes(perso);
+
     summary.warnings.push(
-      `« team » contient ${externalMembers.length} adresse(s) hors du domaine ${config.domain} : ` +
-        `${externalMembers.map((m) => m.email).join(', ')}.\n` +
+      `Le groupe ${groupKey} compte au moins une adresse hors du domaine ${config.domain} :\n` +
+        (quiVeut.length > 0 ? `  - inscrite dans « team » de config.json : ${quiVeut.join(', ')}\n` : '') +
+        (dejaLa.length > 0 ? `  - déjà membre du groupe aujourd'hui : ${dejaLa.join(', ')}\n` : '') +
         "Le réglage « aucun membre externe » (allowExternalMembers = false) n'a donc PAS été appliqué :\n" +
-        'il empêcherait justement ces personnes de faire partie du groupe.\n' +
+        "il empêcherait ces personnes d'être membres, et couperait la réception du courrier du groupe\n" +
+        'à celles qui le sont déjà. La trousse ne coupe jamais un accès existant sans le dire.\n' +
         'Quoi faire :\n' +
+        (persoConcernee
+          ? `  - ${perso} est ton adresse personnelle : c'est exactement le travail de « node src/cli.mjs\n` +
+            "    detach --apply », qui la retire des ressources de l'entreprise. Lance-la, puis relance\n" +
+            '    « node src/cli.mjs group --apply » : le groupe se refermera tout seul ;\n'
+          : '') +
         "  - si ce sont des fautes de frappe, corrige-les dans config.json et relance ;\n" +
-        '  - si ces personnes sont bien des externes assumés, il n\'y a rien à faire, mais sache\n' +
-        '    que le groupe accepte les membres hors domaine.',
+        "  - si ces personnes sont des externes assumés, il n'y a rien à faire, mais sache que ce\n" +
+        '    groupe accepte les membres hors domaine ;\n' +
+        `  - à savoir : une adresse d'un domaine SECONDAIRE du même Workspace est comptée ici comme\n` +
+        `    « hors domaine », parce que config.json ne connaît que « ${config.domain} ».`,
     );
   }
 
   const settingsResult = await syncGroupSettings({
     groupsSettings,
-    groupEmail,
+    groupEmail: groupKey,
     desired: desiredSettings,
     apply,
     groupJustCreated,
     log,
   });
 
+  // Piège inverse : le groupe refuse DÉJÀ les membres externes (réglage posé
+  // avant, ou par quelqu'un d'autre) alors que « team » contient une adresse
+  // hors domaine. La trousse n'y touche pas — mais l'ajout va échouer, et
+  // autant l'annoncer maintenant plutôt que de laisser lire une erreur Google.
+  if (externalWanted.length > 0 && String(settingsResult.current?.allowExternalMembers ?? '') === 'false') {
+    summary.warnings.push(
+      `Le groupe ${groupKey} est réglé pour REFUSER les membres hors domaine ` +
+        '(allowExternalMembers = false), et cette valeur a été posée en dehors de la trousse.\n' +
+        `L'ajout de ${externalWanted.map((m) => m.email).join(', ')} va donc échouer tant que ce ` +
+        'réglage reste en place.\n' +
+        'Quoi faire, au choix :\n' +
+        `  - autoriser les membres externes : https://admin.google.com/ac/groups — chercher ${groupKey}\n` +
+        '    — « Paramètres du groupe » — « Autoriser les membres externes au domaine » ;\n' +
+        "  - ou retirer cette adresse de « team » dans config.json si elle n'a rien à y faire.",
+    );
+  }
+
   if (settingsResult.changed.length > 0) {
     summary.updated.push({
-      label: `Réglages du groupe ${groupEmail} (${settingsResult.changed.join(', ')})`,
+      label: `Réglages du groupe ${groupKey} (${settingsResult.changed.join(', ')})`,
     });
   } else if (settingsResult.unchanged.length > 0) {
-    summary.unchanged.push({ label: `Réglages du groupe ${groupEmail}` });
+    summary.unchanged.push({ label: `Réglages du groupe ${groupKey}` });
   }
   summary.warnings.push(...settingsResult.warnings);
 
   /* --- Étape 3 : membres --------------------------------------------- */
   log.step(`3/3 — Membres du groupe (${config.team.length} attendu(s))`);
 
-  /** @type {Array<object>} */
-  let existingMembers = [];
   if (groupJustCreated) {
-    // Un groupe créé par l'API naît vide (contrairement à l'interface web, qui
-    // ajoute le créateur). Inutile de le demander à Google, et ça évite un 404
-    // de propagation de plus.
-    log.info('Groupe tout neuf : il est vide, on ajoute les quatre membres.');
+    log.info(
+      `Groupe tout neuf : il est vide, on y ajoute les ${config.team.length} personne(s) de « team ».`,
+    );
   } else if (!group) {
-    // Simulation avec un groupe qui n'existe pas encore : rien à lire.
     log.plan("Le groupe n'existe pas encore : tous les membres seront ajoutés à sa création.");
-  } else {
-    existingMembers = await listGroupMembers(admin, groupEmail);
+  } else if (membersReadable) {
     log.info(
       `Le groupe compte actuellement ${existingMembers.length} membre(s) direct(s).` +
         (existingMembers.length > 0
@@ -815,13 +1061,15 @@ export async function run({ config, apply = false, state = {}, log }) {
 
   const membersResult = await syncMembers({
     admin,
-    groupEmail,
+    groupEmail: groupKey,
     team: config.team,
     existing: existingMembers,
     apply,
     groupJustCreated,
     personalEmail: config.personalEmail,
     adminEmail: config.adminEmail,
+    configFile: configPath,
+    membersReadable,
     log,
   });
 
@@ -833,7 +1081,7 @@ export async function run({ config, apply = false, state = {}, log }) {
   /* --- Mot de la fin -------------------------------------------------- */
   if (apply) {
     log.ok(
-      `Le groupe ${groupEmail} est prêt. Les prochaines commandes (calendar, drive) accorderont ` +
+      `Le groupe ${groupKey} est prêt. Les prochaines commandes (calendar, drive) accorderont ` +
         'les accès à CE groupe : plus besoin de toucher aux adresses une par une.',
     );
   } else {

@@ -3,14 +3,29 @@
 service-account.json
 oauth-client.json
 .tokens.json
+# Nom sous lequel la console Google Cloud telecharge un client OAuth. La trousse
+# accepte ce nom tel quel (aucun renommage a faire) : il doit donc etre ignore.
+client_secret*.json
 
 # Configuration reelle (contient les adresses et le domaine du client).
-# Le modele a commiter est config.example.json.
+# Le modele a commiter est config.example.json — et c'est le SEUL config qui
+# doit partir sur le depot, d'ou la ligne « ! » qui le reautorise.
 config.json
+config.*.json
+!config.example.json
+
+# Sauvegardes ecrites par « init --apply --force » (config.json.bak) : meme
+# contenu que config.json, donc memes vraies adresses.
+*.bak
 
 # Cache local des identifiants deja crees. Ce n'est qu'une optimisation :
 # la trousse redecouvre tout via l'API si le fichier est absent.
+# Le motif « .state.json.* » attrape les fichiers voisins ecrits par state.mjs :
+# « .state.json.corrompu » (cache illisible mis de cote) et « .state.json.tmp-1234 »
+# (ecriture atomique interrompue).
 .state.json
+.state.json.*
+.tokens.json.*
 
 # Dependances
 # (sans barre oblique : attrape aussi un lien symbolique, qu'un motif
@@ -22,7 +37,7 @@ node_modules
 npm-debug.log*
 .DS_Store
 
-# Bancs d'essai jetables créés pendant le développement.
+# Bancs d'essai jetables crees pendant le developpement.
 # Ils contiennent des copies de fichiers de src/ : versionner ces doublons
-# les ferait diverger du vrai code. Le test de fumée officiel vit dans scripts/.
+# les ferait diverger du vrai code.
 .smoketest/

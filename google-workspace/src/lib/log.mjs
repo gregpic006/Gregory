@@ -87,6 +87,18 @@ function toText(value) {
 }
 
 /**
+ * Texte d'une cellule de tableau, forcé sur UNE seule ligne.
+ * Un retour à la ligne dans une cellule (une description collée depuis un
+ * traitement de texte, par exemple) décalerait toutes les colonnes suivantes
+ * et rendrait le tableau illisible.
+ * @param {unknown} value
+ * @returns {string}
+ */
+function cellText(value) {
+  return toText(value).replace(/[\r\n\t]+/g, ' ');
+}
+
+/**
  * Indente les lignes 2..n d'un message multiligne pour qu'elles s'alignent
  * sous le texte de la première ligne plutôt que sous la puce.
  * @param {unknown} text
@@ -213,7 +225,7 @@ export function table(rows, options = {}) {
   if (Array.isArray(list[0])) {
     const width = Math.max(...list.map((r) => (Array.isArray(r) ? r.length : 0)));
     headers = options.columns ?? Array.from({ length: width }, (_, i) => `col${i + 1}`);
-    body = list.map((r) => headers.map((_, i) => toText(Array.isArray(r) ? r[i] : '')));
+    body = list.map((r) => headers.map((_, i) => cellText(Array.isArray(r) ? r[i] : '')));
   } else {
     /** @type {string[]} */
     const seen = [];
@@ -223,7 +235,7 @@ export function table(rows, options = {}) {
       }
     }
     headers = options.columns ?? seen;
-    body = list.map((row) => headers.map((key) => toText(row?.[key])));
+    body = list.map((row) => headers.map((key) => cellText(row?.[key])));
   }
 
   const widths = headers.map((h, i) => {

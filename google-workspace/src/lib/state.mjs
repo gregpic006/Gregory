@@ -184,10 +184,16 @@ export function saveState(file, state, options = {}) {
  * @returns {string[]}
  */
 function toSegments(key) {
-  if (Array.isArray(key)) return key.map((k) => String(k)).filter((k) => k !== '');
-  return String(key ?? '')
-    .split('.')
-    .filter((k) => k !== '');
+  const raw = (Array.isArray(key) ? key.map((k) => String(k)) : String(key ?? '').split('.')).filter((k) => k !== '');
+
+  // Les segments viennent souvent de config.json (noms de dossiers, clés de
+  // calendriers). Un dossier nommé « __proto__ » écrirait dans le prototype de
+  // l'objet d'état au lieu d'y ranger une valeur : le chemin entier est alors
+  // refusé (on ne retire PAS seulement le segment fautif, ce qui écrirait au
+  // mauvais endroit — par exemple à la racine de « folders »).
+  if (raw.some((k) => k === '__proto__' || k === 'prototype' || k === 'constructor')) return [];
+
+  return raw;
 }
 
 /**
@@ -230,6 +236,7 @@ export function setStateKey(state, key, value) {
  */
 export function getStateKey(state, key, fallback = undefined) {
   const segments = toSegments(key);
+  if (segments.length === 0) return fallback;
   let node = state;
   for (const seg of segments) {
     if (typeof node !== 'object' || node === null || !(seg in node)) return fallback;
