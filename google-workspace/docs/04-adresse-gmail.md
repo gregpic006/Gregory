@@ -1,7 +1,7 @@
 # 04 — L'adresse @gmail.com dans ton Workspace
 
 Tu viens de créer ton Google Workspace et tu vois ton ancienne adresse personnelle,
-`greg.picard.2003@gmail.com`, apparaître un peu partout dans la console d'administration. C'est
+ton ancienne adresse Gmail, apparaître un peu partout dans la console d'administration. C'est
 troublant. Ce document explique **pourquoi elle est là**, **si c'est dangereux** (non), **où elle
 se trouve exactement**, et **quoi faire** — dans le bon ordre, sans te barrer dehors de ton propre
 compte.
@@ -162,7 +162,7 @@ Cherche plutôt à remplacer une adresse *personnelle* par une adresse *d'entrep
 durable* :
 
 - ✅ une boîte chez un autre fournisseur (Proton, Fastmail, iCloud) réservée à l'administration ;
-- ✅ un Gmail créé **au nom de l'entreprise** (`admin.portailgestion@gmail.com`), pas ton adresse
+- ✅ un Gmail créé **au nom de l'entreprise** (`ton-ancienne-adresse@gmail.com`), pas ton adresse
   personnelle de 2003 ;
 - ❌ l'adresse personnelle d'un employé — il partira un jour ;
 - ❌ une adresse que personne ne surveille — les avis critiques de Google partiraient dans le vide.

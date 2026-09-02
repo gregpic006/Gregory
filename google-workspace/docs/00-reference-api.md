@@ -139,7 +139,7 @@ Tous les champs de Schema$Groups sont des `string`.
 > généré localement par `node src/cli.mjs init`.
 - Domaine Workspace : découvert par `init` (jamais écrit en dur ici — dépôt public)
 - Super-admin : le compte super-admin du domaine (rempli par `init`)
-- Adresse perso à détacher : <adresse-perso@gmail.com>  # jamais commitée — voir config.json (gitignoré)
+- Adresse perso à détacher : ton-ancienne-adresse@gmail.com  # jamais commitée — voir config.json (gitignoré)
 - Groupe d'équipe : `equipe@<domaine>` par défaut, modifiable dans config.json
 - Mode d'auth choisi : **service-account** (compte de service + délégation)
 - Adresses de l'équipe : découvertes automatiquement

@@ -25,7 +25,8 @@
     "setup": "node src/cli.mjs setup",
     "setup:apply": "node src/cli.mjs setup --apply",
     "detach": "node src/cli.mjs detach",
-    "verify": "node src/cli.mjs verify"
+    "verify": "node src/cli.mjs verify",
+    "check": "node scripts/check.mjs"
   },
   "dependencies": {
     "googleapis": "^178.0.0"

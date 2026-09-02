@@ -49,7 +49,7 @@ console d'administration.
 #### `personalEmail` — ton adresse personnelle à détacher
 
 ```json
-"personalEmail": "greg.picard.2003@gmail.com"
+"personalEmail": "ton-ancienne-adresse@gmail.com"
 ```
 
 L'adresse `@gmail.com` que Google a accrochée au compte lors de l'inscription. Elle sert
