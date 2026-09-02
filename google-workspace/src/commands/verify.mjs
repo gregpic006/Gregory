@@ -1066,6 +1066,21 @@ async function lireDrivePartage(driveApi, driveId, asAdmin) {
 }
 
 /** Les membres attendus du Drive partagé : le groupe, ou chaque adresse. */
+/**
+ * Cette adresse est-elle celle d'un membre de l'équipe décrite dans config.json ?
+ *
+ * Sert à distinguer « quelqu'un d'inconnu a un accès » (à signaler) de « une
+ * personne de l'équipe a un accès direct en plus de celui du groupe » (normal).
+ * Comparaison insensible à la casse : Google renvoie l'adresse avec la casse
+ * saisie à l'inscription (« Greg@... »), alors que l'annuaire la normalise en
+ * minuscules — les deux désignent le même compte.
+ */
+function estDansEquipe(config, adresse) {
+  const cible = lower(adresse);
+  if (cible === '') return false;
+  return (config?.team ?? []).some((membre) => lower(membre?.email) === cible);
+}
+
 function membresDriveAttendus(config) {
   if (config.group?.email) {
     return [
@@ -1298,9 +1313,25 @@ async function controleDrive({ driveApi, config, state, rapport }) {
       continue;
     }
 
+    // Cas courant et parfaitement normal : les accès de l'équipe passent par le
+    // groupe, donc seul le groupe est « attendu » comme membre. Mais Google fait
+    // AUTOMATIQUEMENT gestionnaire la personne qui crée le Drive partagé, et ce
+    // droit direct s'ajoute à celui qu'elle a déjà via le groupe. Cette personne
+    // est bien dans config.json (dans « team ») : dire qu'elle n'y est pas serait
+    // faux et inquiétant pour rien.
+    if (permission?.type === 'user' && estDansEquipe(config, adresse)) {
+      rapport.ok(
+        `${adresse} a aussi un accès direct au Drive (rôle : ${libelleRole}), en plus de celui ` +
+          "qu'il a par le groupe. C'est normal : Google donne ce droit à la personne qui crée le " +
+          'Drive partagé. Sans conséquence, rien à faire.',
+      );
+      continue;
+    }
+
     rapport.avert(
-      `${adresse} est membre du Drive partagé (rôle : ${libelleRole}) mais n'apparaît pas dans config.json.`,
-      "Soit l'ajouter à « team » (ou au groupe) dans config.json, soit le retirer à la main : " +
+      `${adresse} est membre du Drive partagé (rôle : ${libelleRole}) mais ne fait partie ` +
+        "ni du groupe d'équipe, ni de « team » dans config.json.",
+      "Soit l'ajouter à « team » dans config.json, soit le retirer à la main : " +
         'Google Drive > le Drive partagé > Gérer les membres. La trousse ne retire JAMAIS un accès.',
     );
   }
