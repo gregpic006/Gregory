@@ -51,6 +51,7 @@ export const DEFAULTS = Object.freeze({
   timeZone: 'America/Toronto',
   team: [],
   group: null,
+  sharedMailboxes: [],
   calendars: [],
   sharedDrive: {
     name: "Espace d'équipe",
@@ -83,7 +84,7 @@ export const DEFAULTS = Object.freeze({
  * Les clés commençant par « _ » sont libres (commentaires dans le JSON).
  */
 const KNOWN_KEYS = Object.freeze({
-  root: ['domain', 'adminEmail', 'personalEmail', 'timeZone', 'team', 'group', 'calendars', 'sharedDrive', 'auth'],
+  root: ['domain', 'adminEmail', 'personalEmail', 'timeZone', 'team', 'group', 'sharedMailboxes', 'calendars', 'sharedDrive', 'auth'],
   sharedDrive: ['name', 'restrictions', 'folders', 'createReadme'],
   auth: ['mode', 'keyFile', 'oauthClientFile', 'tokenFile'],
   // Les sous-objets comptent AUTANT que la racine : « timezone » au lieu de
@@ -91,6 +92,7 @@ const KNOWN_KEYS = Object.freeze({
   // calendrier était créé dans le mauvais fuseau sans que rien ne le dise.
   team: ['email', 'name', 'role'],
   group: ['email', 'name', 'description'],
+  sharedMailbox: ['email', 'name', 'description'],
   calendar: ['key', 'summary', 'description', 'timeZone', 'role'],
   folder: ['name', 'children'],
 });
@@ -536,6 +538,63 @@ export function validateConfig(input) {
     }
   }
 
+  /* --- sharedMailboxes -------------------------------------------- */
+  // Boîtes de courriel partagées (info@, ventes@…). Distinctes de « group » :
+  // « group » porte les ACCÈS (calendriers, Drive), celles-ci reçoivent du
+  // COURRIEL venant de l'extérieur. Mélanger les deux donnerait soit une boîte
+  // de contact qui rebondit, soit un groupe de permissions ouvert à Internet.
+  const sharedMailboxes = [];
+  if (input.sharedMailboxes !== undefined && input.sharedMailboxes !== null) {
+    if (!Array.isArray(input.sharedMailboxes)) {
+      fail('sharedMailboxes', 'Doit être une liste [] de boîtes partagées, ou absent.\nExemple : "sharedMailboxes": [ { "email": "info@mondomaine.ca", "name": "Info" } ]');
+    } else {
+      const vues = new Set();
+      input.sharedMailboxes.forEach((boite, i) => {
+        const ou = `sharedMailboxes[${i}]`;
+        if (!isPlainObject(boite)) {
+          fail(ou, 'Doit être un objet { "email": ..., "name": ..., "description": ... }.');
+          return;
+        }
+        warnUnknownKeys(boite, KNOWN_KEYS.sharedMailbox, ou, warnings);
+
+        if (!isNonEmptyString(boite.email)) {
+          fail(`${ou}.email`, `Champ obligatoire.\nExemple : "email": "info@${domain ?? 'mondomaine.ca'}"`);
+          return;
+        }
+        if (!isEmail(boite.email)) {
+          fail(`${ou}.email`, `« ${boite.email} » n'est pas une adresse courriel valide.`);
+          return;
+        }
+        const email = boite.email.trim().toLowerCase();
+
+        if (domain && !email.endsWith(`@${domain}`)) {
+          fail(`${ou}.email`, `« ${email} » n'est pas dans le domaine « ${domain} ».\nUne boîte partagée se crée obligatoirement dans le domaine administré.`);
+          return;
+        }
+        // Une adresse déjà prise par une personne ne peut pas devenir un groupe :
+        // Google refuserait, mais l'erreur arriverait tard et serait obscure.
+        if (team.some((m) => m.email.toLowerCase() === email)) {
+          fail(`${ou}.email`, `« ${email} » est déjà l'adresse d'un membre de l'équipe. Une boîte partagée doit avoir sa propre adresse.`);
+          return;
+        }
+        // `group` est l'objet déjà validé plus haut (null si aucun groupe).
+        if (group?.email && group.email === email) {
+          fail(`${ou}.email`, `« ${email} » est déjà le groupe d'équipe (« group »). Les deux ont des réglages incompatibles : le groupe porte les accès, la boîte partagée reçoit du courriel de l'extérieur. Donne-leur deux adresses distinctes.`);
+          return;
+        }
+        if (vues.has(email)) {
+          fail(ou, `« ${email} » apparaît deux fois dans sharedMailboxes.`);
+          return;
+        }
+        vues.add(email);
+
+        const nom = isNonEmptyString(boite.name) ? boite.name.trim() : email.split('@')[0];
+        const desc = typeof boite.description === 'string' ? boite.description.trim() : '';
+        sharedMailboxes.push({ email, name: nom, description: desc });
+      });
+    }
+  }
+
   /* --- calendars -------------------------------------------------- */
   /** @type {Array<{key: string, summary: string, description: string, timeZone: string, role: string}>} */
   const calendars = [];
@@ -713,6 +772,7 @@ export function validateConfig(input) {
     timeZone,
     team,
     group,
+    sharedMailboxes,
     calendars,
     sharedDrive: { name: driveName, restrictions, folders, createReadme },
     auth,

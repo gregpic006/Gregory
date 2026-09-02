@@ -27,6 +27,13 @@
     "name": "Équipe",
     "description": "Groupe qui contient l'équipe. Les accès (calendrier, Drive partagé) sont accordés à ce groupe plutôt qu'à chaque personne : quand quelqu'un arrive ou part, on modifie le groupe et tous les accès suivent. Mets ce champ à null pour accorder les accès directement à chaque adresse."
   },
+  "sharedMailboxes": [
+    {
+      "email": "info@exemple.ca",
+      "name": "Info",
+      "description": "Adresse de contact publique. C'est un GROUPE, pas un compte : aucune licence a payer, et le courriel arrive dans la boite de chaque membre de l'equipe. Ouverte aux courriels de l'exterieur, avec assignation des demandes pour eviter que deux personnes repondent au meme client. Laisser [] si tu n'en veux pas."
+    }
+  ],
   "_calendars": "« role » est l'accès accordé à l'équipe sur chaque calendrier : « reader » (voir seulement), « writer » (ajouter et modifier des événements) ou « owner » (peut en plus supprimer le calendrier et changer ses accès). « timeZone » doit être un identifiant reconnu : pour le Québec, c'est « America/Toronto ».",
   "calendars": [
     {

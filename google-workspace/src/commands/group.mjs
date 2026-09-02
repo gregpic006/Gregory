@@ -51,7 +51,7 @@ export const meta = {
  * provoque donc AUCUNE reconnexion supplémentaire. C'est gagnant dans les deux
  * modes.
  */
-const GROUP_SCOPES = [...SCOPES.directory, ...SCOPES.groups];
+export const GROUP_SCOPES = [...SCOPES.directory, ...SCOPES.groups];
 
 /* ------------------------------------------------------------------ *
  * Réglages visés pour le groupe
@@ -145,7 +145,7 @@ const DESIRED_SETTINGS = [
  * ------------------------------------------------------------------ */
 
 /** Normalise une adresse pour la comparaison (Google ne fait pas la différence entre majuscules et minuscules). */
-function normalizeEmail(value) {
+export function normalizeEmail(value) {
   return String(value ?? '').trim().toLowerCase();
 }
 
@@ -161,7 +161,7 @@ function domainOf(email) {
  * @param {string} teamRole
  * @returns {'OWNER'|'MEMBER'}
  */
-function groupRoleFor(teamRole) {
+export function groupRoleFor(teamRole) {
   return teamRole === 'organizer' ? 'OWNER' : 'MEMBER';
 }
 
@@ -256,7 +256,7 @@ const GROUP_FIELDS = 'id,email,name,description,adminCreated,directMembersCount'
  * @param {{ propagation?: boolean, tries?: number }} [options]
  * @returns {Promise<object|null>}
  */
-async function findGroup(admin, groupEmail, options = {}) {
+export async function findGroup(admin, groupEmail, options = {}) {
   const { propagation = false, tries = 4 } = options;
   try {
     const res = await withRetry(() => admin.groups.get({ groupKey: groupEmail, fields: GROUP_FIELDS }), {
@@ -365,7 +365,7 @@ function explainSettingsFailure(e, groupEmail) {
  * @returns {Promise<{ changed: string[], unchanged: string[], warnings: string[], current: object|null }>}
  *   `current` = les réglages lus chez Google (null si la lecture a échoué).
  */
-async function syncGroupSettings({ groupsSettings, groupEmail, desired, apply, groupJustCreated, log }) {
+export async function syncGroupSettings({ groupsSettings, groupEmail, desired, apply, groupJustCreated, log }) {
   const out = { changed: [], unchanged: [], warnings: [], current: null };
 
   // On ne demande pas de « fields » à cette API : elle date de 2022, l'objet est
@@ -454,7 +454,7 @@ async function syncGroupSettings({ groupsSettings, groupEmail, desired, apply, g
  * @param {string} groupEmail
  * @returns {Promise<Array<{id?: string, email?: string, role?: string, type?: string, status?: string}>>}
  */
-async function listGroupMembers(admin, groupEmail) {
+export async function listGroupMembers(admin, groupEmail) {
   return collectPages(
     (pageToken) =>
       admin.members.list({
@@ -478,7 +478,7 @@ async function listGroupMembers(admin, groupEmail) {
  * @param {object} params
  * @returns {Promise<{ created: object[], updated: object[], unchanged: object[], warnings: string[] }>}
  */
-async function syncMembers({
+export async function syncMembers({
   admin,
   groupEmail,
   team,

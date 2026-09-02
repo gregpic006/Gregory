@@ -74,10 +74,14 @@ const COMMANDS = {
   },
   setup: {
     summary: 'Fait tout, dans l\'ordre : groupe, puis calendriers, puis Drive partagé.',
-    steps: ['group', 'calendar', 'drive'],
+    steps: ['group', 'mailboxes', 'calendar', 'drive'],
   },
   group: {
     summary: "Crée le groupe d'équipe et synchronise ses membres.",
+  },
+  mailboxes: {
+    summary:
+      "Crée les boîtes partagées (info@…), ouvertes aux courriels de l'extérieur.",
   },
   calendar: {
     summary: 'Crée les calendriers partagés et accorde les accès à l\'équipe.',
@@ -99,7 +103,7 @@ const COMMANDS = {
   },
 };
 
-const COMMAND_ORDER = ['init', 'doctor', 'dns', 'audit', 'setup', 'group', 'calendar', 'drive', 'detach', 'verify'];
+const COMMAND_ORDER = ['init', 'doctor', 'dns', 'audit', 'setup', 'group', 'mailboxes', 'calendar', 'drive', 'detach', 'verify'];
 
 /* ------------------------------------------------------------------ *
  * Erreur d'utilisation (mauvaise commande, config manquante, etc.)

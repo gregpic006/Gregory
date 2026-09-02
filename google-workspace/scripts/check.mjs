@@ -62,7 +62,7 @@ for (const [fichier, attendus] of Object.entries(CONTRAT)) {
  * ------------------------------------------------------------------ */
 console.log('\n2. Chaque commande est complète et atteignable depuis le CLI');
 
-const COMMANDES = ['init', 'doctor', 'dns', 'audit', 'group', 'calendar', 'drive', 'detach', 'verify'];
+const COMMANDES = ['init', 'doctor', 'dns', 'audit', 'group', 'mailboxes', 'calendar', 'drive', 'detach', 'verify'];
 const cli = readFileSync(join(RACINE, 'src', 'cli.mjs'), 'utf8');
 
 for (const nom of COMMANDES) {
