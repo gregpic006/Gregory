@@ -44,6 +44,59 @@ function corsHeadersFor(origin: string | null) {
 
 const MAX_PROSPECTS_PER_RUN = 5;
 
+// Plafond d'une exécution demandée explicitement (bouton admin, poussée
+// régionale). Le cron quotidien garde MAX_PROSPECTS_PER_RUN : c'est un plafond
+// de coût, pas une limite technique. Chaque prospect coûte plusieurs recherches
+// web facturées, donc on borne même une demande manuelle.
+const MAX_PROSPECTS_BURST = 15;
+
+// ─── Ciblage régional ──────────────────────────────────────────────────────
+// « Québec » désigne À LA FOIS la ville et la province. Une recherche
+// « propriétaire immeuble à logements Québec » ramène donc des résultats de
+// Gatineau à Rimouski, et une poussée censée être locale se dilue dans toute la
+// province. Chaque région porte donc ses propres ancrages de recherche —
+// quartiers, villes voisines, codes postaux — qui lèvent l'ambiguïté.
+//
+// Pourquoi la densité locale compte : la plateforme doit pouvoir dépêcher un
+// travailleur autonome chez le propriétaire. Cent prospects éparpillés dans la
+// province sont invendables tant que le réseau de travailleurs ne couvre pas
+// autant de territoire ; vingt prospects dans un même secteur le sont.
+const REGIONS: Record<string, { label: string; anchors: string }> = {
+  quebec: {
+    label: "la ville de Québec et sa banlieue immédiate",
+    anchors:
+      "Attention : « Québec » désigne à la fois la VILLE et la PROVINCE. Ici on cherche " +
+      "uniquement la VILLE de Québec et sa banlieue immédiate. Pour lever l'ambiguïté, " +
+      "appuie tes recherches sur les quartiers et villes du secteur : Limoilou, Saint-Roch, " +
+      "Saint-Sauveur, Montcalm, Sainte-Foy, Sillery, Charlesbourg, Beauport, Vanier, " +
+      "Cap-Rouge, Loretteville, Val-Bélair, L'Ancienne-Lorette, Lévis, Saint-Romuald, " +
+      "Charny. Les codes postaux commencent par G1, G2, G3 ou G6. " +
+      "REJETTE tout prospect situé ailleurs au Québec (Montréal, Laval, Gatineau, " +
+      "Sherbrooke, Trois-Rivières, Saguenay…) même s'il correspond par ailleurs au profil.",
+  },
+  montreal: {
+    label: "l'île de Montréal et sa banlieue immédiate",
+    anchors:
+      "Secteurs : Villeray, Rosemont, Hochelaga-Maisonneuve, Verdun, NDG, Le Plateau, " +
+      "Ahuntsic, Saint-Léonard, Montréal-Nord, Lachine, LaSalle, Longueuil, Laval. " +
+      "Codes postaux H et J4. REJETTE tout prospect hors de ce secteur.",
+  },
+};
+
+/** Rend le bloc de ciblage géographique injecté dans le prompt. */
+function regionBlock(region: string | null): string {
+  if (!region) {
+    return "ZONE : tout le Québec.";
+  }
+  const r = REGIONS[region];
+  if (!r) {
+    // Une région inconnue ne doit pas silencieusement élargir la recherche à
+    // toute la province : on prend le texte au mot et on le dit dans les notes.
+    return `ZONE : ${region} (Québec). Ne soumets que des prospects réellement situés dans cette zone.`;
+  }
+  return `ZONE : ${r.label}.\n${r.anchors}`;
+}
+
 Deno.serve(async (req) => {
   const corsHeaders = corsHeadersFor(req.headers.get("origin"));
   if (req.method === "OPTIONS") {
@@ -61,6 +114,17 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const action = body.action || "run";
+
+    // Ciblage régional et volume. Les deux sont facultatifs : sans eux, le
+    // comportement est exactement celui d'avant (tout le Québec, 5 prospects),
+    // ce qui laisse le cron quotidien inchangé.
+    const region = typeof body.region === "string" && body.region.trim() !== ""
+      ? body.region.trim().toLowerCase()
+      : null;
+    const requestedLimit = Number(body.limit);
+    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(Math.floor(requestedLimit), MAX_PROSPECTS_BURST)
+      : MAX_PROSPECTS_PER_RUN;
     if (action !== "run") {
       return new Response(JSON.stringify({ error: "Action inconnue" }), { status: 400, headers: corsHeaders });
     }
@@ -110,13 +174,16 @@ Deno.serve(async (req) => {
 
 Utilise l'outil de recherche web pour trouver de VRAIS propriétaires au Québec qui possèdent et gèrent eux-mêmes un ou plusieurs immeubles à logements (plusieurs unités locatives), et qui ne semblent pas déjà faire affaire avec une entreprise de gestion immobilière.
 
+${regionBlock(region)}
+
 RÈGLES STRICTES :
 - Ne cible JAMAIS une entreprise de gestion immobilière, une agence de location, un courtier immobilier ou toute entreprise qui gère des immeubles POUR d'autres propriétaires — ce sont des concurrents de Portail, pas des prospects.
 - Ne cible que des propriétaires individuels, des sociétés à numéro ou des petites entreprises familiales qui gèrent LEURS PROPRES immeubles.
 - N'invente JAMAIS un nom, un numéro de téléphone, un courriel ou une adresse. Si une information exacte n'apparaît pas dans les résultats de recherche, laisse le champ à null ou omets complètement ce prospect.
 - Chaque prospect soumis doit obligatoirement inclure "source_url" : l'URL réelle de la page où tu as trouvé l'information (annonce Kijiji/Facebook Marketplace/Centris publiée par le propriétaire lui-même, registre des entreprises, article, site web personnel, etc.).
 - Un prospect doit avoir au moins un téléphone OU un courriel trouvé réellement — sinon ne le soumets pas.
-- Maximum ${MAX_PROSPECTS_PER_RUN} prospects.
+- Maximum ${limit} prospects.
+- Mieux vaut soumettre MOINS de prospects que d'en soumettre un seul hors zone ou inventé. La qualité et la localisation priment sur le nombre.
 
 Une fois ta recherche terminée, appelle l'outil "submit_prospects" avec les prospects trouvés.`;
 
@@ -180,7 +247,7 @@ Une fois ta recherche terminée, appelle l'outil "submit_prospects" avec les pro
 
     let inserted = 0;
     const results: Record<string, unknown>[] = [];
-    for (const p of foundProspects.slice(0, MAX_PROSPECTS_PER_RUN)) {
+    for (const p of foundProspects.slice(0, limit)) {
       if (!p?.full_name || !p?.source_url) continue;
       const phoneDigits = String(p.phone || "").replace(/\D/g, "");
       const emailLower = String(p.email || "").toLowerCase();
