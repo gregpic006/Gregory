@@ -30,7 +30,7 @@
  * sans le savoir.
  */
 
-import { getClients, explainGoogleError, isConflict } from '../lib/google.mjs';
+import { getClients, explainGoogleError, isConflict, isForbidden } from '../lib/google.mjs';
 import {
   GROUP_SCOPES,
   normalizeEmail,
@@ -191,7 +191,34 @@ export async function run({ config, apply = false, state = {}, configPath = './c
     log.step(`${i + 1}/${boites.length} — ${nom} <${email}>`);
 
     /* --- La boîte existe-t-elle déjà ? -------------------------------- */
-    let groupe = await findGroup(admin, email);
+    // Piège : quand l'adresse existe SANS être un groupe — typiquement un alias
+    // posé sur un compte d'usager, ce que beaucoup de gens font en créant leur
+    // Workspace — Google ne répond pas « introuvable » mais « Not Authorized to
+    // access this resource/api ». Le message envoie alors chercher un problème
+    // de droits d'administrateur qui n'existe pas, pendant que la vraie cause
+    // est une adresse déjà prise. On nomme donc la bonne piste en premier.
+    let groupe;
+    try {
+      groupe = await findGroup(admin, email);
+    } catch (e) {
+      if (isForbidden(e)) {
+        summary.warnings.push(
+          `Google refuse de traiter ${email} comme un groupe. La cause la plus fréquente : ` +
+            "cette adresse est déjà prise ailleurs dans le domaine — le plus souvent comme " +
+            "ALIAS sur un compte d'usager.\n" +
+            `  Vérifier : admin.google.com > Répertoire > Utilisateurs > chaque compte > ` +
+            `« Informations sur l'utilisateur » > Alias — y a-t-il ${email} ?\n` +
+            `  Si oui, deux choix : retirer l'alias pour libérer l'adresse (l'adresse devient ` +
+            `alors la boîte partagée de toute l'équipe), ou choisir une autre adresse dans ` +
+            `config.json.\n` +
+            "  Si l'adresse n'est prise nulle part, c'est bien un problème de droits : le " +
+            `compte ${config.adminEmail} doit être super-administrateur.`,
+        );
+        log.warn(summary.warnings.at(-1));
+        continue;
+      }
+      throw e;
+    }
     let vientDEtreCree = false;
 
     if (!groupe) {

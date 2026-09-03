@@ -859,7 +859,17 @@ async function reportFatal(error) {
   logModule.info('Pistes :');
   logModule.info("  · node src/cli.mjs doctor  -> vérifie l'authentification et les API activées");
   logModule.info("  · Relis config.json (domaine, adresses, mode de connexion)");
-  logModule.info('  · Pour la trace technique complète : PORTAIL_DEBUG=1 node src/cli.mjs <commande>');
+  // La syntaxe « VAR=valeur commande » n'existe pas dans l'invite de commandes
+  // Windows : elle y produit une erreur incompréhensible (« n'est pas reconnu en
+  // tant que commande interne »). On donne donc la forme qui convient au système
+  // sur lequel la trousse tourne réellement.
+  logModule.info(
+    process.platform === 'win32'
+      ? '  · Pour la trace technique complète, deux lignes :\n' +
+          '      set PORTAIL_DEBUG=1\n' +
+          '      node src/cli.mjs <commande>'
+      : '  · Pour la trace technique complète : PORTAIL_DEBUG=1 node src/cli.mjs <commande>',
+  );
 
   if (process.env.PORTAIL_DEBUG && error?.stack) {
     console.error('\n' + error.stack);
