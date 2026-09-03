@@ -12,6 +12,10 @@ client_secret*.json
 # doit partir sur le depot, d'ou la ligne « ! » qui le reautorise.
 config.json
 config.*.json
+# Fichier de validation ecrit par scripts/ajouter-boite.mjs. Normalement
+# supprime aussitot, mais un arret brutal pourrait le laisser : il contient
+# les memes vraies adresses que config.json.
+config.json.essai
 !config.example.json
 
 # Sauvegardes ecrites par « init --apply --force » (config.json.bak) : meme
