@@ -12,6 +12,6 @@
 // =====================================================================
 
 window.CC_CONFIG = {
-  SUPABASE_URL: "https://REMPLACER-PAR-LA-REF.supabase.co",
+  SUPABASE_URL: "https://mtvyimmefayjzlzxudmi.supabase.co",
   SUPABASE_ANON_KEY: "REMPLACER_PAR_LA_CLE_ANON",
 };
