@@ -132,8 +132,11 @@ values ('functions_base_url', '"https://<ref>.supabase.co/functions/v1"')
 on conflict (key) do update set value = excluded.value;
 ```
 
-Puis rejoue `supabase/migrations/20260904120300_cron.sql` (les tâches ne sont créées que si
-`pg_cron`, `pg_net` et ces deux valeurs existent).
+Ces deux valeurs sont relues à **chaque** exécution, pas au moment où la tâche est créée :
+tu peux donc les poser après le déploiement, les tâches se mettront à fonctionner au tic
+suivant. En revanche `pg_cron` et `pg_net` doivent exister **avant** le premier déploiement,
+sinon aucune tâche n'est créée — dans ce cas, rejoue
+`supabase/migrations/20260904120300_cron.sql` dans le SQL Editor.
 
 Vérification : `select jobname, schedule from cron.job;` doit lister 4 tâches.
 

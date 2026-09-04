@@ -78,21 +78,21 @@ begin
    where jobname in ('cc-sync-google', 'cc-triage-ai', 'cc-digest-daily', 'cc-digest-weekly');
 
   perform cron.schedule('cc-sync-google', '*/5 * * * *',
-    $cmd$ select cc_call_function('cc-google-sync'); $cmd$);
+    $cmd$ select public.cc_call_function('cc-google-sync'); $cmd$);
 
   -- Décalé de 10 minutes derrière la synchro plutôt que simultané : le
   -- tri travaille ainsi sur des courriels déjà rapatriés.
   perform cron.schedule('cc-triage-ai', '2-59/10 * * * *',
-    $cmd$ select cc_call_function('cc-ai-triage'); $cmd$);
+    $cmd$ select public.cc_call_function('cc-ai-triage'); $cmd$);
 
   -- Heures en UTC. 11:00 UTC = 7 h à Montréal l'été (EDT), 6 h l'hiver.
   perform cron.schedule('cc-digest-daily', '0 11 * * *',
-    $cmd$ select cc_call_function('cc-digest', '{"mode":"daily"}'::jsonb); $cmd$);
+    $cmd$ select public.cc_call_function('cc-digest', '{"mode":"daily"}'::jsonb); $cmd$);
 
   -- Dimanche 13:00 UTC = 9 h à Montréal : le dossier est prêt bien avant
   -- la réunion de l'après-midi.
   perform cron.schedule('cc-digest-weekly', '0 13 * * 0',
-    $cmd$ select cc_call_function('cc-digest', '{"mode":"weekly"}'::jsonb); $cmd$);
+    $cmd$ select public.cc_call_function('cc-digest', '{"mode":"weekly"}'::jsonb); $cmd$);
 
   raise notice 'Command Center : 4 tâches planifiées créées.';
 end $$;
