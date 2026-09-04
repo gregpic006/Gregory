@@ -14,16 +14,28 @@
 export const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 export const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-const ALLOWED_ORIGINS = [
+// D'où le navigateur a le droit d'appeler ces fonctions.
+//
+// Le Command Center est servi par GitHub Pages, donc depuis le domaine du
+// fichier CNAME du dépôt — aujourd'hui portailgestion.ca. Quand Lease Lane
+// aura le sien, il n'y aura RIEN à recompiler : il suffit de poser le
+// secret d'edge function CC_ALLOWED_ORIGINS (liste séparée par des
+// virgules) et de redéployer. Sans ce secret, la valeur par défaut
+// ci-dessous s'applique.
+const DEFAULT_ORIGINS = [
   "https://portailgestion.ca",
   "https://www.portailgestion.ca",
   "http://localhost:8080",
   "http://127.0.0.1:8080",
 ];
 
+const ALLOWED_ORIGINS = (Deno.env.get("CC_ALLOWED_ORIGINS") ?? "")
+  .split(",").map((o) => o.trim()).filter(Boolean);
+const ORIGINS = ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : DEFAULT_ORIGINS;
+
 export function corsHeadersFor(origin: string | null): Record<string, string> {
   return {
-    "Access-Control-Allow-Origin": origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+    "Access-Control-Allow-Origin": origin && ORIGINS.includes(origin) ? origin : ORIGINS[0],
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",

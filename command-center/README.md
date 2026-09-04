@@ -102,6 +102,11 @@ CC_TOKEN_KEY           la valeur base64 générée ci-dessus
 CC_CRON_SECRET         la valeur hex générée ci-dessus
 ```
 
+Un sixième secret est **facultatif** : `CC_ALLOWED_ORIGINS`, la liste (séparée par des virgules) des
+domaines autorisés à appeler les fonctions. Sans lui, ce sont `portailgestion.ca` et `localhost`.
+Le jour où Lease Lane a son propre domaine, c'est la seule valeur à changer côté serveur — aucun
+code à modifier.
+
 `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY` sont fournis automatiquement par Supabase.
 
 > **`CC_TOKEN_KEY` n'est pas récupérable.** Elle chiffre les jetons Google. La perdre oblige
