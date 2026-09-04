@@ -1,0 +1,69 @@
+name: Déploiement Command Center
+
+# Projet distinct du Portail : sa propre base Supabase, ses propres
+# secrets. Ce workflow ne touche jamais au projet du Portail, et
+# deploy.yml (le Portail) ne touche jamais à celui-ci — les deux sont
+# filtrés par `paths`.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'command-center/supabase/**'
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Sans les secrets configurés, on ne tente rien : un échec rouge à
+    # chaque push serait du bruit tant que le projet Supabase n'existe pas.
+    if: github.repository_owner != ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Vérifier que les secrets sont configurés
+        id: check
+        env:
+          REF: ${{ secrets.CC_SUPABASE_PROJECT_REF }}
+        run: |
+          if [ -z "$REF" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::CC_SUPABASE_PROJECT_REF absent — déploiement ignoré. Voir command-center/README.md."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rattacher le projet Command Center
+        if: steps.check.outputs.configured == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.CC_SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.CC_SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          supabase link --workdir command-center \
+            --project-ref "${{ secrets.CC_SUPABASE_PROJECT_REF }}"
+
+      - name: Appliquer les migrations
+        if: steps.check.outputs.configured == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.CC_SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.CC_SUPABASE_DB_PASSWORD }}
+        # Contrairement au Portail (dont schema.sql est un historique
+        # cumulatif non rejouable), ce projet part de zéro avec de vraies
+        # migrations : `db push` est utilisable dès le premier jour.
+        run: |
+          set -euo pipefail
+          supabase db push --workdir command-center --include-all
+
+      - name: Déployer les edge functions
+        if: steps.check.outputs.configured == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.CC_SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          supabase functions deploy --workdir command-center \
+            --project-ref "${{ secrets.CC_SUPABASE_PROJECT_REF }}"

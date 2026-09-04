@@ -8,6 +8,19 @@ SaaS de gestion immobilière résidentielle, construit sur Supabase (Postgres + 
 - Les **fichiers `edge-function-*.ts`** se déploient maintenant automatiquement aussi, via `.github/workflows/deploy.yml` (voir section CI/CD ci-dessous) — un push sur `main` qui touche un fichier `edge-function-*.ts` les redéploie tous vers Supabase en quelques secondes. **Configuration à faire une seule fois** avant que ça fonctionne (secrets GitHub) — voir CI/CD.
 - Le fichier **`schema.sql`** n'est PAS automatisé et ne le sera pas tel quel : c'est un historique cumulatif (beaucoup de `create table`/`create policy` SANS garde `if not exists`), donc le rejouer en entier sur une base déjà provisionnée échoue. Il reste la référence de ce qui a déjà été appliqué. **Toute NOUVELLE modification de schéma doit désormais aller dans `supabase/migrations/`** (un fichier par changement, jamais dans schema.sql) — voir CI/CD pour la procédure.
 
+## Projets du dépôt
+
+Ce dépôt contient **deux applications distinctes**, qui ne partagent que le dépôt Git et le
+nom de domaine :
+
+- **Le Portail** (racine du dépôt) — le SaaS de gestion immobilière décrit ci-dessous.
+- **Le Command Center** (`command-center/`) — le tableau de bord de lancement de Lease Lane,
+  branché sur les comptes Google de l'équipe. **Base Supabase séparée, secrets séparés,
+  pipeline de déploiement séparé.** Voir [`command-center/README.md`](./command-center/README.md).
+
+Les deux workflows de déploiement sont filtrés par chemin : un changement dans
+`command-center/` ne redéploie jamais le Portail, et l'inverse est vrai aussi.
+
 ## Architecture
 
 **Base de données** : un seul schéma Postgres central. Chaîne de données : `owners → buildings → units → leases → tenants → payments/expenses → service_requests → work_orders → workers → documents → audit_log`. RLS (Row Level Security) activé sur toutes les tables sensibles.

@@ -1,0 +1,43 @@
+# Config Supabase CLI — Command Center UNIQUEMENT.
+#
+# Ce projet a sa PROPRE base Supabase, distincte de celle du Portail. Le
+# fichier supabase/config.toml à la racine du dépôt concerne le Portail
+# et ne doit pas être confondu avec celui-ci.
+#
+# project_id est écrasé au déploiement par --project-ref (secret GitHub
+# CC_SUPABASE_PROJECT_REF), donc la valeur ci-dessous n'est qu'un repère
+# lisible ; remplace-la par la vraie référence pour travailler en local.
+project_id = "REMPLACER_PAR_LA_REF_DU_PROJET_COMMAND_CENTER"
+
+# verify_jwt = false partout, pour la même raison que sur le Portail : la
+# passerelle Edge Functions rejette à tort les JWT signés en ES256 (mode
+# par défaut, clés asymétriques) quand ce réglage est à true — bug connu
+# github.com/supabase/supabase/issues/42244. Le contournement officiel
+# Supabase est verify_jwt=false + vérification en code.
+#
+# Concrètement, la protection de chaque fonction est :
+#   • requireMember()      → cc-board-api, cc-link-google,
+#                            cc-apply-suggestion, cc-agenda-api
+#   • assertCronSecret()   → cc-google-sync, cc-ai-triage, cc-digest
+#   • aucune (volontaire)  → cc-health, en lecture seule et sans donnée
+#                            d'affaires
+#
+# Sans ce fichier, un déploiement automatisé remettrait verify_jwt à sa
+# valeur par défaut et casserait les fonctions.
+
+[functions.cc-board-api]
+verify_jwt = false
+[functions.cc-link-google]
+verify_jwt = false
+[functions.cc-apply-suggestion]
+verify_jwt = false
+[functions.cc-agenda-api]
+verify_jwt = false
+[functions.cc-google-sync]
+verify_jwt = false
+[functions.cc-ai-triage]
+verify_jwt = false
+[functions.cc-digest]
+verify_jwt = false
+[functions.cc-health]
+verify_jwt = false
