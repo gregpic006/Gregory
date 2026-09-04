@@ -298,30 +298,52 @@ from tasks;
 
 -- Résumés IA des courriels, visibles par toute l'équipe même quand le
 -- corps du message ne l'est pas (réglage mailbox_visibility = 'own').
+-- Vue-écran sur google_accounts : expose l'identité d'un compte (à quelle
+-- personne il appartient, quelle adresse) et JAMAIS les jetons. Elle est
+-- en security definer (security_invoker = off) pour deux raisons :
+--   • google_accounts n'accorde aucune permission à `authenticated`, donc
+--     une vue en invoker qui la traverse serait refusée en bloc — c'est ce
+--     qui cassait v_email_digest et v_agenda ;
+--   • google_accounts a le RLS actif sans aucune policy : en invoker, la
+--     jointure ne ramènerait de toute façon aucune ligne.
+-- Les colonnes de jetons sont absentes du select : il n'y a rien à fuir.
+--
+-- Mais contourner le RLS veut aussi dire qu'AUCUN filtre ne s'applique
+-- tout seul : sans le `where` ci-dessous, n'importe quel compte Google
+-- connecté — y compris un inconnu sans ligne members — pourrait lister
+-- les adresses de l'équipe. Le contrôle d'appartenance est donc écrit
+-- explicitement dans la vue, puisqu'il ne peut pas venir du RLS.
+drop view if exists v_google_accounts_public cascade;
+create view v_google_accounts_public
+  with (security_invoker = off) as
+select ga.id, ga.member_id, ga.google_email, ga.status, ga.last_sync_at,
+       m.full_name as owner_name
+from google_accounts ga
+join members m on m.id = ga.member_id
+where cc_is_member();
+
 drop view if exists v_email_digest;
 create view v_email_digest as
 select
-  e.id, e.google_account_id, ga.google_email as account_email, m.full_name as account_owner,
+  e.id, e.google_account_id, ga.google_email as account_email, ga.owner_name as account_owner,
   e.thread_id, e.from_email, e.from_name, e.subject, e.received_at, e.is_unread,
   e.has_attachments, e.ai_status, e.ai_category, e.ai_urgency, e.ai_summary, e.ai_action,
   e.ai_entities, e.task_id,
   case when cc_can_read_account(e.google_account_id) then e.snippet end   as snippet,
   case when cc_can_read_account(e.google_account_id) then e.body_text end as body_text
 from email_messages e
-join google_accounts ga on ga.id = e.google_account_id
-join members m on m.id = ga.member_id;
+join v_google_accounts_public ga on ga.id = e.google_account_id;
 
 -- Agenda unifié des 4 comptes — la vue « qui fait quoi cette semaine ».
 drop view if exists v_agenda;
 create view v_agenda as
 select
-  c.id, c.google_account_id, ga.google_email as account_email, m.full_name as account_owner,
-  m.id as member_id, c.title, c.location, c.starts_at, c.ends_at, c.all_day,
+  c.id, c.google_account_id, ga.google_email as account_email, ga.owner_name as account_owner,
+  ga.member_id, c.title, c.location, c.starts_at, c.ends_at, c.all_day,
   c.attendees, c.organizer_email, c.status, c.html_link, c.origin, c.task_id,
   t.code as task_code
 from calendar_events c
-join google_accounts ga on ga.id = c.google_account_id
-join members m on m.id = ga.member_id
+join v_google_accounts_public ga on ga.id = c.google_account_id
 left join tasks t on t.id = c.task_id
 where c.status <> 'cancelled';
 
@@ -471,3 +493,68 @@ alter table tasks           replica identity full;
 alter table ai_suggestions  replica identity full;
 alter table launch_gates    replica identity full;
 alter table decisions_risks replica identity full;
+
+-- ---------------------------------------------------------------------
+-- Permissions explicites
+--
+-- Le RLS décide QUELLES LIGNES sont visibles ; les GRANT décident quelles
+-- TABLES sont atteignables. Ce sont deux barrières distinctes, et le
+-- projet ne doit pas dépendre du réglage « Automatically expose new
+-- tables » de Supabase (qui accorde tout par défaut aux rôles de l'API).
+--
+-- Déclarer les droits ici permet de laisser ce réglage DÉSACTIVÉ — la
+-- recommandation de Supabase — sans rien casser : une table ajoutée plus
+-- tard sans y penser reste alors inatteignable depuis le navigateur au
+-- lieu d'être silencieusement exposée.
+--
+-- `anon` (visiteur non connecté) n'obtient RIEN : l'écran de connexion ne
+-- lit aucune donnée avant l'authentification.
+-- ---------------------------------------------------------------------
+
+grant usage on schema public to authenticated, service_role;
+
+-- Le serveur (edge functions) garde l'accès complet ; il contourne le RLS
+-- par son rôle, c'est ce qui lui permet de synchroniser Google.
+grant all on all tables in schema public to service_role;
+grant all on all sequences in schema public to service_role;
+
+do $$
+declare
+  t text;
+  -- Le tableau de travail : l'équipe lit et écrit, le RLS réserve la
+  -- suppression aux admins.
+  full_access text[] := array[
+    'tasks','task_dependencies','task_comments','launch_gates','decisions_risks',
+    'meetings','meeting_priorities','kpi_definitions','kpi_values'
+  ];
+  -- Configuration : le RLS réserve déjà l'écriture aux admins.
+  config text[] := array['members','member_emails','meeting_agenda','app_settings','automation_policies'];
+  -- Données produites par le serveur : lecture seule côté navigateur. La
+  -- source de vérité est Google ou l'IA, jamais un formulaire.
+  read_only text[] := array[
+    'email_messages','calendar_events','documents','ai_suggestions','ai_run_log','activity_log'
+  ];
+begin
+  foreach t in array full_access loop
+    execute format('grant select, insert, update, delete on %I to authenticated', t);
+  end loop;
+  foreach t in array config loop
+    execute format('grant select, insert, update, delete on %I to authenticated', t);
+  end loop;
+  foreach t in array read_only loop
+    execute format('grant select on %I to authenticated', t);
+  end loop;
+
+  -- Chacun marque ses propres notifications comme lues.
+  execute 'grant select, update on notifications to authenticated';
+end $$;
+
+-- google_accounts et sync_state : AUCUN grant, volontairement. Ces tables
+-- contiennent les jetons Google. Ni policy RLS ni permission — seul le
+-- service_role les atteint. C'est la deuxième barrière derrière le
+-- chiffrement AES-GCM des jetons.
+
+-- Les vues s'exécutent avec les droits de l'appelant (security_invoker),
+-- donc lire une vue exige aussi le droit sur les tables qu'elle traverse.
+grant select on v_tasks, v_owner_summary, v_dashboard, v_email_digest, v_agenda,
+                v_google_accounts_public to authenticated;

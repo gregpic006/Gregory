@@ -111,8 +111,11 @@ async function boardContext(): Promise<string> {
     db<any>("v_tasks?select=code,title,workstream,owner_name,status,priority,deadline,days_left,health"
       + "&status=neq.done&order=deadline.asc&limit=80"),
     db<any>("members?select=full_name,role_label&is_active=is.true&order=position"),
-    db<any>(`v_agenda?select=account_owner,title,starts_at,ends_at`
-      + `&starts_at=gte.${new Date().toISOString()}`
+    // Lecture directe de calendar_events, pas de la vue v_agenda : celle-ci
+    // est réservée au navigateur (elle exige une appartenance à l'équipe,
+    // ce que le serveur n'a pas — il n'agit au nom de personne).
+    db<any>(`calendar_events?select=title,starts_at,ends_at,google_accounts(members(full_name))`
+      + `&status=neq.cancelled&starts_at=gte.${new Date().toISOString()}`
       + `&starts_at=lte.${new Date(Date.now() + 14 * 86400_000).toISOString()}&order=starts_at&limit=60`),
     db<any>("decisions_risks?select=kind,topic,owner_label,due,status&status=in.(open,active)&limit=20"),
   ]);
@@ -132,7 +135,8 @@ async function boardContext(): Promise<string> {
     ...risks.map((r: any) => `- [${r.kind}] ${r.topic} (${r.owner_label ?? "—"}, échéance ${r.due ?? "—"})`),
     "",
     "AGENDA DES 14 PROCHAINS JOURS (créneaux déjà pris) :",
-    ...agenda.map((e: any) => `- ${e.account_owner} : ${e.starts_at} → ${e.ends_at} — ${e.title}`),
+    ...agenda.map((e: any) =>
+      `- ${e.google_accounts?.members?.full_name ?? "?"} : ${e.starts_at} → ${e.ends_at} — ${e.title}`),
   ].join("\n");
 }
 
